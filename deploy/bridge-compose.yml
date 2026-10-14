@@ -1,0 +1,32 @@
+# TeslaMate 数据库/MQTT 桥接 —— 唯一接触现有栈的新增容器
+# 挂入 teslamate_default 网络，把内部 5432/1883 转发到宿主机 127.0.0.1
+# 不修改 TeslaMate 任何现有容器
+name: ahatesla
+
+services:
+  bridge-db:
+    image: alpine/socat:latest
+    container_name: ahatesla-bridge-db
+    restart: unless-stopped
+    # alpine/socat 的 ENTRYPOINT 是 socat 本体，command 直接写地址对
+    command: TCP-LISTEN:15432,fork,reuseaddr TCP:TeslaMateDB:5432
+    networks: [teslamate_default]
+    ports:
+      - "127.0.0.1:15432:15432"
+    security_opt:
+      - no-new-privileges:true
+
+  bridge-mqtt:
+    image: alpine/socat:latest
+    container_name: ahatesla-bridge-mqtt
+    restart: unless-stopped
+    command: TCP-LISTEN:11883,fork,reuseaddr TCP:TeslaMateMosquitto:1883
+    networks: [teslamate_default]
+    ports:
+      - "127.0.0.1:11883:11883"
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  teslamate_default:
+    external: true

@@ -1,0 +1,27 @@
+[Unit]
+Description=AhaTesla - Tesla trip/cost assistant web + worker
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ahaxzh
+Group=ahaxzh
+WorkingDirectory=/home/ahaxzh/Projects/GitHub/AhaTesla/server
+ExecStart=/home/ahaxzh/.nvm/versions/node/v24.21.0/bin/node src/index.mjs
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=18500
+# DB/MQTT 默认值见 server/src/config，可在此覆盖：
+# Environment=DB_URL=postgres://teslamate@127.0.0.1:15432/teslamate
+# Environment=MQTT_URL=mqtt://127.0.0.1:11883
+
+# 加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/ahaxzh/Projects/GitHub/AhaTesla/server/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

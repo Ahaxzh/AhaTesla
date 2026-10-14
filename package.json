@@ -1,0 +1,21 @@
+{
+  "name": "ahatesla",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "ahaxzh <i@ues.one>",
+  "type": "commonjs",
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
+}

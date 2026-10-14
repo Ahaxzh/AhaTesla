@@ -1,0 +1,10 @@
+node_modules/
+dist/
+server/data/*.json
+server/data/*.key
+server/data/state.json
+*.env
+.DS_Store
+coverage/
+playwright-report/
+test-results/

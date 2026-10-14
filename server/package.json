@@ -1,0 +1,19 @@
+{
+  "name": "ahatesla-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AhaTesla backend — Node ESM, zero heavy deps (pg + mqtt only)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:live": "AHA_LIVE=1 node --test \"test/live/*.test.mjs\""
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1",
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,147 @@
+// dashboard + system routes.
+import {
+  getCarSnapshot, getDrivingState, getSystemStats, getMonthStats, getWeekStats,
+  listCharging, listChargingForStats
+} from "../core/teslamate-queries.mjs";
+import { listDrivesSql } from "../core/teslamate-queries.mjs";
+import { computeTripViews } from "./trips-routes.mjs";
+import { priceChargingSession } from "../core/pricing-ledger.mjs";
+import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
+
+export const VERSION = "0.1.0";
+export const FUEL_REFERENCE = Object.freeze({
+  // 油耗对标参考：92# 油价 × 常见油车 8L/100km。来源口径为内置假设，asOf 为常量。
+  fuelPriceCnyPerL: 7.8,
+  literPer100km: 8,
+  source: "assumed: 92# gasoline × 8L/100km ICE baseline",
+  asOf: "2026-01-01T00:00:00Z"
+});
+
+export function createDashboardRoutes({ db, state }) {
+  async function recentChargesViews(limit) {
+    const rows = await listCharging(db, { limit, offset: 0 });
+    return rows.map((row) => {
+      const priced = priceChargingSession(row, state.pricing.defaultRateCnyPerKwh);
+      return {
+        id: row.id,
+        startAt: isoFromTeslaMate(row.start_at),
+        endAt: isoFromTeslaMate(row.end_at),
+        locationName: row.geofence_name || row.address_name || "未知地点",
+        energyAddedKWh: finiteNumber(row.charge_energy_added),
+        costCny: priced.costCny,
+        pricePerUnit: priced.pricePerUnit,
+        startBattery: row.start_battery_level ?? null,
+        endBattery: row.end_battery_level ?? null,
+        durationMin: Number(row.duration_min) || 0,
+        powerMaxKw: finiteNumber(row.power_max_kw)
+      };
+    });
+  }
+
+  return {
+    async dashboard(ctx) {
+      const [car, driving, monthStats, weekStats] = await Promise.all([
+        getCarSnapshot(db),
+        getDrivingState(db),
+        getMonthStats(db, new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()),
+        getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
+      ]);
+      const { sql, params } = listDrivesSql({});
+      const driveRows = await db.query(sql, [...params, 5, 0]);
+      const recentTrips = await computeTripViews(db, driveRows, {
+        defaultRate: state.pricing.defaultRateCnyPerKwh,
+        history: state.pricing.history
+      });
+      const recentCharges = await recentChargesViews(5);
+
+      // energy + cost for month/week from drive views over the same windows
+      const { sql: monthSql, params: monthParams } = listDrivesSql({
+        from: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
+      });
+      const monthDrives = await db.query(monthSql, [...monthParams, 200, 0]);
+      const monthViews = await computeTripViews(db, monthDrives, {
+        defaultRate: state.pricing.defaultRateCnyPerKwh,
+        history: state.pricing.history
+      });
+      const monthEnergy = monthViews.reduce((total, view) => total + (view.energyKWh ?? 0), 0);
+      const monthCost = monthViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
+
+      const { sql: weekSql, params: weekParams } = listDrivesSql({
+        from: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+      });
+      const weekDrives = await db.query(weekSql, [...weekParams, 200, 0]);
+      const weekViews = await computeTripViews(db, weekDrives, {
+        defaultRate: state.pricing.defaultRateCnyPerKwh,
+        history: state.pricing.history
+      });
+      const weekEnergy = weekViews.reduce((total, view) => total + (view.energyKWh ?? 0), 0);
+      const weekCost = weekViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
+
+      const monthDistance = finiteNumber(monthStats?.distance_km) ?? 0;
+      const fuelCost = round(monthDistance / 100 * FUEL_REFERENCE.fuelPriceCnyPerL * FUEL_REFERENCE.literPer100km, 2);
+
+      return {
+        car: {
+          name: car?.name || "Tesla",
+          currentBattery: car?.current_battery ?? null,
+          rangeKm: finiteNumber(car?.range_km),
+          state: driving?.state || "unknown",
+          odometerKm: finiteNumber(car?.odometer_km),
+          // 充电实时信息（charging state 时有值）
+          charging: driving?.state === "charging" ? {
+            batteryLevel: finiteNumber(driving?.charging_battery),
+            powerKw: finiteNumber(driving?.charging_power)
+          } : null
+        },
+        monthStats: {
+          distanceKm: round(monthDistance, 1),
+          energyKWh: round(monthEnergy, 2),
+          costCny: round(monthCost, 2),
+          driveCount: monthStats?.drive_count ?? 0,
+          driveHours: round((monthStats?.drive_minutes ?? 0) / 60, 1)
+        },
+        weekStats: {
+          distanceKm: round(finiteNumber(weekStats?.distance_km) ?? 0, 1),
+          energyKWh: round(weekEnergy, 2),
+          costCny: round(weekCost, 2)
+        },
+        fuelComparison: {
+          fuelCostCny: fuelCost,
+          source: FUEL_REFERENCE.source,
+          asOf: FUEL_REFERENCE.asOf
+        },
+        recentTrips,
+        recentCharges
+      };
+    }
+  };
+}
+
+export function createSystemRoutes({ db, mqtt, eventLog, startedAt = () => Date.now() }) {
+  return {
+    async status(ctx) {
+      let dbOk = false;
+      let stats = null;
+      try {
+        await db.ping();
+        dbOk = true;
+        stats = await getSystemStats(db);
+      } catch { /* teslamate down */ }
+      return {
+        teslamate: {
+          dbOk,
+          mqttOk: mqtt?.isConnected?.() ?? false,
+          lastDriveAt: isoFromTeslaMate(stats?.last_drive_at),
+          driveCount: stats?.drive_count ?? null
+        },
+        uptime: Math.round((Date.now() - (typeof startedAt === "function" ? startedAt() : startedAt)) / 1000),
+        version: VERSION
+      };
+    },
+
+    async events(ctx) {
+      const limit = Math.max(1, Math.min(500, Number(ctx.query.limit) || 100));
+      return { items: eventLog.list({ limit }) };
+    }
+  };
+}
