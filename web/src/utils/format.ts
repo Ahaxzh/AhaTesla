@@ -9,6 +9,12 @@ export function fmtCny(v: number | null | undefined, digits = 2): string {
   return `¥${v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 
+/** 单价 3~4 位小数（PRD §7.3 精度规范） */
+export function fmtPrice(v: number | null | undefined, digits = 3): string {
+  if (v == null || Number.isNaN(v)) return '--'
+  return v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: 4 })
+}
+
 export function fmtKwh(v: number | null | undefined, digits = 1): string {
   if (v == null || Number.isNaN(v)) return '--'
   return `${v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })} kWh`

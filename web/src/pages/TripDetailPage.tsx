@@ -1,12 +1,42 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { ArrowLeft, Clock, Coins, MapPin, Route as RouteIcon, Zap } from 'lucide-react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import {
+  ArrowLeft,
+  Clock,
+  Coins,
+  Gauge as GaugeIcon,
+  Layers,
+  MapPin,
+  Route as RouteIcon,
+  Thermometer,
+  TrendingDown,
+  Wind,
+  Zap,
+} from 'lucide-react'
 import { api } from '@/api/client'
 import { RouteMap } from '@/components/RouteMap'
 import { SkeletonCards } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh } from '@/utils/format'
+import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice } from '@/utils/format'
+
+/** 能效达成率标签（P3 模块1）：≥100% 绿 / <85% 橙 */
+function EfficiencyBadge({ ratio }: { ratio: number | null | undefined }) {
+  if (ratio == null) return null
+  const pct = Math.round(ratio * 100)
+  const good = ratio >= 1
+  const warn = ratio < 0.85
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+        good ? 'bg-emerald-400/10 text-emerald-400' : warn ? 'bg-amber-400/10 text-amber-400' : 'bg-white/[0.06] text-slate-300'
+      }`}
+      data-testid="efficiency-badge"
+    >
+      <Zap className="h-3 w-3" />
+      {good ? `超预期续航（${pct}%）` : warn ? `激进驾驶/低温损耗（${pct}%）` : `能效达成 ${pct}%`}
+    </span>
+  )
+}
 
 export default function TripDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -35,15 +65,133 @@ export default function TripDetailPage() {
         </div>
       ) : (
         <div className="space-y-4">
+          {/* 模块1：基础概览 + 能效达成率 */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard icon={RouteIcon} label="里程" value={`${fmtKm(trip.distanceKm)} km`} />
             <StatCard icon={Clock} label="时长" value={fmtDuration(trip.durationMin)} />
             <StatCard icon={Zap} label="能耗" value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
             <StatCard icon={Coins} label="电费" value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <EfficiencyBadge ratio={trip.efficiency?.ratio} />
+            {/* 口径标注（AC-6.3） */}
+            <span className="text-[11px] text-slate-500" data-testid="energy-formula-note">
+              耗电口径：基于起止表显续航差 × 车辆效率系数
+            </span>
+          </div>
 
-          <RouteMap points={trip.route ?? []} />
+          {/* 模块2：路线轨迹 */}
+          <RouteMap points={(trip.route ?? []).map((p) => [p.lng, p.lat] as [number, number])} />
 
+          {/* 模块3：环境剖析微卡片 */}
+          {trip.environment && (
+            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="environment-card">
+              <div className="glass-card flex items-center gap-3 p-4">
+                <Thermometer className="h-4 w-4 shrink-0 text-tesla" />
+                <div>
+                  <div className="text-[10px] text-slate-500">平均室外温度</div>
+                  <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.avgTempC != null ? `${trip.environment.avgTempC.toFixed(1)}°C` : '--'}</div>
+                </div>
+              </div>
+              <div className="glass-card flex items-center gap-3 p-4">
+                <Wind className="h-4 w-4 shrink-0 text-tesla" />
+                <div>
+                  <div className="text-[10px] text-slate-500">空调耗电估算</div>
+                  <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.acEstimateKwh != null ? fmtKwh(trip.environment.acEstimateKwh) : '--'}</div>
+                </div>
+              </div>
+              <div className="glass-card flex items-center gap-3 p-4">
+                <GaugeIcon className="h-4 w-4 shrink-0 text-tesla" />
+                <div>
+                  <div className="text-[10px] text-slate-500">均速 / 最高</div>
+                  <div className="num mt-0.5 text-sm text-slate-200">
+                    {trip.environment.avgSpeedKmh?.toFixed(0) ?? '--'} / {trip.environment.maxSpeedKmh?.toFixed(0) ?? '--'} km/h
+                  </div>
+                </div>
+              </div>
+              <div className="glass-card flex items-center gap-3 p-4">
+                <Layers className="h-4 w-4 shrink-0 text-tesla" />
+                <div>
+                  <div className="text-[10px] text-slate-500">GPS 采样点</div>
+                  <div className="num mt-0.5 text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* 模块4：FIFO 电费分摊明细（核心价值卡） */}
+          {trip.fifo && (
+            <section className="glass-card p-5" data-testid="fifo-card">
+              <h2 className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-200">
+                <Coins className="h-4 w-4 text-tesla" /> FIFO 电费分摊明细
+              </h2>
+              <p className="mb-4 text-[11px] text-slate-500">
+                批次单价已含充电损耗折算（实付总额 ÷ 电池净吸收电量）；总耗电量基于电池包净释放能量
+              </p>
+
+              {trip.fifo.batches.length === 0 ? (
+                <p className="py-3 text-center text-xs text-slate-500">无可分摊批次</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/[0.06] text-left text-[11px] text-slate-500">
+                        <th className="py-2 pr-3 font-medium">批次（充电来源）</th>
+                        <th className="py-2 px-3 text-right font-medium">电量 kWh</th>
+                        <th className="py-2 px-3 text-right font-medium">单价</th>
+                        <th className="py-2 pl-3 text-right font-medium">金额</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]" data-testid="fifo-batch-rows">
+                      {trip.fifo.batches.map((b, i) => (
+                        <tr key={i}>
+                          <td className="max-w-[220px] truncate py-2.5 pr-3 text-slate-200">{b.source}</td>
+                          <td className="num py-2.5 px-3 text-right text-slate-300">{b.kwh.toFixed(1)}</td>
+                          <td className="num py-2.5 px-3 text-right text-slate-400">¥{fmtPrice(b.price)}</td>
+                          <td className="num py-2.5 pl-3 text-right font-medium text-white">{fmtCny(b.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {trip.fifo.blendedPrice != null && (
+                <div className="num mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3 text-sm">
+                  <span className="text-slate-400">
+                    本次总电费 <span className="ml-1 text-base font-semibold text-tesla">{fmtCny(trip.fifo.totalCost)}</span>
+                  </span>
+                  <span className="text-slate-500">综合单价 ¥{fmtPrice(trip.fifo.blendedPrice)}/kWh</span>
+                </div>
+              )}
+              {trip.fifo.exhaustedNote && (
+                <div className="mt-3 rounded-lg bg-amber-400/10 px-3 py-2 text-[11px] text-amber-400" data-testid="fifo-exhausted">
+                  {trip.fifo.exhaustedNote}
+                </div>
+              )}
+
+              {/* 油车对比栏 */}
+              {trip.fuelComparison && trip.fuelComparison.saved != null && (
+                <div className="mt-4 rounded-xl bg-white/[0.03] p-4" data-testid="fuel-compare">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-1.5 text-slate-300">
+                      <TrendingDown className="h-4 w-4 text-emerald-400" />
+                      油车对比
+                    </span>
+                    <span className="num font-medium text-emerald-400">
+                      净节省 {fmtCny(trip.fuelComparison.saved)}
+                      {trip.fuelComparison.savedPct != null && `（↓${trip.fuelComparison.savedPct}%）`}
+                    </span>
+                  </div>
+                  <p className="num mt-2 text-[11px] text-slate-500">
+                    {trip.fuelComparison.baseline} → 对比油费 {fmtCny(trip.fuelComparison.fuelCost)}
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* 起终点 */}
           <div className="glass-card space-y-4 p-5" data-testid="trip-endpoints">
             <div className="flex gap-3">
               <span className="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 border-emerald-400" aria-hidden />

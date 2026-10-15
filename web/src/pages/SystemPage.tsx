@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Database, HardDrive, Radio, ScrollText } from 'lucide-react'
+import { Activity, Database, HardDrive, Radio, ScrollText, ShieldCheck } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
@@ -60,6 +60,11 @@ export default function SystemPage() {
             <Database className="h-3.5 w-3.5" /> TeslaMate DB
           </div>
           <StatusDot ok={status?.teslamate.dbOk ?? false} label={status?.teslamate.dbOk ? 'PostgreSQL 正常' : '数据库断开'} />
+          {status?.teslamate.latencyMs != null && (
+            <div className="num text-[11px] text-slate-500" data-testid="db-latency">
+              Ping 延迟 {status.teslamate.latencyMs}ms
+            </div>
+          )}
         </div>
         <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
@@ -85,6 +90,21 @@ export default function SystemPage() {
         </div>
       </section>
 
+      {/* 只读安全盾章（GA-35 / P6 分组1 联动展示） */}
+      {status?.teslamate.readonlyVerified != null && (
+        <section
+          className={`glass-card mb-4 flex items-center gap-3 p-4 text-sm ${status.teslamate.readonlyVerified ? '' : '!border-red-400/30'}`}
+          data-testid="readonly-shield"
+        >
+          <ShieldCheck className={`h-5 w-5 ${status.teslamate.readonlyVerified ? 'text-emerald-400' : 'text-red-400'}`} />
+          {status.teslamate.readonlyVerified ? (
+            <span className="text-emerald-400">只读模式运行中（写入已强阻断）</span>
+          ) : (
+            <span className="text-red-400">⚠ 只读校验失败：当前数据库账号疑似具备写权限，请检查账号配置</span>
+          )}
+        </section>
+      )}
+
       {/* 事件日志 */}
       <section className="glass-card overflow-hidden p-0" data-testid="event-log">
         <div className="flex items-center gap-2 px-5 py-4">
@@ -105,7 +125,7 @@ export default function SystemPage() {
         ) : (
           <ul className="max-h-[480px] divide-y divide-white/[0.04] overflow-y-auto" data-testid="event-list">
             {events.map((ev) => (
-              <li key={ev.id} className="flex items-start gap-3 px-5 py-3">
+              <li key={ev.id ?? ev.at} className="flex items-start gap-3 px-5 py-3">
                 <span className={`num shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium uppercase ${levelStyle[ev.level as keyof typeof levelStyle] ?? levelStyle.info}`}>
                   {ev.level}
                 </span>

@@ -1,18 +1,29 @@
-/** 统一 API 客户端：credentials include、401 跳登录、错误 toast */
+/** 统一 API 客户端：credentials include、401 → refresh → 重试（B3）、错误 toast */
 import type {
   CarDiscoveryResult,
+  ChargeDetail,
   ChannelsData,
   Charge,
   ChargingStats,
+  ChannelStatus,
   DashboardData,
+  HealthLite,
+  HeatmapData,
+  InstanceSettings,
+  LedgerSummary,
   Paged,
   PricingData,
   PricingHistoryEntry,
   PushRules,
+  PushRulesV2,
+  RecalcJob,
+  ReportDetail,
+  ReportListItem,
   SetupStatus,
   SystemEvent,
   SystemStatus,
   TestConnectionResult,
+  TimelineData,
   Trip,
   TripDetail,
   User,
@@ -37,13 +48,25 @@ export function setApiHandlers(h: { unauthorized?: ErrorHandler; error?: ErrorHa
   onError = h.error ?? null
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   const res = await fetch(path, {
     credentials: 'include',
     headers: { ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
     ...init,
   })
   if (!res.ok) {
+    // B3：Access 过期 → 静默用 Refresh 续期并重试一次（refresh 自身失败不重试）
+    if (res.status === 401 && !retried && !path.startsWith('/api/auth/') && !path.startsWith('/api/setup/')) {
+      try {
+        const refreshRes = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          credentials: 'include',
+        })
+        if (refreshRes.ok) return request<T>(path, init, true)
+      } catch {
+        /* refresh 失败 → 正常走 401 处理 */
+      }
+    }
     let code = 'UNKNOWN'
     let message = `请求失败 (${res.status})`
     try {
@@ -102,20 +125,54 @@ export const api = {
   },
   trip: (id: number | string) => get<TripDetail>(`/api/trips/${id}`),
 
-  charging: (params: { limit?: number; offset?: number } = {}) => {
+  charging: (params: { limit?: number; offset?: number; month?: string } = {}) => {
     const q = new URLSearchParams()
     if (params.limit != null) q.set('limit', String(params.limit))
     if (params.offset != null) q.set('offset', String(params.offset))
+    if (params.month) q.set('month', params.month)
     return get<Paged<Charge>>(`/api/charging?${q.toString()}`)
   },
-  chargingStats: (period: 'month' | 'all' = 'month') =>
+  chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
+  chargingStats: (period: 'month' | 'year' | 'all' = 'month') =>
     get<ChargingStats>(`/api/charging/stats?period=${period}`),
+  putChargeCost: (id: number, amount: number) =>
+    put<{ ok: boolean }>(`/api/charging/${id}/cost`, { amount, source: 'manual' }),
+
+  // ---- v2.1：时间轴 / 热力图 / 设置 / 账本 / 推送 / 报告 ----
+  timeline: () => get<TimelineData>('/api/dashboard/timeline'),
+  heatmap: (days = 90) => get<HeatmapData>(`/api/dashboard/heatmap?days=${days}`),
+  settings: () => get<InstanceSettings>('/api/settings'),
+  saveSettings: (payload: Partial<InstanceSettings>) => put<{ ok: boolean; settings: InstanceSettings }>('/api/settings', payload),
+  ledgerSummary: (month?: string) =>
+    post<LedgerSummary>(`/api/ledger/summary${month ? `?month=${month}` : ''}`, {}),
+  startRecalculate: (payload: { all?: boolean; from?: string; to?: string }) =>
+    post<{ jobId: string }>('/api/ledger/recalculate', payload),
+  recalculateStatus: (jobId: string) => get<RecalcJob>(`/api/ledger/recalculate/${jobId}`),
 
   pricing: () => get<PricingData>('/api/pricing'),
   setDefaultRate: (rate: number) => put<{ ok: boolean }>('/api/pricing/default', { rate }),
+  setLocationPricing: (id: number, payload: { priceMode: 'fixed'; pricePerUnit?: number } | { priceMode: 'tou'; tou: { offPeakStart: string; offPeakEnd: string; offPeakRate: number; peakRate: number } }) =>
+    put<{ ok: boolean }>(`/api/pricing/locations/${id}`, payload),
   pricingHistory: () => get<PricingHistoryEntry[]>('/api/pricing/history'),
 
   channels: () => get<ChannelsData>('/api/channels'),
+  channelStatus: () => get<ChannelStatus>('/api/channels'),
+  pushEnv: () => get<{ https: boolean; vapidPublicKey: string | null }>('/api/push/env'),
+  webpushInitVapid: () => post<{ ok: boolean; publicKey: string; created: boolean }>('/api/push/webpush/init-vapid'),
+  webpushSubscribe: (payload: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    post<{ ok: boolean }>('/api/push/webpush/subscribe', payload),
+  webpushUnsubscribe: (endpoint: string) =>
+    post<{ ok: boolean }>('/api/push/webpush/unsubscribe', { endpoint }),
+  webpushTest: () => post<{ ok: boolean }>('/api/push/webpush/test'),
+  saveTelegram: (payload: { enabled: boolean; botToken?: string; chatId?: string }) =>
+    put<{ ok: boolean; connected: boolean }>('/api/channels/telegram', payload),
+  testTelegram: () => post<{ ok: boolean }>('/api/channels/telegram/test'),
+  pushRulesV2: () => get<PushRulesV2>('/api/push-rules'),
+  setPushRulesV2: (payload: PushRulesV2) => put<PushRulesV2>('/api/push-rules', payload),
+  reports: () => get<{ items: ReportListItem[] }>('/api/reports'),
+  reportDetail: (id: number | string) => get<ReportDetail>(`/api/reports/${id}`),
+  generateReport: (type: 'weekly' | 'monthly') => post<{ ok: boolean; id: number }>('/api/reports/generate', { type }),
+  healthLite: () => get<HealthLite>('/api/system/health-lite'),
   saveFeishu: (payload: { enabled: boolean; appId: string; appSecret?: string }) =>
     put<{ ok: boolean; connected: boolean }>('/api/channels/feishu', payload),
   testFeishu: () => post<{ ok: boolean; message: string }>('/api/channels/feishu/test'),

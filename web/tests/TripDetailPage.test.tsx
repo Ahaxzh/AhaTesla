@@ -23,5 +23,13 @@ describe('TripDetailPage', () => {
     expect(map.querySelector('path')).toBeTruthy()
     expect(screen.getByTestId('trip-endpoints')).toHaveTextContent('家')
     expect(screen.getByTestId('trip-endpoints')).toHaveTextContent('公司')
+    // v2.1 P3 模块4：FIFO 批次扣减明细 + 综合单价 + 油车对比 + 能效标签 + 口径标注
+    expect(await screen.findByTestId('fifo-card')).toBeInTheDocument()
+    expect(screen.getByTestId('fifo-batch-rows')).toHaveTextContent('家庭充电桩')
+    expect(screen.getByTestId('fifo-card')).toHaveTextContent('综合单价')
+    expect(screen.getByTestId('fuel-compare')).toHaveTextContent('净节省 ¥2.21')
+    expect(screen.getByTestId('efficiency-badge')).toHaveTextContent('能效达成 93%')
+    expect(screen.getByTestId('energy-formula-note')).toHaveTextContent('耗电口径')
+    expect(screen.getByTestId('environment-card')).toHaveTextContent('18.5')
   })
 })

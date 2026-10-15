@@ -10,6 +10,8 @@ import TripDetailPage from './pages/TripDetailPage'
 import ChargingPage from './pages/ChargingPage'
 import PricingPage from './pages/PricingPage'
 import PushPage from './pages/PushPage'
+import ReportsPage from './pages/ReportsPage'
+import ReportDetailPage from './pages/ReportDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import SystemPage from './pages/SystemPage'
 
@@ -19,11 +21,18 @@ function Protected({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+/** §6.2 路由树：/login 已登录 → 重定向 / */
+function LoginRoute() {
+  const { user, initialized } = useAuth()
+  if (initialized && user) return <Navigate to="/" replace />
+  return <LoginPage />
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        <Route path="/login" element={<LoginRoute />} />
         <Route path="/setup" element={<SetupPage />} />
         <Route element={<AppLayout />}>
           <Route path="/" element={<Protected><DashboardPage /></Protected>} />
@@ -32,6 +41,8 @@ export default function App() {
           <Route path="/charging" element={<Protected><ChargingPage /></Protected>} />
           <Route path="/pricing" element={<Protected><PricingPage /></Protected>} />
           <Route path="/push" element={<Protected><PushPage /></Protected>} />
+          <Route path="/reports" element={<Protected><ReportsPage /></Protected>} />
+          <Route path="/reports/:id" element={<Protected><ReportDetailPage /></Protected>} />
           <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
           <Route path="/system" element={<Protected><SystemPage /></Protected>} />
         </Route>

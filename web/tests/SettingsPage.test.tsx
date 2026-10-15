@@ -25,7 +25,7 @@ describe('SettingsPage', () => {
     await user.type(screen.getByLabelText('新密码'), '123')
     await user.type(screen.getByLabelText('确认新密码'), '123')
     await user.click(screen.getByTestId('password-submit'))
-    expect(await screen.findByTestId('password-error')).toHaveTextContent('至少 6 位')
+    expect(await screen.findByTestId('password-error')).toHaveTextContent('至少 8 位')
 
     await user.clear(screen.getByLabelText('新密码'))
     await user.clear(screen.getByLabelText('确认新密码'))

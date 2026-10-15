@@ -10,45 +10,49 @@ beforeAll(() => server.listen())
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
-/** 等待推送规则加载完成（switch 出现且状态稳定） */
-async function findSwitch(name: string) {
-  return screen.findByRole('switch', { name })
-}
-
-describe('PushPage', () => {
-  it('渲染推送规则开关（初始状态来自 API）', async () => {
+describe('PushPage（三渠道平权 + 矩阵迁移到设置页）', () => {
+  it('渲染 Web Push / Telegram / 飞书 三渠道卡片（AC-10.1）', async () => {
     renderWithProviders(<PushPage />)
-    expect(await findSwitch('行程结束通知')).toBeChecked()
-    expect(await findSwitch('充电开始通知')).not.toBeChecked()
-    expect(await findSwitch('充电结束通知')).toBeChecked()
-    expect(await findSwitch('周报')).toBeChecked()
-    expect(await findSwitch('月报')).toBeChecked()
+    expect(await screen.findByTestId('webpush-card')).toBeInTheDocument()
+    // 等渠道状态数据到位再断言（findBy 轮询）
+    expect(await screen.findByTestId('webpush-status')).toHaveTextContent('1 台设备')
+    expect(await screen.findByTestId('telegram-status')).toHaveTextContent('未连接')
+    expect(screen.getByTestId('feishu-card')).toBeInTheDocument()
   })
 
-  it('切换开关发送 PUT 并乐观更新', async () => {
+  it('Web Push：HTTPS 环境显示一键开启与测试按钮', async () => {
+    renderWithProviders(<PushPage />)
+    expect(await screen.findByTestId('webpush-enable')).toBeInTheDocument()
+    expect(screen.getByTestId('webpush-test')).toBeEnabled()
+    expect(screen.queryByTestId('webpush-https-warning')).not.toBeInTheDocument()
+  })
+
+  it('Web Push：非 HTTPS 环境置灰并显示引导文案（AC-11.0）', async () => {
+    server.use(
+      http.get('/api/push/env', () => HttpResponse.json({ https: false, vapidPublicKey: null })),
+    )
+    renderWithProviders(<PushPage />)
+    expect(await screen.findByTestId('webpush-https-warning')).toHaveTextContent(/非 HTTPS/)
+    expect(screen.queryByTestId('webpush-enable')).not.toBeInTheDocument()
+  })
+
+  it('Telegram：填写 Token/ChatID 后可保存（密文不回传）', async () => {
     const user = userEvent.setup()
     const bodies: unknown[] = []
     server.use(
-      http.put('/api/push-rules', async ({ request }) => {
+      http.put('/api/channels/telegram', async ({ request }) => {
         bodies.push(await request.json())
-        return HttpResponse.json({ ...(bodies.at(-1) as object) })
+        return HttpResponse.json({ ok: true, connected: true })
       }),
     )
     renderWithProviders(<PushPage />)
-    await findSwitch('充电开始通知')
-    const sw = screen.getByRole('switch', { name: '充电开始通知' })
-    await user.click(sw)
-    await waitFor(() => expect(screen.getByRole('switch', { name: '充电开始通知' })).toBeChecked())
-    expect(bodies[0]).toMatchObject({ chargingStart: true })
-  })
-
-  it('周报开启时显示发送日选择', async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<PushPage />)
-    await findSwitch('周报')
-    expect(screen.getByRole('button', { name: '周一' })).toHaveAttribute('aria-pressed', 'true')
-    await user.click(screen.getByRole('button', { name: '周五' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '周五' })).toHaveAttribute('aria-pressed', 'true'))
+    await screen.findByTestId('telegram-card')
+    expect(screen.getByTestId('telegram-save')).toBeDisabled() // 无已存配置且未填写
+    await user.type(screen.getByTestId('tg-token-input'), '123456789:AAFx')
+    await user.type(screen.getByTestId('tg-chat-input'), '987654321')
+    expect(screen.getByTestId('telegram-save')).toBeEnabled()
+    await user.click(screen.getByTestId('telegram-save'))
+    await waitFor(() => expect(bodies[0]).toMatchObject({ enabled: true, botToken: '123456789:AAFx', chatId: '987654321' }))
   })
 
   it('飞书卡片：状态、AppID 输入与测试发送', async () => {
@@ -66,8 +70,9 @@ describe('PushPage', () => {
     server.use(
       http.get('/api/channels', () =>
         HttpResponse.json({
+          webpush: { enabled: false, configured: false, subscriberCount: 0 },
+          telegram: { enabled: false, connected: false, botAlias: null, chatIdAlias: null },
           feishu: { enabled: true, connected: false, appAlias: null, lastEventAt: null },
-          web: { enabled: true },
         }),
       ),
     )
@@ -77,14 +82,5 @@ describe('PushPage', () => {
     expect(screen.getByTestId('feishu-save')).toBeDisabled()
     await user.type(screen.getByLabelText('App ID'), 'cli_newapp')
     expect(screen.getByTestId('feishu-save')).toBeEnabled()
-  })
-
-  it('推送规则加载失败时仍渲染页面骨架', async () => {
-    server.use(
-      http.get('/api/push-rules', () => HttpResponse.json({ error: { code: 'X', message: 'fail' } }, { status: 500 })),
-    )
-    renderWithProviders(<PushPage />)
-    expect(await screen.findByTestId('feishu-card')).toBeInTheDocument()
-    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
   })
 })

@@ -8,6 +8,7 @@ import {
   Flame,
   Gauge,
   Route,
+  Sparkles,
   TrendingDown,
 } from 'lucide-react'
 import { api } from '@/api/client'
@@ -16,16 +17,44 @@ import { PageHeader } from '@/components/PageHeader'
 import { SkeletonCards, SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { EmptyState } from '@/components/EmptyState'
-import { fmtCny, fmtDateTime, fmtKm, fmtKwh } from '@/utils/format'
+import { Timeline24h } from '@/components/Timeline24h'
+import { HeatmapCalendar } from '@/components/HeatmapCalendar'
+import { fmtCny, fmtDateTime, fmtKm, fmtKwh, timeAgo } from '@/utils/format'
 import type { Charge, Trip } from '@/types'
+
+/** states 原值 → 产品语义（PRD §6.3 P2）：offline≠睡眠；online=哨兵/在线驻车 */
+function statePill(state: string): { label: string; cls: string } {
+  switch (state) {
+    case 'charging':
+      return { label: '充电中', cls: 'bg-emerald-400/10 text-emerald-400' }
+    case 'driving':
+      return { label: '行驶中', cls: 'bg-sky-400/10 text-sky-400' }
+    case 'asleep':
+      return { label: '睡眠中', cls: 'bg-violet-400/10 text-violet-400' }
+    case 'online':
+      return { label: '哨兵/在线', cls: 'bg-amber-400/10 text-amber-400' }
+    case 'offline':
+      return { label: '离线', cls: 'bg-white/[0.04] text-slate-500' }
+    default:
+      return { label: '待数据', cls: 'bg-white/[0.06] text-slate-400' }
+  }
+}
 
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard })
+  const { data: timeline } = useQuery({ queryKey: ['timeline'], queryFn: api.timeline, retry: false })
+  const { data: heatmap } = useQuery({ queryKey: ['heatmap'], queryFn: () => api.heatmap(90), retry: false })
+  // P2 模块3 小字：总电费 = 行驶分摊 + 驻车/哨兵（POST /api/ledger/summary）
+  const { data: ledger } = useQuery({
+    queryKey: ['ledger-summary'],
+    queryFn: () => api.ledgerSummary(),
+    retry: false,
+  })
 
   const month = data?.monthStats
-  // 相比油车省下的钱 = 油车费用 - 电费
   const saved = month && data ? data.fuelComparison.fuelCostCny - month.costCny : 0
   const car = data?.car
+  const pill = statePill(car?.state ?? '')
 
   return (
     <div>
@@ -39,38 +68,18 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* 车辆状态卡 */}
+          {/* P2 模块1：车辆状态卡（电量变色 + 状态胶囊 + 数据同步时间） */}
           <section className="glass-card fade-up flex flex-col items-center gap-6 p-6 sm:flex-row sm:gap-10" data-testid="car-card">
             <BatteryRing percent={car!.currentBattery} label={`续航约 ${fmtKm(car!.rangeKm, 0)} km`} />
             <div className="w-full flex-1 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm text-slate-300">
                   <Car className="h-4 w-4 text-tesla" />
                   {car!.name}
                 </div>
-                <span
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${car!.state === 'charging'
-                      ? 'bg-emerald-400/10 text-emerald-400'
-                      : car!.state === 'driving'
-                        ? 'bg-sky-400/10 text-sky-400'
-                        : car!.state === 'online'
-                          ? 'bg-amber-400/10 text-amber-400'
-                          : car!.state === 'offline'
-                            ? 'bg-white/[0.04] text-slate-500'
-                            : 'bg-white/[0.06] text-slate-400'
-                  }`}
-                >
-                  {car!.state === 'charging'
-                    ? `充电中${car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}`
-                    : car!.state === 'driving'
-                      ? '行驶中'
-                      : car!.state === 'online'
-                        ? '在线'
-                        : car!.state === 'offline'
-                          ? '离线'
-                          : car!.state === 'asleep'
-                            ? '休眠'
-                            : '已驻车'}
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
+                  {pill.label}
+                  {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -83,14 +92,27 @@ export default function DashboardPage() {
                   <div className="num mt-1 text-lg font-semibold text-white">{fmtKm(car!.rangeKm, 0)} km</div>
                 </div>
               </div>
+              {/* 数据同步时间（模块1 规格） */}
+              {car && <div className="text-[11px] text-slate-500">数据同步于 {timeAgo(data.recentTrips[0]?.endAt ?? null)}</div>}
             </div>
           </section>
 
-          {/* 本月统计 */}
+          {/* P2 模块3：本月账本汇总（构成小字：含行驶 ¥X · 驻车/哨兵 ¥Y） */}
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="month-stats">
             <StatCard icon={Route} label="本月里程" value={`${fmtKm(month!.distanceKm)} km`} hint={`${month!.driveCount} 趟 · ${month!.driveHours.toFixed(1)} 小时`} />
             <StatCard icon={BatteryCharging} label="本月能耗" value={fmtKwh(month!.energyKWh)} />
-            <StatCard icon={Coins} label="本月电费" value={fmtCny(month!.costCny)} accent data-testid="stat-cost" />
+            <StatCard
+              icon={Coins}
+              label="本月电费"
+              value={fmtCny(ledger?.totalCost ?? month!.costCny)}
+              accent
+              data-testid="stat-cost"
+              hint={
+                ledger
+                  ? `含行驶 ¥${(ledger.breakdown.drivingCost ?? 0).toFixed(2)} · 驻车/哨兵 ¥${(ledger.breakdown.parkingCost ?? 0).toFixed(2)}`
+                  : undefined
+              }
+            />
             <StatCard
               icon={TrendingDown}
               label="相比油车"
@@ -99,7 +121,13 @@ export default function DashboardPage() {
             />
           </section>
 
-          {/* 最近行程 / 充电 */}
+          {/* P2 模块2：24h 状态时间轴 */}
+          {timeline && <Timeline24h data={timeline} />}
+
+          {/* P2 模块4：用车日历热力图 */}
+          {heatmap && <HeatmapCalendar data={heatmap} />}
+
+          {/* P2 模块5：最近活动流（行程/充电混合） */}
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="glass-card p-4" data-testid="recent-trips">
               <div className="mb-2 flex items-center justify-between px-1">
@@ -111,7 +139,7 @@ export default function DashboardPage() {
                 </Link>
               </div>
               {data.recentTrips.length === 0 ? (
-                <EmptyState icon={Route} title="暂无行程数据" description="TeslaMate 记录到行程后会自动出现在这里" />
+                <EmptyState icon={Sparkles} title="数据通道已就绪" description="车辆首次出发或充电后将自动汇入账单" />
               ) : (
                 <ul className="divide-y divide-white/[0.05]">
                   {data.recentTrips.map((t) => (

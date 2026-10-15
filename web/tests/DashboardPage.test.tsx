@@ -23,7 +23,9 @@ describe('DashboardPage', () => {
     const stats = screen.getByTestId('month-stats')
     expect(stats).toHaveTextContent('1,240.5 km')
     expect(stats).toHaveTextContent('223.1 kWh')
-    expect(screen.getByTestId('stat-cost')).toHaveTextContent('¥168.40')
+    // v2.1：电费卡优先显示 ledger summary（¥36.12）并带构成小字（P2 模块3）
+    expect(screen.getByTestId('stat-cost')).toHaveTextContent('¥36.12')
+    expect(screen.getByTestId('stat-cost')).toHaveTextContent('含行驶 ¥34.46 · 驻车/哨兵 ¥1.66')
     // 油车 620.25 - 电 168.40 = 省 451.85
     expect(stats).toHaveTextContent('省')
     expect(stats).toHaveTextContent('451.85')
