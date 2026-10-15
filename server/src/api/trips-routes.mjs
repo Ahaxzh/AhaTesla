@@ -11,11 +11,37 @@ function addressLabel(address) {
     || null;
 }
 
-function routeKey(drive, addressMap, geofenceMap) {
+/** 距离²（粗略平面近似，仅用于最近邻排序，无需 haversine 精度） */
+function sqDist(lat1, lng1, lat2, lng2) {
+  const dLat = lat1 - lat2;
+  const dLng = (lng1 - lng2) * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+  return dLat * dLat + dLng * dLng;
+}
+
+/** 第三级地点兜底：轨迹端点坐标 vs geofences 表中心点最近邻（≤300m 才认）。
+ *  纯本地 SQLite/PG 内已有数据计算，不调用任何外部逆地理 API（红线）。 */
+function nearestGeofenceName(geofenceRows, lat, lng) {
+  if (lat == null || lng == null || !Array.isArray(geofenceRows)) return null;
+  let best = null;
+  let bestDist = Infinity;
+  for (const g of geofenceRows) {
+    if (g.lat == null || g.lng == null) continue;
+    const d = sqDist(Number(lat), Number(lng), Number(g.lat), Number(g.lng));
+    if (d < bestDist) { bestDist = d; best = g; }
+  }
+  if (!best) return null;
+  // 500m 阈值：geofence 自带半径（默认约 100~200m），加上 GPS 漂移余量；
+  // 超出则认为不在任何已知围栏附近
+  const dLatDeg = Math.sqrt(bestDist) || 0;
+  if (dLatDeg > 0.005) return null;
+  return best.name;
+}
+
+function routeKey(drive, addressMap, geofenceMap, geofenceRows) {
   const start = drive.start_address_id ? addressMap[drive.start_address_id] : null;
   const end = drive.end_address_id ? addressMap[drive.end_address_id] : null;
-  const a = addressLabel(start) || geofenceMap[drive.start_geofence_id] || "未知";
-  const b = addressLabel(end) || geofenceMap[drive.end_geofence_id] || "未知";
+  const a = addressLabel(start) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || "未知";
+  const b = addressLabel(end) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || "未知";
   return a === b ? a : `${a} → ${b}`;
 }
 
@@ -65,10 +91,10 @@ export async function computeTripViews(db, drives, { defaultRate, history, charg
       durationMin: Number(drive.duration_min) || 0,
       energyKWh: energy,
       costCny: allocation?.cost_cny ?? null,
-      startAddress: addressLabel(addressMap[drive.start_address_id] || null) || geofenceMap[drive.start_geofence_id] || null,
-      endAddress: addressLabel(addressMap[drive.end_address_id] || null) || geofenceMap[drive.end_geofence_id] || null,
+      startAddress: addressLabel(addressMap[drive.start_address_id] || null) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || null,
+      endAddress: addressLabel(addressMap[drive.end_address_id] || null) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || null,
       kwhPer100km: energy !== null && distance > 0 ? round(energy / distance * 100, 2) : null,
-      routeKey: routeKey(drive, addressMap, geofenceMap)
+      routeKey: routeKey(drive, addressMap, geofenceMap, geofenceRows)
     };
   });
 }
@@ -85,7 +111,11 @@ async function getDrive(db, id) {
            c.efficiency,
            greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
            greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
-           d.outside_temp_avg AS outside_temp_avg_c, d.start_position_id, d.end_position_id
+           d.outside_temp_avg AS outside_temp_avg_c, d.start_position_id, d.end_position_id,
+           (SELECT p.latitude::float8 FROM positions p WHERE p.id = d.start_position_id) AS start_lat,
+           (SELECT p.longitude::float8 FROM positions p WHERE p.id = d.start_position_id) AS start_lng,
+           (SELECT p.latitude::float8 FROM positions p WHERE p.id = d.end_position_id) AS end_lat,
+           (SELECT p.longitude::float8 FROM positions p WHERE p.id = d.end_position_id) AS end_lng
     FROM drives d
     JOIN cars c ON c.id = d.car_id
     WHERE d.id = $1 AND d.end_date IS NOT NULL

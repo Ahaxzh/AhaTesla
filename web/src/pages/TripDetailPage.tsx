@@ -199,7 +199,7 @@ export default function TripDetailPage() {
                 <div className="text-[11px] text-slate-500">起点 · {fmtDateTime(trip.startAt)}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-200">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                  <span className="break-all">{trip.startAddress || '未知位置'}</span>
+                  <span className="break-all">{trip.startAddress || '起点（未命名位置）'}</span>
                 </div>
               </div>
             </div>
@@ -209,7 +209,7 @@ export default function TripDetailPage() {
                 <div className="text-[11px] text-slate-500">终点 · {fmtDateTime(trip.endAt)}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-200">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-tesla" />
-                  <span className="break-all">{trip.endAddress || '未知位置'}</span>
+                  <span className="break-all">{trip.endAddress || '终点（未命名位置）'}</span>
                 </div>
               </div>
             </div>

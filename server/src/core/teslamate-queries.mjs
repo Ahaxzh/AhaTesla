@@ -171,6 +171,10 @@ export function listDrivesSql({ from, to } = {}) {
              c.efficiency,
              greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
              greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
+             (SELECT p.latitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date ASC, p.id ASC LIMIT 1) AS start_lat,
+             (SELECT p.longitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date ASC, p.id ASC LIMIT 1) AS start_lng,
+             (SELECT p.latitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1) AS end_lat,
+             (SELECT p.longitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1) AS end_lng,
              (SELECT p.odometer FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1) AS end_odometer,
              (SELECT count(*)::int FROM positions p WHERE p.drive_id = d.id) AS position_count
       FROM matched m
@@ -245,7 +249,8 @@ export async function getGeofences(db) {
     SELECT g.id, g.name,
            g.cost_per_unit AS price_per_unit,
            g.session_fee,
-           g.billing_type::text AS billing_type
+           g.billing_type::text AS billing_type,
+           g.latitude::float8 AS lat, g.longitude::float8 AS lng
     FROM geofences g
     ORDER BY g.name ASC
   `);

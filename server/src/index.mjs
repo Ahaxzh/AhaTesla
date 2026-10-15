@@ -1,6 +1,15 @@
 // index.mjs — AhaTesla server entry point.
 // API on :18500 (PORT env) + static hosting of ../../web/dist when present.
 // Worker (trip monitor + MQTT signals + push dispatch + report scheduler) runs in this process.
+
+// 出网代理支持：Node 内置 fetch（undici）不读 HTTP(S)_PROXY 环境变量。
+// Telegram/飞书等外呼在有代理变量的环境下必须显式接管 dispatcher，否则直连超时。
+// 本机无代理变量时零开销（不设置 dispatcher）。
+if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.https_proxy) {
+  const { EnvHttpProxyAgent, setGlobalDispatcher } = await import("undici");
+  setGlobalDispatcher(new EnvHttpProxyAgent());
+}
+
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,14 +175,23 @@ export function createStaticHandler(rootDir) {
     try {
       const content = await readFile(filePath);
       const ext = filePath.slice(filePath.lastIndexOf("."));
-      res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream" });
+      // 缓存策略：HTML 与 SW 永远走网络（发版即生效）；带 hash 的构建产物长缓存
+      const isHtml = ext === ".html" || pathname === "/";
+      const isSw = rel === "/service-worker.js";
+      const hashed = /-[A-Za-z0-9_-]{8}\.(js|css|png|svg|woff2?)$/.test(rel);
+      const cacheControl = isHtml || isSw
+        ? "no-cache, must-revalidate"
+        : hashed
+          ? "public, max-age=31536000, immutable"
+          : "public, max-age=3600";
+      res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": cacheControl });
       res.end(content);
       return true;
     } catch {
       // SPA fallback
       try {
         const index = await readFile(join(rootDir, "index.html"));
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache, must-revalidate" });
         res.end(index);
         return true;
       } catch {

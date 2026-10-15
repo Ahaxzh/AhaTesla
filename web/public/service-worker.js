@@ -1,7 +1,7 @@
-/* AhaTesla Service Worker — app shell 缓存优先，API network-first，离线兜底 */
-const VERSION = 'v1'
+/* AhaTesla Service Worker — HTML network-first（发版即生效），带 hash 静态资源 cache-first，API network-first，离线兜底 */
+const VERSION = 'v3'
 const SHELL_CACHE = `ahatesla-shell-${VERSION}`
-const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/favicon.svg']
+const SHELL_ASSETS = ['/manifest.json', '/favicon.svg']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -38,7 +38,23 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // 静态资源与页面：cache-first，后台更新
+  // 页面导航（/ 与 /index.html）：network-first —— HTML 里的带 hash 资源名变了就自动用新版本
+  if (request.mode === 'navigate' || url.pathname === '/index.html') {
+    event.respondWith(
+      fetch(request)
+        .then((res) => {
+          if (res.ok) {
+            const copy = res.clone()
+            caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
+          }
+          return res
+        })
+        .catch(() => caches.match(request).then((c) => c || caches.match('/index.html'))),
+    )
+    return
+  }
+
+  // 带 hash 的构建产物与其他静态资源：cache-first，后台更新
   event.respondWith(
     caches.match(request).then((cached) => {
       const network = fetch(request)
