@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 /** 速度→颜色映射（km/h）：0 蓝 → 40 青 → 70 绿 → 100 黄 → 130+ 红 */
 function speedColor(kmh: number | null | undefined): string {
@@ -24,21 +26,64 @@ function speedColor(kmh: number | null | undefined): string {
   return 'rgb(239,68,68)'
 }
 
+// ---- WGS84 → GCJ02（国测局加密坐标）----
+// 高德底图为 GCJ02 坐标系；TeslaMate 存 WGS84。不纠偏轨迹会整体偏移几百米（不贴路）。
+function outsideChina(lat: number, lng: number) {
+  return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271
+}
+function transformLat(x: number, y: number) {
+  let v = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
+  v += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3
+  v += ((20 * Math.sin(y * Math.PI) + 40 * Math.sin((y / 3) * Math.PI)) * 2) / 3
+  v += ((160 * Math.sin((y / 12) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30)) * 2) / 3
+  return v
+}
+function transformLng(x: number, y: number) {
+  let v = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
+  v += ((20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2) / 3
+  v += ((20 * Math.sin(x * Math.PI) + 40 * Math.sin((x / 3) * Math.PI)) * 2) / 3
+  v += ((150 * Math.sin((x / 12) * Math.PI) + 300 * Math.sin((x * Math.PI) / 30)) * 2) / 3
+  return v
+}
+export function wgs84ToGcj02(lat: number, lng: number): [number, number] {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || outsideChina(lat, lng)) return [lat, lng]
+  const a = 6378245.0
+  const ee = 0.00669342162296594323
+  let dLat = transformLat(lng - 105, lat - 35)
+  let dLng = transformLng(lng - 105, lat - 35)
+  const radLat = (lat / 180) * Math.PI
+  let magic = Math.sin(radLat)
+  magic = 1 - ee * magic * magic
+  const sqrtMagic = Math.sqrt(magic)
+  dLat = (dLat * 180) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI)
+  dLng = (dLng * 180) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI)
+  return [lat + dLat, lng + dLng]
+}
+
 type RoutePoint = { lat: number; lng: number; t?: string; speed?: number | null } | [number, number]
 
-/** 行程路线图：内联 SVG，等距投影 + 起终点标记 + 速度渐变着色分段 + 悬停速度提示 */
+/**
+ * 行程路线图：Leaflet + 高德底图（国内直连快，GCJ02 纠偏贴路），
+ * 轨迹按速度分段着色（蓝→青→绿→黄→红），起终点标记，悬停提示速度。
+ * 瓦片由浏览器从高德 CDN 拉取（仅底图网格坐标，不含轨迹数据，无上传）。
+ */
 export function RouteMap({
   points,
-  height = 260,
+  height = 340,
   showSpeedLegend = true,
 }: {
   points: RoutePoint[]
   height?: number
   showSpeedLegend?: boolean
 }) {
-  const [hover, setHover] = useState<{ x: number; y: number; speed: number | null; idx: number } | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const mapRef = useRef<L.Map | null>(null)
+  const layerRef = useRef<L.LayerGroup | null>(null)
+  const [hover, setHover] = useState<{ speed: number | null } | null>(null)
+  const [satellite, setSatellite] = useState(false)
+  const tileRef = useRef<L.TileLayer | null>(null)
 
-  // 兼容 [lng,lat][] 与 {lat,lng,speed} 两种格式
+  // 兼容 [lng,lat][] 与 {lat,lng,speed} 两种格式；统一转 GCJ02 贴高德路网
   const pts = (points || [])
     .map((p): { lng: number; lat: number; speed: number | null } =>
       Array.isArray(p)
@@ -46,10 +91,116 @@ export function RouteMap({
         : { lng: Number(p.lng), lat: Number(p.lat), speed: p.speed != null ? Number(p.speed) : null },
     )
     .filter((p) => Number.isFinite(p.lng) && Number.isFinite(p.lat))
+    .map((p) => {
+      const [lat, lng] = wgs84ToGcj02(p.lat, p.lng)
+      return { ...p, lat, lng }
+    })
 
-  const hasSpeed = pts.some((p) => p.speed != null)
-  const speeds = pts.filter((p) => p.speed != null).map((p) => p.speed as number)
-  const maxSpeed = speeds.length ? Math.max(...speeds) : null
+  // 初始化地图（一次）
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return
+    const map = L.map(containerRef.current, {
+      zoomControl: false,
+      attributionControl: false, // 高德要求署名，放图例栏文字标注
+      preferCanvas: true,
+    })
+    const std = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+      subdomains: ['1', '2', '3', '4'],
+      maxZoom: 18,
+    })
+    std.addTo(map)
+    tileRef.current = std
+    L.control.zoom({ position: 'bottomright' }).addTo(map)
+    layerRef.current = L.layerGroup().addTo(map)
+    mapRef.current = map
+    return () => {
+      map.remove()
+      mapRef.current = null
+      layerRef.current = null
+      tileRef.current = null
+    }
+  }, [])
+
+  // 图层切换（标准 / 卫星）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !tileRef.current) return
+    if (satellite) {
+      map.removeLayer(tileRef.current)
+      tileRef.current = L.tileLayer(
+        'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
+        { subdomains: ['1', '2', '3', '4'], maxZoom: 18 },
+      ).addTo(map)
+    } else {
+      map.removeLayer(tileRef.current)
+      tileRef.current = L.tileLayer(
+        'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+        { subdomains: ['1', '2', '3', '4'], maxZoom: 18 },
+      ).addTo(map)
+    }
+  }, [satellite])
+
+  // 数据变化时重画轨迹
+  useEffect(() => {
+    const map = mapRef.current
+    const layer = layerRef.current
+    if (!map || !layer) return
+    layer.clearLayers()
+    if (pts.length < 2) return
+
+    const hasSpeed = pts.some((p) => p.speed != null)
+
+    // 白色描边底（让轨迹在浅色底图上也清晰）
+    L.polyline(
+      pts.map((p) => [p.lat, p.lng]),
+      { color: 'rgba(255,255,255,0.9)', weight: 8, opacity: 0.9, lineCap: 'round', lineJoin: 'round' },
+    ).addTo(layer)
+
+    // 速度分段 polyline
+    if (hasSpeed) {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p = pts[i]
+        const q = pts[i + 1]
+        const sp = p.speed != null ? p.speed : q.speed
+        L.polyline(
+          [
+            [p.lat, p.lng],
+            [q.lat, q.lng],
+          ],
+          { color: speedColor(sp), weight: 5, opacity: 1, lineCap: 'round' },
+        )
+          .on('mouseover', () => setHover({ speed: sp }))
+          .on('mouseout', () => setHover(null))
+          .addTo(layer)
+      }
+    } else {
+      L.polyline(
+        pts.map((p) => [p.lat, p.lng]),
+        { color: '#E82127', weight: 5, opacity: 1, lineCap: 'round' },
+      ).addTo(layer)
+    }
+
+    // 起终点标记
+    const startIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid #34D399;box-shadow:0 0 6px rgba(0,0,0,.4)"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    })
+    const endIcon = L.divIcon({
+      className: '',
+      html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid #E82127;box-shadow:0 0 6px rgba(0,0,0,.4)"><div style="width:4px;height:4px;border-radius:50%;background:#E82127;margin:2px auto"></div></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    })
+    L.marker([pts[0].lat, pts[0].lng], { icon: startIcon }).addTo(layer)
+    L.marker([pts[pts.length - 1].lat, pts[pts.length - 1].lng], { icon: endIcon }).addTo(layer)
+
+    // 适配视野
+    const bounds = L.latLngBounds(pts.map((p) => [p.lat, p.lng] as [number, number]))
+    map.fitBounds(bounds, { padding: [30, 30] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points])
 
   if (pts.length < 2) {
     return (
@@ -62,103 +213,41 @@ export function RouteMap({
     )
   }
 
-  const W = 640
-  const H = 360
-  const PAD = 26
-
-  const lngs = pts.map((p) => p.lng)
-  const lats = pts.map((p) => p.lat)
-  const minLng = Math.min(...lngs)
-  const maxLng = Math.max(...lngs)
-  const minLat = Math.min(...lats)
-  const maxLat = Math.max(...lats)
-  const spanLng = Math.max(maxLng - minLng, 1e-6)
-  const spanLat = Math.max(maxLat - minLat, 1e-6)
-
-  // 等比例适配到 viewBox（纬度方向翻转）
-  const scale = Math.min((W - PAD * 2) / spanLng, (H - PAD * 2) / spanLat)
-  const offsetX = (W - spanLng * scale) / 2
-  const offsetY = (H - spanLat * scale) / 2
-  const project = (p: { lng: number; lat: number }): [number, number] => [
-    offsetX + (p.lng - minLng) * scale,
-    offsetY + (maxLat - p.lat) * scale,
-  ]
-
-  const first = project(pts[0])
-  const last = project(pts[pts.length - 1])
-
-  // 速度分段线：相邻点一段，颜色取该段速度（无速度数据时统一主题红）
-  const segments = pts.slice(0, -1).map((p, i) => {
-    const q = pts[i + 1]
-    const [x1, y1] = project(p)
-    const [x2, y2] = project(q)
-    const sp = p.speed != null ? p.speed : q.speed
-    return { x1, y1, x2, y2, speed: sp, idx: i }
-  })
+  const speeds = pts.filter((p) => p.speed != null).map((p) => p.speed as number)
+  const maxSpeed = speeds.length ? Math.max(...speeds) : null
 
   return (
-    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-base-900" data-testid="route-map">
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: '100%', height: 'auto', maxHeight: height * 1.6 }}
-        role="img"
-        aria-label="行程路线图（按速度着色）"
-      >
-        {/* 网格底纹 */}
-        {Array.from({ length: 9 }, (_, i) => (
-          <line key={`h${i}`} x1={0} y1={(H / 9) * i} x2={W} y2={(H / 9) * i} stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
-        ))}
-        {Array.from({ length: 13 }, (_, i) => (
-          <line key={`v${i}`} x1={(W / 13) * i} y1={0} x2={(W / 13) * i} y2={H} stroke="rgba(255,255,255,0.04)" strokeWidth={1} />
-        ))}
-
-        {/* 速度着色路线段 */}
-        {hasSpeed ? (
-          segments.map((s) => (
-            <line
-              key={s.idx}
-              x1={s.x1}
-              y1={s.y1}
-              x2={s.x2}
-              y2={s.y2}
-              stroke={speedColor(s.speed)}
-              strokeWidth={4}
-              strokeLinecap="round"
-              opacity={hover == null || Math.abs(hover.idx - s.idx) <= 2 ? 1 : 0.4}
-              onMouseEnter={() => setHover({ x: (s.x1 + s.x2) / 2, y: (s.y1 + s.y2) / 2, speed: s.speed, idx: s.idx })}
-              onMouseLeave={() => setHover(null)}
-              style={{ cursor: 'crosshair' }}
-            />
-          ))
-        ) : (
-          <path
-            d={pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${project(p)[0].toFixed(1)},${project(p)[1].toFixed(1)}`).join(' ')}
-            fill="none"
-            stroke="#E82127"
-            strokeWidth={4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        )}
-
-        {/* 悬停速度提示 */}
+    <div
+      className="overflow-hidden rounded-xl border border-white/[0.06]"
+      data-testid="route-map"
+    >
+      <div className="relative" style={{ height }}>
+        <div ref={containerRef} className="h-full w-full" style={{ background: '#0d1117' }} />
         {hover && (
-          <g pointerEvents="none">
-            <rect x={Math.min(hover.x + 10, W - 96)} y={hover.y - 32} width={86} height={26} rx={6} fill="rgba(11,15,20,0.92)" stroke="rgba(255,255,255,0.12)" />
-            <text x={Math.min(hover.x + 10, W - 96) + 43} y={hover.y - 14} textAnchor="middle" fill="#E2E8F0" fontSize={13} fontWeight={600}>
-              {hover.speed != null ? `${Math.round(hover.speed)} km/h` : '--'}
-            </text>
-          </g>
+          <div
+            className="pointer-events-none absolute z-[1000] rounded-lg border border-white/10 bg-[rgba(11,15,20,0.92)] px-2.5 py-1 text-xs font-semibold text-slate-100 shadow-lg"
+            style={{ left: '50%', top: 8, transform: 'translateX(-50%)' }}
+          >
+            {hover.speed != null ? `${Math.round(hover.speed)} km/h` : '--'}
+          </div>
         )}
-
-        {/* 起终点 */}
-        <circle cx={first[0]} cy={first[1]} r={7} fill="#0B0F14" stroke="#34D399" strokeWidth={2.5} />
-        <circle cx={last[0]} cy={last[1]} r={7} fill="#0B0F14" stroke="#E82127" strokeWidth={2.5} />
-        <circle cx={last[0]} cy={last[1]} r={2.5} fill="#E82127" />
-      </svg>
-
-      {/* 图例：速度色带 */}
-      {hasSpeed && showSpeedLegend ? (
+        {/* 图层切换 */}
+        <div className="absolute right-2 top-2 z-[1000] flex overflow-hidden rounded-lg border border-white/15 bg-[rgba(11,15,20,0.85)] text-[11px] font-medium">
+          <button
+            className={`px-2.5 py-1 ${!satellite ? 'bg-tesla text-white' : 'text-slate-300'}`}
+            onClick={() => setSatellite(false)}
+          >
+            标准
+          </button>
+          <button
+            className={`px-2.5 py-1 ${satellite ? 'bg-tesla text-white' : 'text-slate-300'}`}
+            onClick={() => setSatellite(true)}
+          >
+            卫星
+          </button>
+        </div>
+      </div>
+      {showSpeedLegend && (
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-white/[0.06] px-3 py-2 text-[11px] text-slate-400" data-testid="route-speed-legend">
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-400" /> 起点
@@ -174,16 +263,7 @@ export function RouteMap({
             />
             <span>快{maxSpeed != null ? `（最高 ${Math.round(maxSpeed)} km/h）` : ''}</span>
           </span>
-          <span className="text-slate-500">悬停路段查看速度</span>
-        </div>
-      ) : (
-        <div className="flex items-center justify-center gap-5 border-t border-white/[0.06] py-2 text-[11px] text-slate-400">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-400" /> 起点
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-tesla bg-tesla/40" /> 终点
-          </span>
+          <span className="text-slate-500">悬停轨迹看速度 · 拖拽缩放 · 底图©高德</span>
         </div>
       )}
     </div>

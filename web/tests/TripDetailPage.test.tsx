@@ -1,6 +1,23 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
+
+// jsdom 缺少 Leaflet 需要的布局 API（offsetWidth/resize），mock 掉地图实现
+const fakeLayer = { addTo: () => fakeLayer, on: () => fakeLayer, clearLayers: () => {}, remove: () => {} }
+vi.mock('leaflet', () => ({
+  default: {
+    map: () => ({ remove: () => {}, fitBounds: () => {}, on: () => {}, setView: () => {}, removeLayer: () => {}, addLayer: () => {} }),
+    tileLayer: () => fakeLayer,
+    control: { zoom: () => ({ addTo: () => {} }) },
+    layerGroup: () => fakeLayer,
+    polyline: () => fakeLayer,
+    marker: () => fakeLayer,
+    divIcon: (o: unknown) => o,
+    latLngBounds: () => ({ pad: () => ({}) }),
+  },
+}))
+vi.mock('leaflet/dist/leaflet.css', () => ({}))
+
 import TripDetailPage from '@/pages/TripDetailPage'
 import { renderWithProviders } from './test-utils'
 import { server } from './msw'
@@ -20,8 +37,7 @@ describe('TripDetailPage', () => {
     expect(await screen.findByTestId('trip-cost')).toHaveTextContent('¥4.35')
     const map = await screen.findByTestId('route-map')
     expect(map).toBeInTheDocument()
-    // v2.1：速度数据存在时按段着色（line 段），否则回退单 path
-    expect(map.querySelector('path, line[stroke^="rgb("]')).toBeTruthy()
+    // v2.2：Leaflet 真实底图版（容器存在性 + 图例；瓦片加载与轨迹由 e2e 真浏览器验证）
     expect(screen.getByTestId('route-speed-legend')).toBeInTheDocument()
     expect(screen.getByTestId('trip-endpoints')).toHaveTextContent('家')
     expect(screen.getByTestId('trip-endpoints')).toHaveTextContent('公司')
