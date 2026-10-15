@@ -176,7 +176,15 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
       const type = ctx.body?.type === "monthly" ? "monthly" : "weekly";
       if (!reportScheduler) throw new HttpError(500, "internal", "report engine unavailable");
       const result = await reportScheduler.runKind(type);
-      if (!result) throw new HttpError(500, "internal", "report generation failed");
+      // runKind 对"同周期已有快照"返回 null（幂等防重）——返回已存在的那份而非报错
+      if (!result) {
+        const all = store.listReportSnapshots(type, 1);
+        const existing = all[0];
+        if (existing) {
+          return { ok: true, id: existing.id, deduplicated: true, periodLabel: existing.payload?.periodLabel ?? null };
+        }
+        throw new HttpError(500, "internal", "report generation failed");
+      }
       return { ok: true, id: result.id };
     }
   };

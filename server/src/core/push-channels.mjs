@@ -275,19 +275,55 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
 
   function eventBody(event) {
     if (event.type === "trip_end") {
-      const parts = [];
-      if (event.distanceKm != null) parts.push(`里程 ${event.distanceKm} km`);
-      if (event.costCny != null) parts.push(`电费 ¥${event.costCny}`);
-      if (event.savedCny != null) parts.push(`较油车省 ¥${event.savedCny}`);
-      return parts.length > 0 ? parts.join(" · ") : `行程已结束（${event.segment_ids?.length ?? 0} 段）`;
+      // v2.2 富化版：路线 + 核心数字 + 驾驶洞察（天气/胎压/拥堵/效率）
+      const lines = [];
+      const route = event.startLabel && event.endLabel ? `${event.startLabel} → ${event.endLabel}` : null;
+      if (route) lines.push(`🚗 ${route}`);
+
+      const stats = [];
+      if (event.distanceKm != null) stats.push(`${event.distanceKm} km`);
+      if (event.durationMin != null) stats.push(`${event.durationMin} 分钟`);
+      if (event.energyKwh != null) stats.push(`${event.energyKwh} kWh`);
+      if (event.costCny != null) stats.push(`¥${event.costCny}`);
+      if (stats.length) lines.push(`📊 ${stats.join(" · ")}`);
+      if (event.savedCny != null) lines.push(`💰 较油车省 ¥${event.savedCny}`);
+
+      const insights = [];
+      if (event.avgTempC != null) insights.push(`🌡 ${event.avgTempC}°C${event.minTempC != null && event.minTempC < event.avgTempC ? `（最低 ${event.minTempC}°C）` : ""}`);
+      if (event.avgSpeedKmh != null && event.maxSpeedKmh != null) insights.push(`🏎 均 ${event.avgSpeedKmh} / 峰 ${event.maxSpeedKmh} km/h`);
+      if (event.idleRatio != null && event.idleRatio >= 0.15) insights.push(`🚦 堵车怠速占 ${Math.round(event.idleRatio * 100)}%`);
+      if (event.kwhPer100km != null) insights.push(`⚡ ${event.kwhPer100km} kWh/100km`);
+      if (event.powerMaxKw != null && event.powerMaxKw >= 100) insights.push(`🔥 峰值功率 ${event.powerMaxKw} kW`);
+      if (event.tirePressure) {
+        const tp = event.tirePressure;
+        const vals = [tp.fl, tp.fr, tp.rl, tp.rr].filter((v) => v != null).map((v) => Number(v));
+        if (vals.length === 4) {
+          const min = Math.min(...vals);
+          const max = Math.max(...vals);
+          const tag = max - min >= 0.3 ? "⚠️" : "🛞";
+          insights.push(`${tag} 胎压 ${min.toFixed(1)}~${max.toFixed(1)} bar`);
+        }
+      }
+      if (insights.length) lines.push(insights.join(" · "));
+
+      return lines.length ? lines.join("\n") : `行程已结束（${event.segment_ids?.length ?? 0} 段）`;
     }
     if (event.type === "charging_done") {
+      const lines = [];
       const parts = [];
       if (event.energyKwh != null) parts.push(`充入 ${event.energyKwh} kWh`);
-      if (event.costCny != null) parts.push(`费用 ¥${event.costCny}`);
-      return parts.length > 0 ? parts.join(" · ") : `充电会话 #${event.charging_process_id ?? "-"} 已结束`;
+      if (event.costCny != null) parts.push(`¥${event.costCny}`);
+      if (parts.length) lines.push(`⚡ ${parts.join(" · ")}`);
+      if (event.endBattery != null) lines.push(`🔋 已充至 ${Math.round(event.endBattery)}%`);
+      if (event.locationName) lines.push(`📍 ${event.locationName}`);
+      if (event.tempC != null) lines.push(`🌡 充电时气温 ${event.tempC}°C`);
+      return lines.length ? lines.join("\n") : `充电会话 #${event.charging_process_id ?? "-"} 已结束`;
     }
-    if (event.type === "charging_start") return `充电会话 #${event.charging_process_id ?? "-"} 开始`;
+    if (event.type === "charging_start") {
+      const bits = [`🔌 充电开始`];
+      if (event.locationName) bits.push(`📍 ${event.locationName}`);
+      return bits.join("\n");
+    }
     if (event.type === "weekly" || event.type === "monthly") return event.summary || "";
     return "";
   }

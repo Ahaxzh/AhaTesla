@@ -13,7 +13,8 @@ afterAll(() => server.close())
 describe('SettingsPage', () => {
   it('渲染账户卡片与修改密码表单', async () => {
     renderWithProviders(<SettingsPage />)
-    expect(await screen.findByTestId('account-card')).toHaveTextContent('aha')
+    // v2.2：账户信息合并进页头（无独立 account-card）
+    expect(await screen.findByText(/aha.*单用户模式/s)).toBeInTheDocument()
     expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
   })
 

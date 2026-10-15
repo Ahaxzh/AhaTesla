@@ -107,6 +107,65 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
     try { parkingLoss = await getParkingLoss(start.toISOString(), end.toISOString()); } catch { parkingLoss = null; }
   }
 
+  // ---- v2.2 驾驶洞察维度（全部来自本地库实测） ----
+  let insights = null;
+  try {
+    const driveIds = views.map((v) => v.id).filter(Number.isInteger);
+    if (driveIds.length) {
+      const r = await db.query(`
+        SELECT
+          avg(d.outside_temp_avg)::float8 AS avg_temp,
+          min(d.outside_temp_avg)::float8 AS min_temp,
+          max(d.outside_temp_avg)::float8 AS max_temp,
+          max(d.power_max)::float8 AS power_max_kw,
+          avg(d.duration_min)::float8 AS avg_duration_min,
+          (SELECT avg(v.speed)::float8 FROM (
+             SELECT p.speed, p.drive_id FROM positions p
+             WHERE p.drive_id = ANY($1::int[]) AND p.speed IS NOT NULL
+             ORDER BY p.id DESC LIMIT 20000
+           ) v) AS avg_speed,
+          (SELECT max(v.speed)::float8 FROM (
+             SELECT p.speed FROM positions p
+             WHERE p.drive_id = ANY($1::int[]) AND p.speed IS NOT NULL
+             ORDER BY p.id DESC LIMIT 20000
+           ) v) AS max_speed,
+          (SELECT (count(*) FILTER (WHERE v.speed < 5))::float8 / greatest(count(*),1) FROM (
+             SELECT p.speed FROM positions p
+             WHERE p.drive_id = ANY($1::int[]) AND p.speed IS NOT NULL
+             ORDER BY p.id DESC LIMIT 20000
+           ) v) AS idle_ratio,
+          (SELECT avg(v.tpms)::float8 FROM (
+             SELECT p.tpms_pressure_fl::float8 AS tpms FROM positions p
+             WHERE p.drive_id = ANY($1::int[]) AND p.tpms_pressure_fl IS NOT NULL
+             ORDER BY p.id DESC LIMIT 500
+           ) v) AS tire_fl,
+          (SELECT avg(v.tpms)::float8 FROM (
+             SELECT p.tpms_pressure_rr::float8 AS tpms FROM positions p
+             WHERE p.drive_id = ANY($1::int[]) AND p.tpms_pressure_rr IS NOT NULL
+             ORDER BY p.id DESC LIMIT 500
+           ) v) AS tire_rr
+        FROM drives d WHERE d.id = ANY($1::int[])
+      `, [driveIds]);
+      const row = r[0] ?? {};
+      const avgTemp = finiteNumber(row.avg_temp);
+      if (avgTemp != null || row.idle_ratio != null) {
+        insights = {
+          avgTempC: avgTemp != null ? round(avgTemp, 1) : null,
+          tempRangeC: avgTemp != null && finiteNumber(row.min_temp) != null && finiteNumber(row.max_temp) != null
+            ? `${round(row.min_temp, 0)}~${round(row.max_temp, 0)}°C`
+            : null,
+          avgSpeedKmh: finiteNumber(row.avg_speed) != null ? round(row.avg_speed, 0) : null,
+          maxSpeedKmh: finiteNumber(row.max_speed) != null ? round(row.max_speed, 0) : null,
+          idlePct: finiteNumber(row.idle_ratio) != null ? round(row.idle_ratio * 100, 0) : null,
+          powerMaxKw: finiteNumber(row.power_max_kw) != null ? round(row.power_max_kw, 0) : null,
+          tireFlBar: finiteNumber(row.tire_fl) != null ? round(row.tire_fl, 1) : null,
+          tireRrBar: finiteNumber(row.tire_rr) != null ? round(row.tire_rr, 1) : null,
+          kwhPer100km: distanceKm > 2 ? round(energyKwh / distanceKm * 100, 1) : null,
+        };
+      }
+    }
+  } catch { /* 洞察维度失败不影响报告本体 */ }
+
   return {
     kind,
     periodLabel: label,
@@ -126,11 +185,33 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
       ...(parkingLoss ? { parkingLoss } : {})
     },
     topRoutes,
+    insights,
     baselineNote: `对比基准：${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L`,
-    closing: distanceKm > 0
-      ? `本期每公里成本 ¥${(totalCost / Math.max(distanceKm, 0.1)).toFixed(2)}，较燃油车${saved >= 0 ? "节省" : "多花"} ¥${Math.abs(saved).toFixed(2)}`
-      : "本期无行程记录"
+    closing: buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss })
   };
+}
+
+/** v2.2 结语：核心数字 + 洞察要点（温度/胎压/拥堵/能耗） */
+function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss }) {
+  if (!(distanceKm > 0)) return "本期无行程记录";
+  const lines = [
+    `本期行驶 ${distanceKm} km · 电费 ¥${totalCost.toFixed(2)} · 较油车${saved >= 0 ? "省" : "多花"} ¥${Math.abs(saved).toFixed(2)}（每公里 ¥${(totalCost / Math.max(distanceKm, 0.1)).toFixed(2)}）`
+  ];
+  if (insights) {
+    const bits = [];
+    if (insights.kwhPer100km != null) bits.push(`平均能耗 ${insights.kwhPer100km} kWh/100km`);
+    if (insights.avgTempC != null) bits.push(`气温 ${insights.tempRangeC ?? `${insights.avgTempC}°C`}`);
+    if (insights.idlePct != null && insights.idlePct >= 10) bits.push(`怠速占比 ${insights.idlePct}%${insights.idlePct >= 25 ? "（拥堵较多）" : ""}`);
+    if (insights.tireFlBar != null && insights.tireRrBar != null) {
+      const diff = Math.abs(insights.tireFlBar - insights.tireRrBar);
+      bits.push(`胎压 ${insights.tireFlBar}/${insights.tireRrBar} bar${diff >= 0.3 ? "（前后差异偏大，建议检查）" : ""}`);
+    }
+    if (bits.length) lines.push(bits.join(" · "));
+  }
+  if (parkingLoss && parkingLoss.kwh > 0.5) {
+    lines.push(`驻车/哨兵损耗 ${parkingLoss.kwh.toFixed(1)} kWh（¥${(parkingLoss.cost ?? 0).toFixed(2)}）`);
+  }
+  return lines.join("\n");
 }
 
 // ---- 定时调度 ----------------------------------------------------------------

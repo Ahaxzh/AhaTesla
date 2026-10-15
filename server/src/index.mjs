@@ -42,6 +42,7 @@ import { createSetupRoutes } from "./api/setup-routes.mjs";
 import { createPushRoutes } from "./api/push-routes.mjs";
 import { computeTripViews as tripsComputeTripViews } from "./api/trips-routes.mjs";
 import { listDrivesSql, listChargingForStats } from "./core/teslamate-queries.mjs";
+import { enrichTripEndEvent, enrichChargingDoneEvent } from "./core/event-enrichment.mjs";
 
 const PORT = Number(process.env.PORT) || 18500;
 const DB_URL = process.env.DB_URL || "postgres://teslamate@127.0.0.1:15432/teslamate";
@@ -305,7 +306,15 @@ async function main() {
 
   const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps });
 
-  async function dispatchPush(event) {
+  async function dispatchPush(rawEvent) {
+    // 事件富化（v2.2）：从 teslamate 只读库补全天气/胎压/速度/怠速等维度
+    let event = rawEvent;
+    try {
+      if (event.type === "trip_end") event = await enrichTripEndEvent(db, event);
+      else if (event.type === "charging_done") event = await enrichChargingDoneEvent(db, event);
+    } catch (error) {
+      eventLog.log("push.enrich_error", { message: error.message });
+    }
     // 矩阵化投递（GA-08/AC-12.2）：多渠道并行 + 单渠道失败隔离 + deliveryMs 埋点
     const t0 = Date.now();
     const { results } = await notifier.dispatch(event);

@@ -5,10 +5,11 @@ export default {
     extend: {
       colors: {
         base: {
-          950: '#0B0F14',
-          900: '#0F141B',
-          800: '#141B24',
-          700: '#1B2430',
+          950: '#08090A',
+          900: '#0F1011',
+          850: '#121315',
+          800: '#16181A',
+          700: '#1D2022',
         },
         tesla: {
           DEFAULT: '#E82127',
@@ -30,8 +31,9 @@ export default {
         numeric: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       boxShadow: {
-        card: '0 8px 32px rgba(0,0,0,0.35)',
+        card: '0 1px 0 0 rgba(255,255,255,0.03) inset, 0 8px 32px rgba(0,0,0,0.35)',
         glow: '0 0 24px rgba(232,33,39,0.25)',
+        overlay: '0 16px 48px rgba(0,0,0,0.5)',
       },
     },
   },
