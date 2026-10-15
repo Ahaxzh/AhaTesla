@@ -8,8 +8,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node src/index.mjs",
-    "test": "node --test \"test/*.test.mjs\"",
+    "start": "node --env-file=.env src/index.mjs",
+    "test": "AHA_STATE_IN_MEMORY=1 node --test \"test/*.test.mjs\"",
     "test:live": "AHA_LIVE=1 node --test \"test/live/*.test.mjs\""
   },
   "dependencies": {

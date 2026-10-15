@@ -1,7 +1,8 @@
 // feishu.mjs — push channel abstraction over Feishu (Lark) OpenAPI.
 // Graceful degradation: when not configured, enabled=false and every send is a
-// no-op returning {sent:false, reason:"disabled"}. Card style templates are
-// simplified from tesla-butler cards.mjs (github.com/manwithshit/tesla-butler).
+// no-op returning {sent:false, reason:"disabled"}. Cards use a minimal,
+// Card-1.0-compatible subset (header + markdown divs) so they render on both
+// mobile and desktop clients.
 import { getFeishuSecret } from "./state.mjs";
 
 const FEISHU_API = "https://open.feishu.cn/open-apis";
@@ -138,6 +139,11 @@ export function createFeishuChannel(state, { fetchImpl = globalThis.fetch, logge
       if (event.type === "trip_end") {
         return this.sendCard("行程结束", [
           markdown(`**行程结束**\n路段数：${event.segment_ids?.length ?? 0}\n原因：${event.reason || "-"}\n结束时间：${event.ended_at || "-"}`)
+        ]);
+      }
+      if (event.type === "charging_start") {
+        return this.sendCard("开始充电", [
+          markdown(`**开始充电**\n会话 #${event.charging_process_id ?? "-"}\n开始时间：${event.started_at || "-"}`)
         ]);
       }
       if (event.type === "charging_done") {

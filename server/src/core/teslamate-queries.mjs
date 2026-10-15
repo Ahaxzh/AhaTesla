@@ -10,7 +10,18 @@ function expr(value, errorMessage) {
 
 // ---- car / dashboard ----------------------------------------------------
 
-export async function getCarSnapshot(db) {
+// 主绑定 car_id（AC-2.3 多车隔离）：优先向导绑定（state.datasource.carId），
+// 回退 display_priority 排序的第一辆。所有核心查询经由此参数化过滤，
+// 修复原 s.car_id = 1 / LIMIT 1 硬编码（GA-05 / B1 / G8）。
+export function resolveCarId(state, fallbackCarId = null) {
+  const bound = Number(state?.datasource?.carId);
+  if (Number.isInteger(bound) && bound > 0) return bound;
+  return fallbackCarId;
+}
+
+export async function getCarSnapshot(db, { carId = null } = {}) {
+  const filter = carId ? "WHERE c.id = $1" : "";
+  const params = carId ? [carId] : [];
   return db.queryOne(`
     SELECT c.id,
            c.name,
@@ -20,6 +31,7 @@ export async function getCarSnapshot(db) {
            pos.date AS position_at,
            (SELECT max(d.end_date) FROM drives d WHERE d.car_id = c.id AND d.end_date IS NOT NULL) AS last_drive_at
     FROM cars c
+    ${filter}
     LEFT JOIN LATERAL (
       SELECT p.battery_level, p.ideal_battery_range_km, p.odometer, p.date
       FROM positions p
@@ -29,14 +41,24 @@ export async function getCarSnapshot(db) {
     ) pos ON true
     ORDER BY c.display_priority ASC NULLS LAST, c.id ASC
     LIMIT 1
-  `);
+  `, params);
 }
 
-// Vehicle state: charging > driving > online/asleep.
+// states 表只记在线性状态（online/offline/asleep），无 driving/charging 行。
+// 产品语义值域（PRD §6.2 P2 状态胶囊）：charging / driving / online / offline /
+// asleep / asleep_or_parked。charging/driving 由回退链推导；本映射把 states
+// 原始值归一到该值域，未知原始值与 NULL 统一归一为 asleep_or_parked。
+export function mapVehicleState(raw) {
+  const value = raw === null || raw === undefined ? "" : String(raw).trim().toLowerCase();
+  if (value === "online" || value === "offline" || value === "asleep") return value;
+  return "asleep_or_parked";
+}
+
+// Vehicle state: charging > driving > states(在线性，经 mapVehicleState 归一)。
 // Charging = unfinished charging_process whose latest charge row is recent (zombie
 // sessions with stale data are excluded by the 30-minute recency window).
-export async function getDrivingState(db) {
-  return db.queryOne(`
+export async function getDrivingState(db, { carId = null } = {}) {
+  const row = await db.queryOne(`
     SELECT CASE
       WHEN ch.id IS NOT NULL THEN 'charging'
       WHEN a.id IS NOT NULL THEN 'driving'
@@ -50,6 +72,7 @@ export async function getDrivingState(db) {
       SELECT d.id
       FROM drives d
       WHERE d.end_date IS NULL
+        AND ($1::int IS NULL OR d.car_id = $1::int)
         AND EXISTS (
           SELECT 1 FROM positions p
           WHERE p.drive_id = d.id
@@ -61,6 +84,7 @@ export async function getDrivingState(db) {
       SELECT cp.id
       FROM charging_processes cp
       WHERE cp.end_date IS NULL
+        AND ($1::int IS NULL OR cp.car_id = $1::int)
         AND EXISTS (
           SELECT 1 FROM charges c
           WHERE c.charging_process_id = cp.id
@@ -82,10 +106,12 @@ export async function getDrivingState(db) {
     ) chg ON true
     LEFT JOIN LATERAL (
       SELECT s.state FROM states s
-      WHERE s.car_id = 1 AND s.end_date IS NULL
+      WHERE s.car_id = $1::int AND s.end_date IS NULL
       ORDER BY s.start_date DESC LIMIT 1
     ) s ON true
-  `);
+  `, [carId]);
+  if (!row) return { state: "asleep_or_parked" };
+  return { ...row, state: row.state === "charging" || row.state === "driving" ? row.state : mapVehicleState(row.state) };
 }
 
 export async function getSystemStats(db) {
@@ -276,4 +302,66 @@ export async function getLatestChargingProcess(db) {
     ORDER BY cp.id DESC
     LIMIT 1
   `);
+}
+
+// ---- 增量轮询（AC-12.1b 事件捕获基线）--------------------------------------
+// 全部为只读 SELECT；以自增 id 为游标（id > $1），探针实测 1-3ms。冷启动时由
+// TripMonitor.reconcile 首帧写入水线（max id），水线之前的历史仅静默建档。
+
+export async function getMaxDriveId(db) {
+  const row = await db.queryOne(`SELECT COALESCE(max(d.id), 0)::int AS max_id FROM drives d`);
+  return Number(row?.max_id) || 0;
+}
+
+// 已结算行程增量（end_date 非空 = TeslaMate 完成结算落库，AC-12.3 起算点）。
+export async function getDrivesIncremental(db, sinceId, limit = 50) {
+  return db.query(`
+    SELECT d.id, d.start_date AS start_at, d.end_date AS end_at
+    FROM drives d
+    WHERE d.id > $1 AND d.end_date IS NOT NULL
+    ORDER BY d.id ASC
+    LIMIT $2
+  `,
+    [Number(sinceId) || 0, Math.max(1, Math.min(200, Number(limit) || 50))]
+  );
+}
+
+export async function getActiveDrive(db) {
+  const row = await db.queryOne(`
+    SELECT d.id, d.start_date AS start_at
+    FROM drives d
+    WHERE d.end_date IS NULL
+    ORDER BY d.start_date DESC
+    LIMIT 1
+  `);
+  return row ? { id: row.id, start_at: row.start_at } : null;
+}
+
+// 充电会话增量（新行，含未结束与已结算；未结束 = 进行中，已结算 = charging_done 候选）。
+// 调用侧游标取 max(last_charging_id, last_charging_done_id)。
+export async function getChargingIncremental(db, sinceId, limit = 50) {
+  return db.query(`
+    SELECT cp.id, cp.start_date AS start_at, cp.end_date AS end_at
+    FROM charging_processes cp
+    WHERE cp.id > $1
+    ORDER BY cp.id ASC
+    LIMIT $2
+  `,
+    [Number(sinceId) || 0, Math.max(1, Math.min(200, Number(limit) || 50))]
+  );
+}
+
+// 已结算充电行增量（end_date 非空 = TeslaMate 完成结算落库，AC-12.3 起算点）。
+// 捕捉「先 open 后结算」的行：这类行 id 不变，上面的新行查询扫不到它的关闭，
+// 必须以 done 游标单独增量扫描（单车站点会话按 id 顺序结算，游标安全）。
+export async function getChargingClosedIncremental(db, sinceId, limit = 50) {
+  return db.query(`
+    SELECT cp.id, cp.start_date AS start_at, cp.end_date AS end_at
+    FROM charging_processes cp
+    WHERE cp.id > $1 AND cp.end_date IS NOT NULL
+    ORDER BY cp.id ASC
+    LIMIT $2
+  `,
+    [Number(sinceId) || 0, Math.max(1, Math.min(200, Number(limit) || 50))]
+  );
 }

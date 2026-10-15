@@ -32,7 +32,7 @@ function baseState(overrides = {}) {
   };
 }
 
-function buildTestApp({ db, state = baseState(), mqtt = { isConnected: () => true } } = {}) {
+function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => true, isConnected: () => true } } = {}) {
   const eventLog = createEventLog();
   const requireAuth = createJwtMiddleware({ getSecret: () => SECRET });
   const saved = [];
@@ -387,11 +387,30 @@ test("GET /api/system/status 汇报 db/mqtt/uptime/version", async () => {
   const res = await fetchApp(app, "GET", "/api/system/status", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 200);
   assert.equal(res.json.teslamate.dbOk, true);
-  assert.equal(res.json.teslamate.mqttOk, true);
+  // 已配置 MQTT（isConfigured=true）→ 返回 mqtt 块（AC-5.1）
+  assert.deepEqual(res.json.teslamate.mqtt, { ok: true });
   assert.equal(res.json.teslamate.driveCount, 3023);
   assert.equal(res.json.teslamate.lastDriveAt, "2026-10-13T02:58:09.000Z");
   assert.equal(res.json.version, "0.1.0");
   assert.ok(res.json.uptime >= 0);
+});
+
+test("GET /api/system/status 未配置 MQTT 时不返回 mqtt 块（AC-5.1/§7.1 可选增强）", async () => {
+  const { app } = buildTestApp({ db: createFakeDb((sql) => {
+    if (/drive_count/.test(sql)) return [{ drive_count: 1, last_drive_at: null }];
+    return [];
+  }), mqtt: null });
+  const res = await fetchApp(app, "GET", "/api/system/status", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal("mqtt" in res.json.teslamate, false);
+  assert.equal("mqttOk" in res.json.teslamate, false);
+});
+
+test("GET /api/system/status MQTT 已配置但断开时返回 mqtt.ok=false", async () => {
+  const { app } = buildTestApp({ db: createFakeDb(), mqtt: { isConfigured: () => true, isConnected: () => false } });
+  const res = await fetchApp(app, "GET", "/api/system/status", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json.teslamate.mqtt, { ok: false });
 });
 
 test("db 故障时 status 仍 200 且 dbOk=false", async () => {

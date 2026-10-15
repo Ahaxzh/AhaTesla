@@ -1,5 +1,5 @@
 // live/db.test.mjs — SQL 正确性验证，连真实 TeslaMate 库（只读）。
-// 遵循 tesla-butler live-safe 模式：AHA_LIVE=1 时才执行，CI 可跳过。
+// live-safe：仅当 AHA_LIVE=1 时才执行（连真实 TeslaMate 库，只读），CI 默认跳过。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createDb } from "../../src/core/db.mjs";
@@ -27,7 +27,12 @@ test("car snapshot", { skip: !LIVE }, async () => {
 
 test("driving state", { skip: !LIVE }, async () => {
   const state = await getDrivingState(db);
-  assert.ok(["driving", "asleep_or_parked"].includes(state.state));
+  // 语义值域：推导态（charging/driving）+ states 在线性值（online/offline/asleep）经
+  // mapVehicleState 归一后的全集（含无 open 行时的 asleep_or_parked 兜底）。
+  assert.ok(
+    ["driving", "charging", "online", "offline", "asleep", "asleep_or_parked"].includes(state.state),
+    `unexpected state ${state.state}`
+  );
 });
 
 test("system stats", { skip: !LIVE }, async () => {

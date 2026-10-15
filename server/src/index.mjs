@@ -10,23 +10,34 @@ import { loadSecretKey, dataDir } from "./core/secret-box.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 import { createDb } from "./core/db.mjs";
-import { loadState, saveState } from "./core/state.mjs";
+import { loadState, saveState, getStore } from "./core/state.mjs";
 import { createEventLog } from "./core/events.mjs";
 import { createFeishuChannel } from "./core/feishu.mjs";
 import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
-import { hashPassword, generateInitialPassword, signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
+import { startMqttBridge } from "./core/mqtt-bridge.mjs";
+import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
 import { createApp, parseCookies } from "./api/http-kit.mjs";
 import { createJwtMiddleware } from "./api/jwt.mjs";
 import { createAuthRoutes } from "./api/auth-routes.mjs";
 import { createTripsRoutes } from "./api/trips-routes.mjs";
 import { createChargingRoutes } from "./api/charging-routes.mjs";
 import { createPricingRoutes } from "./api/pricing-routes.mjs";
+import { createLedgerRoutes } from "./api/ledger-routes.mjs";
 import { createChannelRoutes } from "./api/channel-routes.mjs";
 import { createDashboardRoutes, createSystemRoutes } from "./api/dashboard-routes.mjs";
+import { createSetupRoutes } from "./api/setup-routes.mjs";
 
 const PORT = Number(process.env.PORT) || 18500;
 const DB_URL = process.env.DB_URL || "postgres://teslamate@127.0.0.1:15432/teslamate";
-const MQTT_URL = process.env.MQTT_URL || "mqtt://127.0.0.1:1883";
+// MQTT 可选增强（§7.1）：仅显式配置 MQTT_URL 时启用；默认不配置（纯轮询基线）。
+const MQTT_URL = process.env.MQTT_URL || "";
+
+// 事件类型 → 推送矩阵开关（state.pushRules 键名），见 docs/API_CONTRACT.md §6。
+const EVENT_PUSH_RULE = Object.freeze({
+  trip_end: "tripEnd",
+  charging_start: "chargingStart",
+  charging_done: "chargingDone"
+});
 
 function log(...args) {
   process.stdout.write(`[${new Date().toISOString()}] ${args.join(" ")}\n`);
@@ -34,15 +45,11 @@ function log(...args) {
 
 // ---- bootstrap state ------------------------------------------------------
 
+// AC-1.4：无预设明文密码。管理员账号由 /setup 向导首位注册创建（t_3f9fe52a）；
+// bootstrap 不再生成/打印初始密码。保留函数供旧测试导入兼容。
 export async function bootstrap({ db, statePathEnv } = {}) {
   loadSecretKey();
   const state = loadState();
-  if (!state.passwordHash) {
-    const initial = generateInitialPassword();
-    state.passwordHash = await hashPassword(initial);
-    saveState(state);
-    log(`初始密码已生成: ${initial} （登录后请立即修改，此提示不会再次显示）`);
-  }
   return state;
 }
 
@@ -52,14 +59,41 @@ export function buildApp({ db, state, eventLog, mqtt, startedAt }) {
   const feishu = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
 
   const auth = createAuthRoutes({ state, getSecret, eventLog });
+  const setup = createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog });
   const trips = createTripsRoutes({ db, state });
   const charging = createChargingRoutes({ db, state });
-  const pricing = createPricingRoutes({ db, state });
+  const pricing = createPricingRoutes({ db, state, getStore });
+  const ledger = createLedgerRoutes({ db, state, getStore });
   const channels = createChannelRoutes({ state, feishu, eventLog });
   const dashboard = createDashboardRoutes({ db, state });
   const system = createSystemRoutes({ db, mqtt, eventLog, startedAt });
 
   const app = createApp({ onError: (error) => eventLog.log("server.error", { message: error?.message }) });
+
+  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu });
+
+  return { app, feishu };
+}
+
+// 路由注册统一入口：buildApp 与 main() 重建路由共用，避免两份清单漂移。
+function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null }) {
+  const auth = createAuthRoutes({ state, getSecret, eventLog });
+  const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog });
+  const trips = createTripsRoutes({ db, state });
+  const charging = createChargingRoutes({ db, state });
+  const pricing = createPricingRoutes({ db, state, getStore });
+  const ledger = createLedgerRoutes({ db, state, getStore });
+  const channels = createChannelRoutes({ state, feishu, eventLog });
+  const dashboard = createDashboardRoutes({ db, state });
+  const system = createSystemRoutes({ db, mqtt, eventLog, startedAt });
+
+  // /api/setup/*（契约 §1）：status 匿名；admin 仅 uninitialized；其余需管理员登录。
+  app.get("/api/setup/status", (ctx) => setup.status(ctx));
+  app.post("/api/setup/admin", (ctx) => setup.registerAdmin(ctx));
+  app.post("/api/setup/test-connection", requireAuth, (ctx) => setup.testConnection(ctx));
+  app.post("/api/setup/datasource", requireAuth, (ctx) => setup.saveDatasource(ctx));
+  app.get("/api/setup/car-discovery", requireAuth, (ctx) => setup.carDiscovery(ctx));
+  app.post("/api/setup/select-car", requireAuth, (ctx) => setup.selectCar(ctx));
 
   app.post("/api/auth/login", (ctx) => auth.login(ctx));
   app.post("/api/auth/logout", (ctx) => auth.logout(ctx));
@@ -71,8 +105,13 @@ export function buildApp({ db, state, eventLog, mqtt, startedAt }) {
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
+  app.put("/api/charging/:id/cost", requireAuth, (ctx) => ledger.putChargeCost(ctx));
+  app.post("/api/ledger/summary", requireAuth, (ctx) => ledger.summary(ctx));
+  app.post("/api/ledger/recalculate", requireAuth, (ctx) => ledger.startRecalculate(ctx));
+  app.get("/api/ledger/recalculate/:jobId", requireAuth, (ctx) => ledger.recalculateStatus(ctx));
   app.get("/api/pricing", requireAuth, (ctx) => pricing.list(ctx));
   app.put("/api/pricing/default", requireAuth, (ctx) => pricing.setDefault(ctx));
+  app.put("/api/pricing/locations/:id", requireAuth, (ctx) => pricing.updateLocation(ctx));
   app.get("/api/pricing/history", requireAuth, (ctx) => pricing.history(ctx));
   app.get("/api/channels", requireAuth, (ctx) => channels.list(ctx));
   app.put("/api/channels/feishu", requireAuth, (ctx) => channels.updateFeishu(ctx));
@@ -81,8 +120,6 @@ export function buildApp({ db, state, eventLog, mqtt, startedAt }) {
   app.put("/api/push-rules", requireAuth, (ctx) => channels.putPushRules(ctx));
   app.get("/api/system/status", requireAuth, (ctx) => system.status(ctx));
   app.get("/api/system/events", requireAuth, (ctx) => system.events(ctx));
-
-  return { app, feishu };
 }
 
 // ---- static hosting --------------------------------------------------------
@@ -129,37 +166,23 @@ export function createStaticHandler(rootDir) {
 
 // ---- MQTT signal bridge ------------------------------------------------------
 
-async function startMqtt({ state, monitor, eventLog }) {
-  const topicHandlers = {
-    "locked": (value) => monitor.observeVehicleSignal("locked", value),
-    "driver_front_door_open": (value) => monitor.observeVehicleSignal("driver_front_door_open", value)
-  };
+// MQTT 为可选增强（§7.1）：仅 MQTT_URL 显式配置时启用；未配置/连不上时优雅
+// 降级为纯轮询基线（事件捕获不依赖 MQTT）。只读订阅，绝不发布车辆命令。
+async function startMqtt({ monitor, eventLog, loop }) {
   try {
-    const mqtt = (await import("mqtt")).default;
-    const client = mqtt.connect(MQTT_URL, { connectTimeout: 5_000, reconnectPeriod: 10_000 });
-    client.on("error", (error) => eventLog.log("mqtt.error", { message: error.message }));
-    client.on("connect", () => {
-      log("mqtt connected", MQTT_URL);
-      for (const topic of ["teslamate/cars/1/locked", "teslamate/cars/1/driver_front_door_open"]) {
-        client.subscribe(topic);
-      }
+    const bridge = await startMqttBridge({
+      url: MQTT_URL,
+      monitor,
+      eventLog,
+      logger: (message) => log("mqtt:", message)
     });
-    client.on("message", (topic, payload) => {
-      const field = topic.split("/").pop();
-      const handler = topicHandlers[field];
-      if (!handler) return;
-      const text = payload.toString().trim();
-      const value = text === "true" || text === "1";
-      const changed = monitor.observeVehicleSignal(field, value);
-      if (changed) eventLog.log("mqtt.signal", { field, value });
-    });
-    return {
-      isConnected: () => client.connected === true,
-      close: () => client.endAsync?.() ?? client.end(true)
-    };
+    if (!bridge) return null;
+    // MQTT 充电边沿到达 → 立即触发一次轮询（DB 权威行产生事件；双源一致 AC-12.1b）
+    bridge.onBoundary = () => loop?.poke?.();
+    return bridge;
   } catch (error) {
     log("mqtt unavailable:", error.message);
-    return { isConnected: () => false, close: async () => {} };
+    return null;
   }
 }
 
@@ -168,15 +191,44 @@ async function startMqtt({ state, monitor, eventLog }) {
 async function main() {
   const startedAt = Date.now();
   const state = await bootstrap();
-  const eventLog = createEventLog();
+  // §7.1 事件日志落 SQLite（进程重启可回看）；getStore 顺带完成 JSON→SQLite 一次性迁移。
+  const eventLog = createEventLog({ store: getStore() });
   const db = createDb(DB_URL);
 
+  // GA-39（§7.4 崩溃自愈）：monitor 状态（水线游标 + sent_keys/pending_events）
+  // 持久化到 SQLite kv，重启恢复，避免重复推送/水线重算。防抖写回（节流 2s）。
+  const MONITOR_STATE_KEY = "monitor_state_v1";
+  const store = getStore();
+  const savedMonitorState = (() => {
+    try {
+      const raw = store.kvGet(MONITOR_STATE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })();
+  let monitorSaveTimer = null;
+  const persistMonitorState = () => {
+    if (monitorSaveTimer) return;
+    monitorSaveTimer = setTimeout(() => {
+      monitorSaveTimer = null;
+      try {
+        store.kvPut(MONITOR_STATE_KEY, JSON.stringify(monitor.state));
+      } catch (error) {
+        eventLog?.log?.("monitor.persist_error", { message: error.message });
+      }
+    }, 2_000);
+    monitorSaveTimer.unref?.();
+  };
+
   const monitor = new TripMonitor({
-    state: {},
+    state: savedMonitorState,
     onEvent: (event) => {
       eventLog.log("push.event", { type: event.type, eventKey: event.eventKey });
       const rules = state.pushRules;
-      if (event.type === "trip_end" && !rules.tripEnd) return;
+      // 推送矩阵：每类事件独立开关（AC-12.1）；未登记的 event.type 直接放行。
+      const ruleKey = EVENT_PUSH_RULE[event.type];
+      if (ruleKey && rules[ruleKey] === false) return;
       dispatchPush(event).catch((error) => eventLog.log("push.error", { message: error.message }));
     }
   });
@@ -206,47 +258,36 @@ async function main() {
     rawHandler(req, res);
   });
 
-  const mqttBridge = await startMqtt({ state, monitor, eventLog });
-  const requireAuth = createJwtMiddleware({ getSecret: () => loadSecretKey() });
-  app.routes.length = 0; // rebuild route table with real mqtt status route
-  {
-    const auth = createAuthRoutes({ state, getSecret: () => loadSecretKey(), eventLog });
-    const trips = createTripsRoutes({ db, state });
-    const charging = createChargingRoutes({ db, state });
-    const pricing = createPricingRoutes({ db, state });
-    const channels = createChannelRoutes({ state, feishu, eventLog });
-    const dashboard = createDashboardRoutes({ db, state });
-    const system = createSystemRoutes({ db, mqtt: mqttBridge, eventLog, startedAt });
-    app.post("/api/auth/login", (ctx) => auth.login(ctx));
-    app.post("/api/auth/logout", (ctx) => auth.logout(ctx));
-    app.post("/api/auth/change-password", requireAuth, (ctx) => auth.changePassword(ctx));
-    app.get("/api/auth/me", requireAuth, (ctx) => auth.me(ctx));
-    app.get("/api/dashboard", requireAuth, (ctx) => dashboard.dashboard(ctx));
-    app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
-    app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
-    app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
-    app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
-    app.get("/api/pricing", requireAuth, (ctx) => pricing.list(ctx));
-    app.put("/api/pricing/default", requireAuth, (ctx) => pricing.setDefault(ctx));
-    app.get("/api/pricing/history", requireAuth, (ctx) => pricing.history(ctx));
-    app.get("/api/channels", requireAuth, (ctx) => channels.list(ctx));
-    app.put("/api/channels/feishu", requireAuth, (ctx) => channels.updateFeishu(ctx));
-    app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
-    app.get("/api/push-rules", requireAuth, (ctx) => channels.getPushRules(ctx));
-    app.put("/api/push-rules", requireAuth, (ctx) => channels.putPushRules(ctx));
-    app.get("/api/system/status", requireAuth, (ctx) => system.status(ctx));
-    app.get("/api/system/events", requireAuth, (ctx) => system.events(ctx));
-  }
-
   const loop = startTripMonitorLoop({
     monitor,
     db,
     logger: (message) => eventLog.log("monitor.error", { message })
   });
+  // GA-39：周期 + 事件驱动节流持久化 monitor 状态（水线游标/sent_keys/pending_events）
+  const origPoke = loop.poke.bind(loop);
+  loop.poke = () => Promise.resolve(origPoke()).finally(persistMonitorState);
+  const persistTimer = setInterval(persistMonitorState, 30_000);
+  persistTimer.unref?.();
+
+  // loop 先建，MQTT 充电边沿才能 poke 即时轮询（§7.1 增强路径）
+  const mqttBridge = await startMqtt({ monitor, eventLog, loop });
+  if (mqttBridge) {
+    const requireAuth2 = createJwtMiddleware({ getSecret: () => loadSecretKey() });
+    app.routes.length = 0;
+    registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu });
+    log(`mqtt enabled (optional enhancement): ${MQTT_URL}`);
+  } else if (MQTT_URL) {
+    log(`mqtt configured but unavailable — degraded to polling baseline: ${MQTT_URL}`);
+  } else {
+    log("mqtt not configured — polling baseline only (§7.1)");
+  }
 
   const shutdown = async () => {
     loop.stop();
-    await mqttBridge.close();
+    clearInterval(persistTimer);
+    if (monitorSaveTimer) { clearTimeout(monitorSaveTimer); }
+    try { store.kvPut(MONITOR_STATE_KEY, JSON.stringify(monitor.state)); } catch {}
+    await mqttBridge?.close?.();
     server.close();
     await db.close().catch(() => {});
     process.exit(0);

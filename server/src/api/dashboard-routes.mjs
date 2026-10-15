@@ -1,7 +1,7 @@
 // dashboard + system routes.
 import {
   getCarSnapshot, getDrivingState, getSystemStats, getMonthStats, getWeekStats,
-  listCharging, listChargingForStats
+  listCharging, listChargingForStats, resolveCarId
 } from "../core/teslamate-queries.mjs";
 import { listDrivesSql } from "../core/teslamate-queries.mjs";
 import { computeTripViews } from "./trips-routes.mjs";
@@ -40,9 +40,16 @@ export function createDashboardRoutes({ db, state }) {
 
   return {
     async dashboard(ctx) {
-      const [car, driving, monthStats, weekStats] = await Promise.all([
-        getCarSnapshot(db),
-        getDrivingState(db),
+      // 主绑定 car_id（AC-2.3）：向导选定值优先，未绑定时回退快照第一辆车。
+      let boundCarId = null;
+      let car = null;
+      try { car = await getCarSnapshot(db); } catch { /* teslamate down */ }
+      boundCarId = resolveCarId(state, car?.id ?? null);
+      if (boundCarId !== car?.id) {
+        car = await getCarSnapshot(db, { carId: boundCarId }).catch(() => car);
+      }
+      const [driving, monthStats, weekStats] = await Promise.all([
+        getDrivingState(db, { carId: boundCarId }),
         getMonthStats(db, new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()),
         getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
       ]);
@@ -78,7 +85,13 @@ export function createDashboardRoutes({ db, state }) {
       const weekCost = weekViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
 
       const monthDistance = finiteNumber(monthStats?.distance_km) ?? 0;
-      const fuelCost = round(monthDistance / 100 * FUEL_REFERENCE.fuelPriceCnyPerL * FUEL_REFERENCE.literPer100km, 2);
+      // GA-17（AC-7.4）：油车基准可配置（state.fuelBaseline），默认 8.0L/100km @ ¥8.20/L（PRD 口径）
+      const baseline = {
+        literPer100km: 8.0,
+        fuelPriceCnyPerL: 8.20,
+        ...state.fuelBaseline
+      };
+      const fuelCost = round(monthDistance / 100 * baseline.fuelPriceCnyPerL * baseline.literPer100km, 2);
 
       return {
         car: {
@@ -107,6 +120,7 @@ export function createDashboardRoutes({ db, state }) {
         },
         fuelComparison: {
           fuelCostCny: fuelCost,
+          baseline: `对比基准 ${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L`,
           source: FUEL_REFERENCE.source,
           asOf: FUEL_REFERENCE.asOf
         },
@@ -127,13 +141,18 @@ export function createSystemRoutes({ db, mqtt, eventLog, startedAt = () => Date.
         dbOk = true;
         stats = await getSystemStats(db);
       } catch { /* teslamate down */ }
+      const teslamate = {
+        dbOk,
+        lastDriveAt: isoFromTeslaMate(stats?.last_drive_at),
+        driveCount: stats?.drive_count ?? null
+      };
+      // AC-5.1 / §7.1：MQTT 为可选增强，仅在已配置时返回 mqtt 块；
+      // 未配置时状态页不显示 MQTT 项（字段整体缺省，而非 false）。
+      if (mqtt?.isConfigured?.()) {
+        teslamate.mqtt = { ok: mqtt.isConnected?.() ?? false };
+      }
       return {
-        teslamate: {
-          dbOk,
-          mqttOk: mqtt?.isConnected?.() ?? false,
-          lastDriveAt: isoFromTeslaMate(stats?.last_drive_at),
-          driveCount: stats?.drive_count ?? null
-        },
+        teslamate,
         uptime: Math.round((Date.now() - (typeof startedAt === "function" ? startedAt() : startedAt)) / 1000),
         version: VERSION
       };

@@ -2,7 +2,7 @@
 import { HttpError } from "./http-kit.mjs";
 import { setFeishuConfig, saveState } from "../core/state.mjs";
 
-export function createChannelRoutes({ state, feishu, eventLog }) {
+export function createChannelRoutes({ state, feishu, eventLog, saveStateFn = saveState }) {
   return {
     async list(ctx) {
       const feishuStatus = await feishu.status();
@@ -52,7 +52,7 @@ export function createChannelRoutes({ state, feishu, eventLog }) {
         update.weeklyReportDay = day;
       }
       Object.assign(state.pushRules, update);
-      saveState(state);
+      saveStateFn(state);
       return { ...state.pushRules };
     }
   };

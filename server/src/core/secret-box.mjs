@@ -2,11 +2,15 @@
 // (feishu appSecret). Key is generated once at server/data/secret.key.
 import { randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, "..", "..", "data");
+// 数据目录默认 server/data；可用 AHA_DATA_DIR 覆盖（e2e 以临时目录拉起隔离实例，
+// 不污染常驻实例的 state.json / secret.key）。
+const DATA_DIR = process.env.AHA_DATA_DIR
+  ? resolve(process.env.AHA_DATA_DIR)
+  : join(__dirname, "..", "..", "data");
 
 let cachedKey = null;
 

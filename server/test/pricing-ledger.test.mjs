@@ -180,3 +180,55 @@ test("缺能量/缺时间的行程标记 allocation_reliable=false", () => {
   assert.equal(allocations.every((a) => a.allocation_reliable === false), true);
   assert.equal(allocations.every((a) => a.cost_cny === null), true);
 });
+
+// ---- 账本闭合不变量与精度双轨（契约 v2 §8.2 / PRD §7.3） ----------------------
+
+test("账本闭合：批次全耗尽时分摊电费总和 ≡ 实付总额（含充损折算单价）", () => {
+  // 一次充电：电池净吸收 10 kWh，实付 30 元 → 折算单价 3.0 元/kWh（含充损）。
+  const batches = batchesFromChargingSessions([
+    { id: 1, end_at: "2026-01-01 12:00", charge_energy_added: 10, cost: 30 }
+  ]);
+  assert.equal(batches[0].unit_price_cny_per_kwh, 3.0);
+  assert.equal(batches[0].amount_cny, 30);
+
+  const { allocations, remaining_batches } = allocateDriveCosts({
+    drives: [
+      { id: 101, start_at: "2026-01-02 08:00", estimated_kwh: 6 },
+      { id: 102, start_at: "2026-01-02 18:00", estimated_kwh: 4 }
+    ],
+    batches,
+    defaultRate: 9.9 // 批次足额，默认价不得参与
+  });
+
+  const total = allocations.reduce((sum, a) => sum + a.cost_cny, 0);
+  assert.equal(roundTo(total, 2), 30);           // 分摊总和 ≡ 实付总额
+  assert.equal(allocations.every((a) => a.default_kwh === 0), true);
+  assert.equal(allocations.every((a) => a.cost_complete === true), true);
+  assert.deepEqual(remaining_batches, [{ batch_id: "cp-1", remaining_kwh: 0 }]);
+});
+
+test("精度双轨：cost_cny 展示 2 位，cost_cny_precise 保留内部高精度", () => {
+  const { allocations } = allocateDriveCosts({
+    drives: [{ id: 1, start_at: "2026-01-01 00:00", estimated_kwh: 1 }],
+    batches: [],
+    defaultRate: 0.123456789
+  });
+  assert.equal(allocations[0].cost_cny, 0.12);
+  assert.equal(allocations[0].cost_cny_precise, 0.123456789);
+});
+
+test("未定价行程的 cost_cny 与 cost_cny_precise 同为 null", () => {
+  const { allocations } = allocateDriveCosts({
+    drives: [{ id: 1, start_at: "2026-01-01 00:00", estimated_kwh: 5 }],
+    batches: [],
+    defaultRate: null
+  });
+  assert.equal(allocations[0].cost_cny, null);
+  assert.equal(allocations[0].cost_cny_precise, null);
+  assert.equal(allocations[0].unpriced_kwh, 5);
+});
+
+// 本地四舍五入辅助（避免引入额外依赖）
+function roundTo(value, digits) {
+  return Number(Number(value).toFixed(digits));
+}
