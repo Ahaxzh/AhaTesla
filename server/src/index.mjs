@@ -1,6 +1,6 @@
 // index.mjs — AhaTesla server entry point.
 // API on :18500 (PORT env) + static hosting of ../../web/dist when present.
-// Worker (trip monitor + MQTT signals + push dispatch) runs in this process.
+// Worker (trip monitor + MQTT signals + push dispatch + report scheduler) runs in this process.
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,9 @@ import { createEventLog } from "./core/events.mjs";
 import { createFeishuChannel } from "./core/feishu.mjs";
 import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
 import { startMqttBridge } from "./core/mqtt-bridge.mjs";
+import { createNotifier, createTelegramChannel, createWebPushChannel } from "./core/push-channels.mjs";
+import { startReportScheduler } from "./core/report-engine.mjs";
+import { recordProbe } from "./core/health.mjs";
 import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
 import { createApp, parseCookies } from "./api/http-kit.mjs";
 import { createJwtMiddleware } from "./api/jwt.mjs";
@@ -25,7 +28,11 @@ import { createPricingRoutes } from "./api/pricing-routes.mjs";
 import { createLedgerRoutes } from "./api/ledger-routes.mjs";
 import { createChannelRoutes } from "./api/channel-routes.mjs";
 import { createDashboardRoutes, createSystemRoutes } from "./api/dashboard-routes.mjs";
+import { createDashboardExtraRoutes, createSettingsRoutes, createHealthLiteRoutes } from "./api/dashboard-extra-routes.mjs";
 import { createSetupRoutes } from "./api/setup-routes.mjs";
+import { createPushRoutes } from "./api/push-routes.mjs";
+import { computeTripViews as tripsComputeTripViews } from "./api/trips-routes.mjs";
+import { listDrivesSql, listChargingForStats } from "./core/teslamate-queries.mjs";
 
 const PORT = Number(process.env.PORT) || 18500;
 const DB_URL = process.env.DB_URL || "postgres://teslamate@127.0.0.1:15432/teslamate";
@@ -53,39 +60,33 @@ export async function bootstrap({ db, statePathEnv } = {}) {
   return state;
 }
 
-export function buildApp({ db, state, eventLog, mqtt, startedAt }) {
+export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null, reportScheduler = null, buildDeps = null }) {
   const getSecret = () => loadSecretKey();
   const requireAuth = createJwtMiddleware({ getSecret });
   const feishu = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
 
-  const auth = createAuthRoutes({ state, getSecret, eventLog });
-  const setup = createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog });
-  const trips = createTripsRoutes({ db, state });
-  const charging = createChargingRoutes({ db, state });
-  const pricing = createPricingRoutes({ db, state, getStore });
-  const ledger = createLedgerRoutes({ db, state, getStore });
-  const channels = createChannelRoutes({ state, feishu, eventLog });
-  const dashboard = createDashboardRoutes({ db, state });
-  const system = createSystemRoutes({ db, mqtt, eventLog, startedAt });
-
   const app = createApp({ onError: (error) => eventLog.log("server.error", { message: error?.message }) });
 
-  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu });
+  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, notifier, reportScheduler, buildDeps });
 
   return { app, feishu };
 }
 
 // 路由注册统一入口：buildApp 与 main() 重建路由共用，避免两份清单漂移。
-function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null }) {
+function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null }) {
   const auth = createAuthRoutes({ state, getSecret, eventLog });
   const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog });
   const trips = createTripsRoutes({ db, state });
-  const charging = createChargingRoutes({ db, state });
+  const charging = createChargingRoutes({ db, state, getStore });
   const pricing = createPricingRoutes({ db, state, getStore });
   const ledger = createLedgerRoutes({ db, state, getStore });
   const channels = createChannelRoutes({ state, feishu, eventLog });
   const dashboard = createDashboardRoutes({ db, state });
+  const dashboardExtra = createDashboardExtraRoutes({ db, state });
+  const settingsRoutes = createSettingsRoutes({ state, getStore });
+  const healthLite = createHealthLiteRoutes({});
   const system = createSystemRoutes({ db, mqtt, eventLog, startedAt });
+  const push = createPushRoutes({ state, notifier, eventLog, store: getStore(), reportScheduler, buildDeps });
 
   // /api/setup/*（契约 §1）：status 匿名；admin 仅 uninitialized；其余需管理员登录。
   app.get("/api/setup/status", (ctx) => setup.status(ctx));
@@ -96,15 +97,20 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.post("/api/setup/select-car", requireAuth, (ctx) => setup.selectCar(ctx));
 
   app.post("/api/auth/login", (ctx) => auth.login(ctx));
+  app.post("/api/auth/refresh", (ctx) => auth.refresh(ctx));
   app.post("/api/auth/logout", (ctx) => auth.logout(ctx));
   app.post("/api/auth/change-password", requireAuth, (ctx) => auth.changePassword(ctx));
+  app.post("/api/auth/sessions/revoke-all", requireAuth, (ctx) => auth.revokeAll(ctx));
   app.get("/api/auth/me", requireAuth, (ctx) => auth.me(ctx));
 
   app.get("/api/dashboard", requireAuth, (ctx) => dashboard.dashboard(ctx));
+  app.get("/api/dashboard/timeline", requireAuth, (ctx) => dashboardExtra.timeline(ctx));
+  app.get("/api/dashboard/heatmap", requireAuth, (ctx) => dashboardExtra.heatmap(ctx));
   app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
+  app.get("/api/charging/:id", requireAuth, (ctx) => charging.detail(ctx));
   app.put("/api/charging/:id/cost", requireAuth, (ctx) => ledger.putChargeCost(ctx));
   app.post("/api/ledger/summary", requireAuth, (ctx) => ledger.summary(ctx));
   app.post("/api/ledger/recalculate", requireAuth, (ctx) => ledger.startRecalculate(ctx));
@@ -113,13 +119,26 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.put("/api/pricing/default", requireAuth, (ctx) => pricing.setDefault(ctx));
   app.put("/api/pricing/locations/:id", requireAuth, (ctx) => pricing.updateLocation(ctx));
   app.get("/api/pricing/history", requireAuth, (ctx) => pricing.history(ctx));
-  app.get("/api/channels", requireAuth, (ctx) => channels.list(ctx));
+  app.get("/api/settings", requireAuth, (ctx) => settingsRoutes.get(ctx));
+  app.put("/api/settings", requireAuth, (ctx) => settingsRoutes.put(ctx));
+  app.get("/api/channels", requireAuth, (ctx) => push.listChannels(ctx));
   app.put("/api/channels/feishu", requireAuth, (ctx) => channels.updateFeishu(ctx));
   app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
-  app.get("/api/push-rules", requireAuth, (ctx) => channels.getPushRules(ctx));
-  app.put("/api/push-rules", requireAuth, (ctx) => channels.putPushRules(ctx));
+  app.put("/api/channels/telegram", requireAuth, (ctx) => push.updateTelegram(ctx));
+  app.post("/api/channels/telegram/test", requireAuth, (ctx) => push.testTelegram(ctx));
+  app.post("/api/push/webpush/subscribe", requireAuth, (ctx) => push.webpushSubscribe(ctx));
+  app.post("/api/push/webpush/unsubscribe", requireAuth, (ctx) => push.webpushUnsubscribe(ctx));
+  app.post("/api/push/webpush/test", requireAuth, (ctx) => push.webpushTest(ctx));
+  app.post("/api/push/webpush/init-vapid", requireAuth, (ctx) => push.webpushInitVapid(ctx));
+  app.get("/api/push/env", (ctx) => push.getPushEnv(ctx)); // 匿名（AC-11.0 前端置灰依据）
+  app.get("/api/push-rules", requireAuth, (ctx) => push.getPushRules(ctx));
+  app.put("/api/push-rules", requireAuth, (ctx) => push.putPushRules(ctx));
+  app.get("/api/reports", requireAuth, (ctx) => push.listReports(ctx));
+  app.get("/api/reports/:id", requireAuth, (ctx) => push.reportDetail(ctx));
+  app.post("/api/reports/generate", requireAuth, (ctx) => push.generateReport(ctx));
   app.get("/api/system/status", requireAuth, (ctx) => system.status(ctx));
   app.get("/api/system/events", requireAuth, (ctx) => system.events(ctx));
+  app.get("/api/system/health-lite", (ctx) => healthLite.healthLite(ctx)); // 匿名探活（GA-32）
 }
 
 // ---- static hosting --------------------------------------------------------
@@ -195,6 +214,17 @@ async function main() {
   const eventLog = createEventLog({ store: getStore() });
   const db = createDb(DB_URL);
 
+  // 实例设置（GA-36）：货币/单位/时区/油车基准 —— kv 持久化，启动时恢复进 state
+  {
+    const store0 = getStore();
+    try {
+      const rawSettings = store0.kvGet("app:settings");
+      if (rawSettings) state.settings = { ...(state.settings || {}), ...JSON.parse(rawSettings) };
+      const rawFb = store0.kvGet("app:fuelBaseline");
+      if (rawFb) state.fuelBaseline = { ...state.fuelBaseline, ...JSON.parse(rawFb) };
+    } catch { /* 坏数据忽略，走默认 */ }
+  }
+
   // GA-39（§7.4 崩溃自愈）：monitor 状态（水线游标 + sent_keys/pending_events）
   // 持久化到 SQLite kv，重启恢复，避免重复推送/水线重算。防抖写回（节流 2s）。
   const MONITOR_STATE_KEY = "monitor_state_v1";
@@ -225,19 +255,46 @@ async function main() {
     state: savedMonitorState,
     onEvent: (event) => {
       eventLog.log("push.event", { type: event.type, eventKey: event.eventKey });
-      const rules = state.pushRules;
-      // 推送矩阵：每类事件独立开关（AC-12.1）；未登记的 event.type 直接放行。
-      const ruleKey = EVENT_PUSH_RULE[event.type];
-      if (ruleKey && rules[ruleKey] === false) return;
       dispatchPush(event).catch((error) => eventLog.log("push.error", { message: error.message }));
     }
   });
 
-  const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt });
+  // ---- Notifier（三渠道抽象，GA-08）+ 报告调度器（GA-11） --------------------
+  const feishuChannel = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
+  const notifier = createNotifier({
+    state,
+    eventLog,
+    feishu: feishuChannel,
+    telegram: createTelegramChannel({ logger: (m) => eventLog.log("telegram.error", { message: m }) }),
+    webpush: createWebPushChannel({ logger: (m) => eventLog.log("webpush.error", { message: m }) })
+  });
+  // 报告构建依赖（computeTripViews/listDrivesSql/listChargingForStats 已静态导入）
+  const reportBuildDeps = () => ({
+    db, state,
+    computeTripViews: tripsComputeTripViews,
+    listDrivesSql,
+    listChargingForStats
+  });
+  const reportScheduler = startReportScheduler({
+    store,
+    buildDeps: reportBuildDeps,
+    notifier,
+    eventLog,
+    state,
+    tz: state.settings?.timezone || "Asia/Shanghai",
+    logger: (msg) => log("report:", msg)
+  });
+
+  const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps });
 
   async function dispatchPush(event) {
-    const result = await feishu.pushEvent(event);
-    if (result.sent && event.eventKey) monitor.acknowledge(event.eventKey);
+    // 矩阵化投递（GA-08/AC-12.2）：多渠道并行 + 单渠道失败隔离 + deliveryMs 埋点
+    const t0 = Date.now();
+    const { results } = await notifier.dispatch(event);
+    const anySent = Object.values(results).some((r) => r?.sent);
+    const deliveryMs = Date.now() - t0;
+    eventLog.log("push.dispatch", { type: event.type, results, deliveryMs });
+    if (anySent && event.eventKey) monitor.acknowledge(event.eventKey);
   }
 
   const staticHandler = createStaticHandler(join(__dirname, "..", "..", "web", "dist"));
@@ -261,6 +318,8 @@ async function main() {
   const loop = startTripMonitorLoop({
     monitor,
     db,
+    // 探活结果喂给健康状态机（GA-32 失联横幅数据源）；失败由 loop 内部 logger 兜底
+    onPollResult: (ok) => { recordProbe(ok); },
     logger: (message) => eventLog.log("monitor.error", { message })
   });
   // GA-39：周期 + 事件驱动节流持久化 monitor 状态（水线游标/sent_keys/pending_events）
@@ -274,7 +333,7 @@ async function main() {
   if (mqttBridge) {
     const requireAuth2 = createJwtMiddleware({ getSecret: () => loadSecretKey() });
     app.routes.length = 0;
-    registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu });
+    registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu, notifier, reportScheduler, buildDeps: reportBuildDeps });
     log(`mqtt enabled (optional enhancement): ${MQTT_URL}`);
   } else if (MQTT_URL) {
     log(`mqtt configured but unavailable — degraded to polling baseline: ${MQTT_URL}`);
@@ -284,6 +343,7 @@ async function main() {
 
   const shutdown = async () => {
     loop.stop();
+    reportScheduler?.stop?.();
     clearInterval(persistTimer);
     if (monitorSaveTimer) { clearTimeout(monitorSaveTimer); }
     try { store.kvPut(MONITOR_STATE_KEY, JSON.stringify(monitor.state)); } catch {}

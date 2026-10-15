@@ -253,7 +253,11 @@ export async function getGeofences(db) {
 
 // ---- charging ------------------------------------------------------------
 
-export async function listCharging(db, { limit = 50, offset = 0 } = {}) {
+export async function listCharging(db, { limit = 50, offset = 0, month = null } = {}) {
+  // month "YYYY-MM" → 该自然月内开始/结束的会话（UTC 口径，与列表页一致）
+  const monthFilter = month
+    ? `AND cp.start_date >= (('${month}-01'::date)::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < (('${month}-01'::date + interval '1 month')::timestamptz AT TIME ZONE 'UTC')`
+    : "";
   return db.query(`
     SELECT cp.id,
            cp.start_date AS start_at, cp.end_date AS end_at,
@@ -267,17 +271,48 @@ export async function listCharging(db, { limit = 50, offset = 0 } = {}) {
     FROM charging_processes cp
     LEFT JOIN geofences g ON g.id = cp.geofence_id
     LEFT JOIN addresses a ON a.id = cp.address_id
-    WHERE cp.end_date IS NOT NULL
+    WHERE cp.end_date IS NOT NULL ${monthFilter}
     ORDER BY cp.end_date DESC
     LIMIT $1 OFFSET $2
   `, [limit, offset]);
 }
 
-export async function countCharging(db) {
+export async function countCharging(db, { month = null } = {}) {
+  const monthFilter = month
+    ? `AND cp.start_date >= (('${month}-01'::date)::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < (('${month}-01'::date + interval '1 month')::timestamptz AT TIME ZONE 'UTC')`
+    : "";
   const row = await db.queryOne(`
-    SELECT count(*)::int AS total FROM charging_processes WHERE end_date IS NOT NULL
+    SELECT count(*)::int AS total FROM charging_processes cp WHERE cp.end_date IS NOT NULL ${monthFilter}
   `);
   return row ? row.total : 0;
+}
+
+// 单条充电会话（含 charge_energy_used 桩端注入，P4 效率模块）。
+export async function getChargingProcessById(db, id) {
+  return db.queryOne(`
+    SELECT cp.id,
+           cp.start_date AS start_at, cp.end_date AS end_at,
+           cp.charge_energy_added, cp.charge_energy_used, cp.cost, cp.duration_min,
+           cp.start_battery_level, cp.end_battery_level,
+           cp.geofence_id, cp.address_id,
+           g.name AS geofence_name, g.cost_per_unit AS geofence_cost_per_unit, g.session_fee AS geofence_session_fee,
+           a.display_name AS address_name,
+           (SELECT max(c.charger_power) FROM charges c WHERE c.charging_process_id = cp.id) AS power_max_kw
+    FROM charging_processes cp
+    LEFT JOIN geofences g ON g.id = cp.geofence_id
+    LEFT JOIN addresses a ON a.id = cp.address_id
+    WHERE cp.id = $1 AND cp.end_date IS NOT NULL
+  `, [Number(id)]);
+}
+
+// 充电功率曲线采样（charges 表，SoC × 功率）。
+export async function getChargesCurve(db, chargingProcessId) {
+  return db.query(`
+    SELECT c.date, c.battery_level, c.charger_power
+    FROM charges c
+    WHERE c.charging_process_id = $1
+    ORDER BY c.date ASC, c.id ASC
+  `, [Number(chargingProcessId)]);
 }
 
 export async function listChargingForStats(db, { sinceIso = null } = {}) {

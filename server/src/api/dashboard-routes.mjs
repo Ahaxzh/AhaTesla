@@ -136,13 +136,27 @@ export function createSystemRoutes({ db, mqtt, eventLog, startedAt = () => Date.
     async status(ctx) {
       let dbOk = false;
       let stats = null;
+      let latencyMs = null;
+      let readonlyVerified = null;
       try {
+        const t0 = Date.now();
         await db.ping();
+        latencyMs = Date.now() - t0;
         dbOk = true;
         stats = await getSystemStats(db);
+        // 只读校验（GA-31）：元数据探测（同 /setup 四级校验第3步逻辑）
+        try {
+          const probe = await db.queryOne(`
+            SELECT has_table_privilege(current_user, 'public.drives', 'INSERT,UPDATE,DELETE,TRUNCATE') AS table_write,
+                   has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create
+          `);
+          readonlyVerified = !(probe?.table_write === true || probe?.schema_create === true);
+        } catch { readonlyVerified = null; }
       } catch { /* teslamate down */ }
       const teslamate = {
         dbOk,
+        latencyMs,
+        readonlyVerified,
         lastDriveAt: isoFromTeslaMate(stats?.last_drive_at),
         driveCount: stats?.drive_count ?? null
       };

@@ -6,7 +6,23 @@ import { promisify } from "node:util";
 const scrypt = promisify(_scrypt);
 const SCRYPT_KEYLEN = 64;
 export const TOKEN_TTL_S = 24 * 60 * 60;
+export const REFRESH_TOKEN_TTL_S = 30 * 24 * 60 * 60;
 export const TOKEN_COOKIE = "ahatesla_token";
+export const REFRESH_COOKIE = "ahatesla_refresh";
+
+// Refresh token 版本号（kv: auth:refresh_epoch）。改密/吊销全部会话时 +1，
+// 令所有旧 refresh token 失效（无需逐 token 黑名单，单用户实例足够）。
+import { getStore } from "../core/state.mjs";
+export function refreshEpoch() {
+  const store = getStore();
+  return Number(store.kvGet("auth:refresh_epoch")) || 0;
+}
+export function bumpRefreshEpoch() {
+  const store = getStore();
+  const next = refreshEpoch() + 1;
+  store.kvPut("auth:refresh_epoch", String(next));
+  return next;
+}
 
 // ---- password hashing (scrypt, salted, format: scrypt$N$salt$hash) ----
 

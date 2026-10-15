@@ -42,12 +42,14 @@
 ## 3. 仪表盘与行程（v1 演进）
 
 - `GET /api/dashboard` → {
-    car: {name, model, currentBattery, rangeKm, state, stateSince, odometerKm},
+    car: {name, model, currentBattery, rangeKm, state, stateSince, odometerKm, positionAt},
     monthStats: {distanceKm, energyKwh, **cost**, driveCount, driveHours},
     weekStats: {distanceKm, energyKwh, **cost**},
     fuelComparison: {**fuelCost**, **saved**, savedPct, baseline, asOf},
     recentTrips:[Trip top5], recentCharges:[Charge top5]
   }
+- `GET /api/dashboard/timeline`（v2.1 新增，P2 模块2）→ {segments:[{from, to, state:"driving"|"charging"|"online"|"asleep"|"offline"}], summary:{drivingH, chargingH, asleepH, onlineH, offlineH}}（最近 24h，按实例时区对齐零点或滚动窗口）
+- `GET /api/dashboard/heatmap`（v2.1 新增，P2 模块4）→ {days:[{date:"YYYY-MM-DD", distanceKm}], maxKm}（最近 90 天按实例时区聚合，date 为本地日期）
 - `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
 - `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}}
 - Trip: {id, startAt, endAt, distanceKm, durationMin, energyKwh, **cost**（原 costCny）, startAddress, endAddress, kwhPer100km, routeKey}

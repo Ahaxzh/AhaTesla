@@ -1,17 +1,31 @@
 // charging routes — list + stats with per-location aggregation.
 import { HttpError } from "./http-kit.mjs";
-import { listCharging, countCharging, listChargingForStats } from "../core/teslamate-queries.mjs";
+import { listCharging, countCharging, listChargingForStats, getChargingProcessById, getChargesCurve } from "../core/teslamate-queries.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
 
-export function createChargingRoutes({ db, state }) {
+export function createChargingRoutes({ db, state, getStore }) {
   function defaultRate() {
     return state.pricing.defaultRateCnyPerKwh;
   }
 
-  function toChargeView(row) {
-    const priced = priceChargingSession(row, defaultRate());
+  function overridesMap() {
+    const store = getStore?.();
+    if (!store?.listChargeCostOverrides) return new Map();
+    const map = new Map();
+    for (const row of store.listChargeCostOverrides()) map.set(Number(row.charging_process_id), Number(row.cost));
+    return map;
+  }
+
+  // 费用来源 → 三态标记（P4 视图A）：manual（TeslaMate 已录 + 本地补录）/ geofence / default
+  function toChargeView(row, overrides) {
+    const priced = priceChargingSession(row, defaultRate(), { overrides });
     const energy = finiteNumber(row.charge_energy_added);
+    const costSource = priced.source === "manual" || priced.source === "stated"
+      ? "manual"
+      : priced.source === "geofence" || priced.source === "geofence-tou"
+        ? "geofence"
+        : priced.source === "default" ? "default" : "unknown";
     return {
       id: row.id,
       startAt: isoFromTeslaMate(row.start_at),
@@ -24,7 +38,7 @@ export function createChargingRoutes({ db, state }) {
       endBattery: row.end_battery_level ?? null,
       durationMin: Number(row.duration_min) || 0,
       powerMaxKw: finiteNumber(row.power_max_kw),
-      priceSource: priced.source
+      costSource
     };
   }
 
@@ -32,23 +46,82 @@ export function createChargingRoutes({ db, state }) {
     async list(ctx) {
       const limit = Math.max(1, Math.min(200, Number(ctx.query.limit) || 50));
       const offset = Math.max(0, Number(ctx.query.offset) || 0);
-      const rows = await listCharging(db, { limit, offset });
-      const total = await countCharging(db);
-      return { total, items: rows.map(toChargeView) };
+      const month = /^\d{4}-\d{2}$/.test(String(ctx.query.month || "")) ? String(ctx.query.month) : null;
+      const overrides = overridesMap();
+      const rows = await listCharging(db, { limit, offset, month });
+      const total = await countCharging(db, { month });
+      return { total, items: rows.map((r) => toChargeView(r, overrides)) };
+    },
+
+    // GET /api/charging/:id（契约 B6）：功率曲线 + 桩端效率 + 费用来源 + 补录回显
+    async detail(ctx) {
+      const id = Number(ctx.params.id);
+      if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "bad_request", "invalid charging id");
+      const row = await getChargingProcessById(db, id);
+      if (!row) throw new HttpError(404, "not_found", "charging session not found");
+      const overrides = overridesMap();
+      const view = toChargeView(row, overrides);
+
+      // 功率曲线（LTTB ≤300 点）：SoC 横轴 + 峰值打点（P4 单次详情）
+      let powerCurve = [];
+      let maxKw = null;
+      let maxKwSoc = null;
+      try {
+        const charges = await getChargesCurve(db, id);
+        const pts = charges
+          .map((c) => ({
+            soc: finiteNumber(c.battery_level),
+            kw: finiteNumber(c.charger_power),
+            x: finiteNumber(c.battery_level) ?? 0,
+            y: finiteNumber(c.charger_power) ?? 0
+          }))
+          .filter((p) => p.soc !== null && p.kw !== null);
+        const { lttbDownsample } = await import("./trips-routes.mjs");
+        powerCurve = lttbDownsample(pts, 300).map((p) => ({ soc: p.soc, kw: p.kw }));
+        let best = null;
+        for (const p of pts) if (best === null || p.kw > best.kw) best = p;
+        if (best) { maxKw = round(best.kw, 1); maxKwSoc = best.soc; }
+      } catch { /* charges 表不可用 → 空曲线 */ }
+
+      // 桩端效率（P4）：charge_energy_used（桩端）vs charge_energy_added（电池）。
+      // 容错：NULL 或 ≤added 时隐藏损耗模块（PRD §6.3 P4）。
+      const meterKwh = finiteNumber(row.charge_energy_used);
+      const batteryKwh = finiteNumber(row.charge_energy_added);
+      let efficiency = null;
+      if (meterKwh !== null && batteryKwh !== null && meterKwh > batteryKwh && meterKwh > 0) {
+        efficiency = {
+          meterKwh: round(meterKwh, 2),
+          batteryKwh: round(batteryKwh, 2),
+          ratio: round(batteryKwh / meterKwh, 4),
+          lossKwh: round(meterKwh - batteryKwh, 2)
+        };
+      }
+
+      return {
+        ...view,
+        powerCurve,
+        maxKw,
+        maxKwSoc,
+        efficiency,
+        overrideCost: overrides.has(id) ? overrides.get(id) : null
+      };
     },
 
     async stats(ctx) {
-      const period = ctx.query.period === "all" ? "all" : "month";
+      const period = ctx.query.period === "all" ? "all" : ctx.query.period === "year" ? "year" : "month";
       const sinceIso = period === "month"
         ? new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
-        : null;
+        : period === "year"
+          ? new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString()
+          : null;
+      const overrides = overridesMap();
       const rows = await listChargingForStats(db, { sinceIso });
       let totalKwh = 0;
       let totalCost = 0;
       let pricedSessions = 0;
       const byLocation = new Map();
       for (const row of rows) {
-        const priced = priceChargingSession(row, defaultRate());
+        const priced = priceChargingSession(row, defaultRate(), { overrides });
         const energy = finiteNumber(row.charge_energy_added) ?? 0;
         totalKwh += energy;
         if (priced.costCny !== null) {

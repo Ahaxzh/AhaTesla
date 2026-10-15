@@ -371,7 +371,7 @@ export class TripMonitor {
 // Poll loop used by index.mjs; db, clock and snapshot are injectable for tests.
 // The snapshot is id-incremental (WHERE id > cursor, AC-12.1b §7.1): each tick
 // only fetches rows newer than the persisted cursors, not a fixed tail.
-export function startTripMonitorLoop({ monitor, db, pollMs = MONITOR_DEFAULTS.pollMs, getSnapshot, logger = () => {} } = {}) {
+export function startTripMonitorLoop({ monitor, db, pollMs = MONITOR_DEFAULTS.pollMs, getSnapshot, logger = () => {}, onPollResult = null } = {}) {
   let stopped = false;
   let waterlinePrimed = false;
 
@@ -384,7 +384,6 @@ export function startTripMonitorLoop({ monitor, db, pollMs = MONITOR_DEFAULTS.po
       } else {
         snapshot = await incrementalSnapshot(db, monitor);
       }
-
       // Cold start: stamp all notification water lines from the database so a
       // leftover historical session cannot fire on connect (AC-12.1b).
       if (!waterlinePrimed) {
@@ -415,7 +414,9 @@ export function startTripMonitorLoop({ monitor, db, pollMs = MONITOR_DEFAULTS.po
       if (Array.isArray(snapshot.charging_closed_rows)) {
         monitor.reconcileChargingClosed(snapshot.charging_closed_rows);
       }
+      onPollResult?.(true);
     } catch (error) {
+      onPollResult?.(false);
       logger(`trip-monitor error: ${error.message}`);
     }
   };

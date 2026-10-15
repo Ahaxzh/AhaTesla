@@ -84,12 +84,44 @@ async function getDrive(db, id) {
            d.start_address_id, d.end_address_id,
            c.efficiency,
            greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
-           greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km
+           greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
+           d.outside_temp_avg_c, d.start_position_id, d.end_position_id
     FROM drives d
     JOIN cars c ON c.id = d.car_id
     WHERE d.id = $1 AND d.end_date IS NOT NULL
   `, [numId]);
   return rows[0] ?? null;
+}
+
+// LTTB（Largest-Triangle-Three-Buckets）降采样（§6.5-3）：保形状，≤300 点。
+export function lttbDownsample(points, threshold = 300) {
+  if (!Array.isArray(points) || points.length <= threshold) return points || [];
+  const sampled = [];
+  const every = (points.length - 2) / (threshold - 2);
+  sampled.push(points[0]);
+  let a = 0;
+  for (let i = 1; i < threshold - 1; i++) {
+    const rangeStart = Math.floor((i + 1) * every) + 1;
+    const rangeEnd = Math.min(Math.floor((i + 2) * every) + 1, points.length);
+    // 计算 a..a+1 区间平均
+    let avgX = 0, avgY = 0;
+    const avgRangeLen = rangeEnd - rangeStart;
+    for (let j = rangeStart; j < rangeEnd; j++) { avgX += points[j].x; avgY += points[j].y; }
+    avgX /= avgRangeLen || 1; avgY /= avgRangeLen || 1;
+    // 在下一区间选离“前点→均值线”三角形面积最大的点
+    const rangeOff = Math.floor((i - 1) * every) + 1;
+    const rangeTo = Math.floor(i * every) + 1;
+    const px = points[a].x, py = points[a].y;
+    let maxArea = -1, nextA = rangeOff;
+    for (let j = rangeOff; j < rangeTo && j < points.length; j++) {
+      const area = Math.abs((px - avgX) * (points[j].y - py) - (px - points[j].x) * (avgY - py)) * 0.5;
+      if (area > maxArea) { maxArea = area; nextA = j; }
+    }
+    sampled.push(points[nextA]);
+    a = nextA;
+  }
+  sampled.push(points[points.length - 1]);
+  return sampled;
 }
 
 export function createTripsRoutes({ db, state }) {
@@ -121,14 +153,102 @@ export function createTripsRoutes({ db, state }) {
         defaultRate: state.pricing.defaultRateCnyPerKwh,
         history: state.pricing.history
       });
-      const points = await getRoutePoints(db, drive.id, 500);
+
+      // FIFO 扣减明细（GA-23/24）：重建该行程的批次分配 slices
+      const charging = await listChargingForStats(db, {});
+      const batches = batchesFromChargingSessions(charging);
+      const { allocations } = allocateDriveCosts({
+        drives: [{ id: drive.id, start_at: drive.start_at, estimated_kwh: driveEnergyKwh(drive) }],
+        batches,
+        defaultRate: state.pricing.defaultRateCnyPerKwh,
+        defaultRateHistory: state.pricing.history
+      });
+      const alloc = allocations[0] || {};
+      const geofenceRows = await getGeofences(db);
+      const geofenceById = new Map(geofenceRows.map((g) => [g.id, g.name]));
+      const batchLabel = (batchId) => {
+        const cpId = Number(String(batchId).replace("cp-", ""));
+        const session = charging.find((c) => Number(c.id) === cpId);
+        const name = session ? (session.geofence_name || session.address_name || `会话 #${cpId}`) : `会话 #${cpId}`;
+        const date = session ? String(session.end_at ?? session.end_date ?? "").slice(0, 10) : "";
+        return date ? `${date} ${name}` : name;
+      };
+      const fifoBatches = (alloc.slices || [])
+        .filter((s) => s.source === "batch")
+        .map((s) => ({
+          source: batchLabel(s.batch_id),
+          kwh: s.energy_kwh,
+          price: s.unit_price_cny_per_kwh,
+          amount: s.cost_cny
+        }));
+      const defaultSlice = (alloc.slices || []).find((s) => s.source === "default");
+      if (defaultSlice) {
+        fifoBatches.push({ source: "默认电价", kwh: defaultSlice.energy_kwh, price: defaultSlice.unit_price_cny_per_kwh, amount: defaultSlice.cost_cny });
+      }
+      const fifoTotal = alloc.cost_cny ?? null;
+      const energy = alloc.energy_kwh ?? null;
+      const blendedPrice = energy && energy > 0 && fifoTotal !== null ? round(fifoTotal / energy, 4) : null;
+
+      // 油车对比（AC-7.4 可配置基准）
+      const baseline = { literPer100km: 8.0, fuelPriceCnyPerL: 8.20, ...(state.fuelBaseline || {}) };
+      const perKm = baseline.literPer100km / 100 * baseline.fuelPriceCnyPerL;
+      const distance = finiteNumber(drive.distance_km) ?? 0;
+      const fuelCost = round(distance * perKm, 2);
+      const saved = fifoTotal !== null ? round(fuelCost - fifoTotal, 2) : null;
+
+      // 能效达成率（P3 模块1）：额定预估耗电 = distance × cars.efficiency
+      const rawEff = finiteNumber(drive.efficiency);
+      const kwhPerKm = rawEff === null ? null : rawEff > 1 ? rawEff / 1000 : rawEff;
+      const ratedKwh = kwhPerKm !== null && distance > 0 ? round(distance * kwhPerKm, 2) : null;
+      const ratio = ratedKwh !== null && energy !== null && energy > 0 ? round(ratedKwh / energy, 3) : null;
+
+      // 环境剖析（P3 模块3）
+      const avgSpeed = drive.duration_min > 0 ? round(distance / (drive.duration_min / 60), 1) : null;
+      // 最高时速 + 空调估算（温度差近似）：取 positions 聚合
+      let maxSpeed = null;
+      let avgTempC = finiteNumber(drive.outside_temp_avg_c);
+      try {
+        const agg = await db.queryOne(`
+          SELECT max(p.speed) AS max_speed, avg(p.outside_temp) AS avg_temp
+          FROM positions p WHERE p.drive_id = $1
+        `, [Number(drive.id)]);
+        maxSpeed = finiteNumber(agg?.max_speed);
+        if (avgTempC === null) avgTempC = finiteNumber(agg?.avg_temp);
+      } catch { /* positions 缺列时忽略 */ }
+      // AC 估算：环境温度偏离 20°C 每 5 度 +0.5 kWh/100km 的粗口径（仅展示参考）
+      let acEstimateKwh = null;
+      if (avgTempC !== null && energy !== null && distance > 0) {
+        const deviation = Math.abs(avgTempC - 20);
+        acEstimateKwh = round((deviation / 5) * 0.5 * (distance / 100), 2);
+      }
+
+      // 路线点（LTTB ≤300，GA-26）
+      const points = await getRoutePoints(db, drive.id, 1200);
+      const poly = points
+        .map((p) => ({ x: new Date(String(p.date).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(p.date)) ? p.date : `${p.date}Z`).getTime() || 0, y: p.lat, lat: p.lat, lng: p.lng }))
+        .filter((p) => Number.isFinite(p.x));
+      const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng }));
+
       return {
         ...view,
-        route: points.map((point) => ({
-          t: isoFromTeslaMate(point.date),
-          lat: point.lat,
-          lng: point.lng
-        }))
+        route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng })),
+        positionCount: points.length,
+        fifo: {
+          batches: fifoBatches,
+          totalCost: fifoTotal,
+          blendedPrice,
+          exhaustedNote: (alloc.unpriced_kwh ?? 0) > 0
+            ? `历史充电批次已耗尽，超出 ${(alloc.unpriced_kwh).toFixed(1)} kWh 无法计价`
+            : null
+        },
+        fuelComparison: {
+          baseline: `对比基准 ${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L（¥${perKm.toFixed(3)}/km）`,
+          fuelCost,
+          saved,
+          savedPct: saved !== null && fuelCost > 0 ? round((saved / fuelCost) * 100, 1) : null
+        },
+        efficiency: { ratedKwh, actualKwh: energy, ratio },
+        environment: { avgTempC, acEstimateKwh, avgSpeedKmh: avgSpeed, maxSpeedKmh: maxSpeed }
       };
     }
   };
