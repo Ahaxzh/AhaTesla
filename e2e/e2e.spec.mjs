@@ -24,14 +24,18 @@ test("登录流程：错误密码被拒，正确密码进入总览", async ({ pa
   await expect(page).toHaveURL(/\/(dashboard)?$|\/dashboard/, { timeout: 8000 });
 });
 
-test("总览页：车辆电量环、月度统计、最近行程渲染", async ({ page }) => {
+test("总览页：车辆状态卡、本月账本卡、24h时间轴、热力图", async ({ page }) => {
   await login(page);
-  await expect(page.getByText(/Ahaxzh's Model 3/).first()).toBeVisible({ timeout: 10000 });
+  await expect(page.locator("main").getByText(/Ahaxzh's Model 3/).first()).toBeVisible({ timeout: 10000 });
   // 电量百分比出现
-  await expect(page.locator("text=/\\d+\\s*%/").first()).toBeVisible();
+  await expect(page.locator("main").locator("text=/\\d+\\s*%/").first()).toBeVisible();
   // 月度统计卡（里程/电费）
   await expect(page.getByText(/里程|km/i).first()).toBeVisible();
   await expect(page.getByText(/¥|元/).first()).toBeVisible();
+  // v2.1 P2：24h 时间轴（骨架或数据其一）
+  await page.waitForSelector("[data-testid='timeline-card']", { timeout: 10000 });
+  // v2.1 P2：用车热力图
+  await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
 });
 
 test("行程页：列表加载、分页、详情路线", async ({ page }) => {
@@ -53,6 +57,8 @@ test("行程页：列表加载、分页、详情路线", async ({ page }) => {
   if (!empty) {
     await expect(page.locator("[data-testid='route-map'] svg")).toBeVisible();
   }
+  // v2.1 P3：FIFO 扣减明细卡（有账本数据时出现批次表，无数据时显示空态说明）
+  await page.waitForSelector("[data-testid='fifo-card']", { timeout: 10000 });
 });
 
 test("充电页：列表与按地点统计", async ({ page }) => {
@@ -69,17 +75,15 @@ test("电价页：地点单价表 + 默认电价显示", async ({ page }) => {
   await expect(page.getByText(/1\.8/).first()).toBeVisible();
 });
 
-test("推送页：开关切换持久化", async ({ page }) => {
+test("推送页：三渠道卡片渲染（WebPush/Telegram/飞书）", async ({ page }) => {
   await login(page);
   await navigate(page, "push");
-  const firstToggle = page.locator('[role="switch"], button[aria-pressed], input[type="checkbox"]').first();
-  await expect(firstToggle).toBeVisible({ timeout: 8000 });
-  const before = await firstToggle.getAttribute("aria-pressed");
-  await firstToggle.click();
-  await page.waitForTimeout(800);
-  // 恢复原状态（避免污染配置）
-  await firstToggle.click();
-  await page.waitForTimeout(800);
+  // v2.1：三渠道平权卡片（AC-10.1）
+  await expect(page.locator("[data-testid='webpush-card']")).toBeVisible({ timeout: 10000 });
+  await expect(page.locator("[data-testid='telegram-card']")).toBeVisible();
+  await expect(page.locator("[data-testid='feishu-card']")).toBeVisible();
+  // WebPush：HTTP 环境置灰引导（AC-11.0）或 HTTPS 可订阅按钮，其一出现
+  await page.waitForSelector("[data-testid='webpush-https-warning'], [data-testid='webpush-enable']", { timeout: 10000 });
 });
 
 test("系统页：DB/MQTT 状态", async ({ page }) => {

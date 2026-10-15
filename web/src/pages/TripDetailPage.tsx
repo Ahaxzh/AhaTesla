@@ -80,8 +80,8 @@ export default function TripDetailPage() {
             </span>
           </div>
 
-          {/* 模块2：路线轨迹 */}
-          <RouteMap points={(trip.route ?? []).map((p) => [p.lng, p.lat] as [number, number])} />
+          {/* 模块2：路线轨迹（速度着色 + 悬停速度提示） */}
+          <RouteMap points={trip.route ?? []} />
 
           {/* 模块3：环境剖析微卡片 */}
           {trip.environment && (

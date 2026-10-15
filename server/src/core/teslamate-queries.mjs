@@ -210,7 +210,7 @@ export async function getDriveByIdSql(id) {
 
 export async function getRoutePoints(db, driveId, maxPoints = 500) {
   const rows = await db.query(`
-    SELECT p.date, p.latitude::float8 AS lat, p.longitude::float8 AS lng, p.odometer
+    SELECT p.date, p.latitude::float8 AS lat, p.longitude::float8 AS lng, p.odometer, p.speed::float8 AS speed
     FROM positions p
     WHERE p.drive_id = $1
     ORDER BY p.date ASC, p.id ASC

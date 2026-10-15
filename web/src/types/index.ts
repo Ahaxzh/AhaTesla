@@ -59,8 +59,8 @@ export interface Trip {
 }
 
 export interface TripDetail extends Trip {
-  /** 路线点集 {t, lat, lng}[]（LTTB ≤300 点） */
-  route?: { t: string; lat: number; lng: number }[]
+  /** 路线点集 {t, lat, lng, speed}[]（LTTB ≤300 点，speed km/h 供速度着色） */
+  route?: { t: string; lat: number; lng: number; speed?: number | null }[]
   positionCount?: number
   /** FIFO 扣减明细（P3 模块4） */
   fifo?: {

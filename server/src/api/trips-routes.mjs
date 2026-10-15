@@ -85,7 +85,7 @@ async function getDrive(db, id) {
            c.efficiency,
            greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
            greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
-           d.outside_temp_avg_c, d.start_position_id, d.end_position_id
+           d.outside_temp_avg AS outside_temp_avg_c, d.start_position_id, d.end_position_id
     FROM drives d
     JOIN cars c ON c.id = d.car_id
     WHERE d.id = $1 AND d.end_date IS NOT NULL
@@ -225,13 +225,13 @@ export function createTripsRoutes({ db, state }) {
       // 路线点（LTTB ≤300，GA-26）
       const points = await getRoutePoints(db, drive.id, 1200);
       const poly = points
-        .map((p) => ({ x: new Date(String(p.date).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(p.date)) ? p.date : `${p.date}Z`).getTime() || 0, y: p.lat, lat: p.lat, lng: p.lng }))
+        .map((p) => ({ x: new Date(String(p.date).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(p.date)) ? p.date : `${p.date}Z`).getTime() || 0, y: p.lat, lat: p.lat, lng: p.lng, speed: p.speed ?? null }))
         .filter((p) => Number.isFinite(p.x));
-      const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng }));
+      const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng, speed: p.speed ?? null }));
 
       return {
         ...view,
-        route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng })),
+        route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng, speed: p.speed ?? null })),
         positionCount: points.length,
         fifo: {
           batches: fifoBatches,

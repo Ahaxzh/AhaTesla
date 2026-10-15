@@ -175,9 +175,9 @@ export const defaultHandlers = [
       ...mockTrip,
       id: Number(params.id),
       route: [
-        { t: '2026-10-13T09:00:00Z', lat: 31.22, lng: 121.4 },
-        { t: '2026-10-13T09:20:00Z', lat: 31.23, lng: 121.42 },
-        { t: '2026-10-13T09:40:00Z', lat: 31.25, lng: 121.45 },
+        { t: '2026-10-13T09:00:00Z', lat: 31.22, lng: 121.4, speed: 32 },
+        { t: '2026-10-13T09:20:00Z', lat: 31.23, lng: 121.42, speed: 75 },
+        { t: '2026-10-13T09:40:00Z', lat: 31.25, lng: 121.45, speed: 105 },
       ],
       positionCount: 3,
       fifo: {

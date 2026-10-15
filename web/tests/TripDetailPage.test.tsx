@@ -20,7 +20,9 @@ describe('TripDetailPage', () => {
     expect(await screen.findByTestId('trip-cost')).toHaveTextContent('¥4.35')
     const map = await screen.findByTestId('route-map')
     expect(map).toBeInTheDocument()
-    expect(map.querySelector('path')).toBeTruthy()
+    // v2.1：速度数据存在时按段着色（line 段），否则回退单 path
+    expect(map.querySelector('path, line[stroke^="rgb("]')).toBeTruthy()
+    expect(screen.getByTestId('route-speed-legend')).toBeInTheDocument()
     expect(screen.getByTestId('trip-endpoints')).toHaveTextContent('家')
     expect(screen.getByTestId('trip-endpoints')).toHaveTextContent('公司')
     // v2.1 P3 模块4：FIFO 批次扣减明细 + 综合单价 + 油车对比 + 能效标签 + 口径标注
