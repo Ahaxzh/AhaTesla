@@ -2,7 +2,13 @@ node_modules/
 dist/
 server/data/*.json
 server/data/*.key
-server/data/state.json
+server/data/*.db
+server/data/*.db-wal
+server/data/*.db-shm
+server/data/state.json.e2e-backup
+server/data/*.bak-*
+server/data/state.json.migrated-*
+server/data/state.json.corrupt-*
 *.env
 .DS_Store
 coverage/

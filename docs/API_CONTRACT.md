@@ -1,64 +1,129 @@
-# AhaTesla API 契约 v1
+# AhaTesla API 契约 v2
+
+> **状态**：定稿（2026-10-14，对应 PRD v1.2）· 前一版：v1（见 Git 历史）
+> **本文档是唯一真相源**：改接口先改它，再改 server、web、测试（CLAUDE.md 纪律）。
 
 单一 Node 服务，端口 **18500**，同时提供 REST API 与前端静态资源（生产模式）。
-认证：JWT (HS256)，`httpOnly` cookie `ahatesla_token`，24h 有效。单用户体系（首次启动生成初始密码，登录后可改）。
+
+## 0. 全局规范
+
+- **认证**：JWT (HS256) httpOnly cookie `ahatesla_token`，**Access 24h + Refresh 30d 双 Token**（AC-3.2）；受保护端点未认证 → 401 `{error:{code,message}}`
+- **初始化状态机**：实例三态 `uninitialized`（无管理员）→ `setup-locked`（管理员已建，/api/setup/* 注册类端点 403）→ `ready`。`GET /api/setup/status` 可匿名查询
+- **金额与精度（PRD §7.3）**：金额 2 位小数、单价 3~4 位小数（均以字符串传输，避免浮点误差）；内部计算高精度，展示层截断
+- **多币种（AC-9.1）**：金额字段统一 `cost` / `totalCost` / `avgPrice` 命名，**不带货币后缀**；货币由实例配置（`/api/settings` currency）决定
+- **错误格式**：`{error: {code, message}}`，HTTP 4xx/5xx
 
 ## 数据源
-- TeslaMate PostgreSQL（经 socat 桥接容器暴露 `127.0.0.1:15432`，db=teslamate user=teslamate）
-- Mosquitto MQTT（桥接 `127.0.0.1:1883`，无认证，仅用于充电/门锁实时信号）
-- 只读访问，禁止任何写操作到 teslamate 库
 
-## 端点
+- TeslaMate PostgreSQL（只读；连接分级见 PRD §7.1——同机 external network / 跨机局域网直连，socat 仅高级附录）
+- 事件捕获基线为 PG 轮询（15~30s，AC-12.1b）；MQTT 可选增强（显式配置才启用）
+- AhaTesla 自有数据（账号/密钥/订阅/电价/FIFO 记录/报告快照/事件日志）存本地 SQLite `/data/ahatesla.db`，**严禁写 teslamate 库**
 
-### 认证
-- `POST /api/auth/login` {username, password} → {token, user}
+## 1. 初始化与数据源（v2 新增）
+
+- `GET /api/setup/status`（匿名）→ {state: "uninitialized"|"setup-locked"|"ready", https: bool, carFound: bool}
+- `POST /api/setup/admin`（仅 uninitialized）{username, password(≥8)} → {ok}（自动登录设 cookie）
+- `POST /api/setup/test-connection` {host, port=5432, database="teslamate", user, password} → {steps:[{name:"reachability"|"auth"|"readonly"|"cars", ok, detail}]}
+  - readonly 步 = **元数据探测**：`SELECT has_table_privilege(current_user,'public.drives','INSERT,UPDATE,DELETE,TRUNCATE') OR has_schema_privilege(current_user,'public','CREATE')`，返回 true 即危险配置（ok:false，要求降级只读账号，AC-2.4）；**严禁 CREATE/INSERT 实写探测**；连接池每 Session 初始化强制 `SET default_transaction_read_only = on`
+- `POST /api/setup/datasource` {mode:"connect"|"fullstack", ...连接参数} → {ok}（连接信息 AES-GCM 加密存 SQLite）
+- `GET /api/setup/car-discovery`（管理员）→ {found, car:{id,name,model}|null}（前端 2s 轮询，AC-2.3 的 60 秒发现）
+- `GET /api/settings`（管理员）→ {currency:{symbol:"¥",code:"CNY"}, distanceUnit:"km"|"mi", timezone, fuelBaseline:{consumptionL100:8.0, pricePerL:8.20}}
+- `PUT /api/settings`（管理员）→ {ok}（fuelBaseline 即 AC-7.4 油车基准可配置）
+
+## 2. 认证（v1 演进）
+
+- `POST /api/auth/login` {username, password} → {token, user}（连续 5 次失败锁 15 分钟，AC-3.3）
+- `POST /api/auth/refresh` → {ok}（Refresh cookie 续 Access；失效则 401 重登）
 - `POST /api/auth/logout` → {ok}
-- `GET /api/auth/me` → {username, initialized}（401 未登录）
-- `POST /api/auth/change-password` {oldPassword, newPassword} → {ok}
+- `GET /api/auth/me` → {username, initialized}
+- `POST /api/auth/change-password` {oldPassword, newPassword} → {ok}（吊销其他会话）
+- `POST /api/auth/sessions/revoke-all`（管理员）→ {ok}（AC-3.2 手动吊销）
 
-### 概览
+## 3. 仪表盘与行程（v1 演进）
+
 - `GET /api/dashboard` → {
-    car: {name, currentBattery, rangeKm, state, odometerKm},
-    monthStats: {distanceKm, energyKWh, costCny, driveCount, driveHours},
-    weekStats: {distanceKm, energyKWh, costCny},
-    fuelComparison: {fuelCostCny, source, asOf},
-    recentTrips: [Trip...top5], recentCharges: [Charge...top5]
+    car: {name, model, currentBattery, rangeKm, state, stateSince, odometerKm},
+    monthStats: {distanceKm, energyKwh, **cost**, driveCount, driveHours},
+    weekStats: {distanceKm, energyKwh, **cost**},
+    fuelComparison: {**fuelCost**, **saved**, savedPct, baseline, asOf},
+    recentTrips:[Trip top5], recentCharges:[Charge top5]
   }
+- `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
+- `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}}
+- Trip: {id, startAt, endAt, distanceKm, durationMin, energyKwh, **cost**（原 costCny）, startAddress, endAddress, kwhPer100km, routeKey}
 
-### 行程
-- `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items: [Trip]}
-- `GET /api/trips/:id` → Trip 详情（含路线 polyline 点集、起终点地址、每公里能耗）
-- Trip: {id, startAt, endAt, distanceKm, durationMin, energyKWh, costCny, startAddress, endAddress, kwhPer100km, routeKey}
+## 4. 充电（v1 演进）
 
-### 充电
-- `GET /api/charging?limit=50&offset=0` → {total, items: [Charge]}
-- `GET /api/charging/stats?period=month|all` → {totalKWh, totalCostCny, avgPricePerKWh, byLocation: [{name, count, kwh, cost, pricePerUnit}]}
-- Charge: {id, startAt, endAt, locationName, energyAddedKWh, costCny, pricePerUnit, startBattery, endBattery, durationMin, powerMaxKw}
+- `GET /api/charging?limit=50&offset=0&month=YYYY-MM` → {total, items:[Charge]}
+- `GET /api/charging/stats?period=month|all` → {totalKwh, **totalCost**, **avgPrice**, byLocation:[{name, count, kwh, cost, pricePerUnit}]}
+- `GET /api/charging/:id` → {**...Charge, powerCurve:[{soc, kw}]（峰值打点 maxKw@soc）**, efficiency:{meterKwh, batteryKwh, ratio, lossKwh}, costSource:"manual"|"geofence"|"default"}
+- `PUT /api/charging/:id/cost` {amount, source:"manual"} → {ok}（费用补录；触发 7 天窗口异步重算，AC-7.6）
+- Charge: {id, startAt, endAt, locationName, energyAddedKwh, **cost**（原 costCny）, pricePerUnit, startBattery, endBattery, durationMin, powerMaxKw, costSource}
 
-### 电价（geofences 镜像 + 默认价）
-- `GET /api/pricing` → {defaultRateCnyPerKwh, locations: [{id, name, pricePerUnit, sessionFee, billingType}]}
-- `PUT /api/pricing/default` {rate} → {ok}（写本地库，不改 teslamate）
-- `GET /api/pricing/history` → 费率变更历史 [{changedAt, from, to, source}]
+## 5. 电价与账本（v1 演进）
 
-### 推送渠道配置
-- `GET /api/channels` → {feishu: {enabled, connected, appAlias, lastEventAt}, web: {enabled: true}}
-- `PUT /api/channels/feishu` {enabled, appId, appSecret} → {ok, connected}（secret 落盘加密存储，不回传）
-- `POST /api/channels/feishu/test` → {ok, message}（发送测试卡片）
-- 推送规则: `GET/PUT /api/push-rules` {
-    tripEnd: bool, chargingStart: bool, chargingDone: bool,
-    weeklyReport: bool, weeklyReportDay: 1-7, monthlyReport: bool
-  }
+- `GET /api/pricing` → {defaultRate（原 defaultRateCnyPerKwh）, locations:[{id, name, **priceMode:"fixed"|"tou"**, pricePerUnit, **tou:{offPeakStart:"23:00", offPeakEnd:"07:00", offPeakRate, peakRate}**, sessionFee, billingType}]}
+- `PUT /api/pricing/default` {rate} → {ok}（只影响新行程，AC-7.3）
+- `GET /api/pricing/history` → [{changedAt, from, to, source}]
+- `PUT /api/pricing/locations/:id` {priceMode, pricePerUnit?, tou?} → {ok}（围栏分时电价配置，本地 SQLite 存）
+- `POST /api/ledger/summary?month=YYYY-MM` → {distanceKm, energyKwh, totalCost, costPerKm, fuelComparison, parkingLoss:{kwh, cost}, breakdown:{drivingCost, parkingCost}}（**v2 新增**：月度账本 + 驻车损耗 + 口径构成，AC-7.5；P2 模块3 小字数据源）
+- `POST /api/ledger/recalculate` {from?, to?|all} → {jobId}（【重算历史账本】，AC-7.3）
+- `GET /api/ledger/recalculate/:jobId` → {status, progress}（重算进度）
 
-### 系统
-- `GET /api/system/status` → {teslamate: {dbOk, mqttOk, lastDriveAt, driveCount}, uptime, version}
-- `GET /api/system/events?limit=100` → 运行事件日志（推送记录、错误）
-- WebSocket `/ws` → 实时事件推送（可选实现，前端轮询兜底）
+## 6. 推送（渠道抽象，v1 演进）
 
-## 计价规则（核心）
-1. 充电会话若 `charging_processes.cost` 非空 → 直接使用（TeslaMate 已按 geofence 单价算好）
-2. cost 为空但 geofence 有 cost_per_unit → energy × price + session_fee
-3. 都没有 → 使用默认价（本项目 `pricing.defaultRate`，变更只影响之后的新行程）
-4. 行程电费 = 行程耗电按时间顺序消耗"已购电价批次"，批次耗尽回落默认价（继承 tesla-butler electricity-accounting 模型，批次来源改为 TeslaMate 充电记录自动导入，非 OCR）
+### 渠道配置（三渠道平权，AC-10.1）
+- `GET /api/channels` → {webpush:{enabled, subscriberCount}, telegram:{enabled, connected}, feishu:{enabled, connected, appAlias}}
+- `PUT /api/channels/webpush` {enabled} → {ok}
+- `GET /api/push/env`（匿名）→ {https: bool}（AC-11.0 前端置灰依据）
+- `POST /api/push/webpush/subscribe` {endpoint, keys:{p256dh, auth}} → {ok}
+- `POST /api/push/webpush/unsubscribe` {endpoint} → {ok}
+- `POST /api/push/webpush/test` → {ok}（向当前设备发测试，AC-10.2）
+- `PUT /api/channels/telegram` {botToken, chatId} → {ok}（密文存储）
+- `POST /api/channels/telegram/test` → {ok}
+- `PUT /api/channels/feishu` {enabled, appId, appSecret} → {ok, connected}
+- `POST /api/channels/feishu/test` → {ok, message}
 
-## 错误格式
-`{error: {code, message}}`，HTTP 4xx/5xx。未认证访问受保护端点 → 401。
+### 推送规则（矩阵化）
+- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu}, chargingStart:{...}, chargingDone:{...}, weekly:{...}, monthly:{...}}}
+- `PUT /api/push-rules` {matrix} → {ok}
+  - v1 为每事件单一 bool → v2 为 5 事件 × 3 渠道矩阵（P6 分组3）；weeklyReportDay 并入 settings
+
+### 报告（v2 新增）
+- `GET /api/reports` → {items:[{id, type:"weekly"|"monthly", periodLabel, distanceKm, totalCost, saved}]}
+- `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）
+- `POST /api/reports/generate` {type} → {ok}（手动触发，调试用）
+
+## 7. 系统（v1 演进）
+
+- `GET /api/system/status` → {teslamate:{dbOk, **latencyMs**, lastDriveAt, driveCount, **readonlyVerified**}, mqtt:{...}（**仅已配置时返回**，AC-5.1）, uptime, version}
+- `GET /api/system/events?limit=100` → 事件日志（含推送时效埋点 **deliveryMs**，AC-12.3 验证依据）
+- `GET /api/system/health-lite`（匿名）→ {dbOk}（失联横幅轮询，无需登录态）
+- WebSocket `/ws` → 实时事件 {type:"tripEnd"|"chargingStart"|"chargingDone", payload}（可选，前端轮询兜底）
+
+## 8. 计价规则（核心，v1.3 评审后定稿）
+
+1. 充电会话费用优先级（**四层回退**）：① AhaTesla 本地手动录入（SQLite `charge_cost_overrides`）→ ② `charging_processes.cost` 非空 → ③ geofence 单价（支持**分时电价**：谷段时段+两档价，按充电起止跨时段比例计价）→ ④ 默认价（变更仅对未来生效）
+2. **FIFO 批次入池公式（含充损闭合）**：批次可用电量 = `charge_energy_added`（电池净吸收）；批次折算单价 = 实付总额 ÷ `charge_energy_added`。批次耗尽时分摊总和 ≡ 实付总额（账本闭合）；行程耗电 = `(start_rated_range_km − end_rated_range_km) × cars.efficiency`（ideal 回退同式）
+3. **驻车损耗（AC-7.5）**：事件驱动——每次新行程/充电开始时对比上一事件结束的表显电量，差值 >0.5 kWh 立即冲抵 FIFO（含负损耗过滤 BMS 温漂）
+4. **修正窗口（AC-7.6）**：推送小结=不可变快照；7 天内补录费用（PUT /charging/:id/cost，存 charge_cost_overrides）触发异步重算，UI 标注校准
+5. **历史重算**：`POST /api/ledger/recalculate` {from?, to?|all} → {jobId}（P6【重算历史账本】，进度可查）
+6. **冷启动水线**：首次接入数据源时记录最大 drives.id / charging_processes.id 为通知游标，水线前历史数据仅静默建档不推送（AC-12.1b）
+7. 地点名称一律 JOIN TeslaMate `addresses` 表（county/city/road），**严禁调用外部逆地理编码 API**
+
+## 9. BREAKING 变更清单（v1 → v2）
+
+| # | 变更 | v1 | v2 | 前端同步点 |
+|---|---|---|---|---|
+| B1 | 金额字段去 CNY | costCny / totalCostCny / fuelCostCny 等 | cost / totalCost / fuelCost | client.ts + 全部展示组件 |
+| B2 | 初始化方式 | 日志打印初始密码 | /setup 首注册管理员（AC-1.4） | LoginPage → 新 SetupPage |
+| B3 | 会话模型 | 单 JWT 24h | Access 24h + Refresh 30d | client.ts 401→refresh→重试 |
+| B4 | 推送规则 | 每事件单 bool | 5×3 矩阵 | PushPage 矩阵 UI |
+| B5 | 数据源配置 | .env DB_URL | /api/setup/datasource（SQLite 加密） | SetupPage Step2 |
+| B6 | 充电详情 | 无单条端点 | GET /charging/:id（功率曲线/效率） | ChargingPage 详情模态 |
+| B7 | 默认价字段名 | defaultRateCnyPerKwh | defaultRate | PricingSettings |
+| B8 | MQTT 状态 | 恒定返回 | 仅配置时返回 | StatusPage 条件渲染 |
+
+## 10. 实现状态标注
+
+契约先行：本文件描述 v2 目标态。各端点实现落地在 M1/M2 任务卡（Kanban t_234e1abd 子任务），实现完成前 server 现状仍为 v1 行为。
