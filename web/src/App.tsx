@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import LoginPage from './pages/LoginPage'
+import SetupPage from './pages/SetupPage'
 import DashboardPage from './pages/DashboardPage'
 import TripsPage from './pages/TripsPage'
 import TripDetailPage from './pages/TripDetailPage'
@@ -23,6 +24,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/setup" element={<SetupPage />} />
         <Route element={<AppLayout />}>
           <Route path="/" element={<Protected><DashboardPage /></Protected>} />
           <Route path="/trips" element={<Protected><TripsPage /></Protected>} />

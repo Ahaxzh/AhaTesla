@@ -1,5 +1,6 @@
 /** 统一 API 客户端：credentials include、401 跳登录、错误 toast */
 import type {
+  CarDiscoveryResult,
   ChannelsData,
   Charge,
   ChargingStats,
@@ -8,8 +9,10 @@ import type {
   PricingData,
   PricingHistoryEntry,
   PushRules,
+  SetupStatus,
   SystemEvent,
   SystemStatus,
+  TestConnectionResult,
   Trip,
   TripDetail,
   User,
@@ -75,6 +78,17 @@ export const api = {
   me: () => get<User>('/api/auth/me'),
   changePassword: (oldPassword: string, newPassword: string) =>
     post<{ ok: boolean }>('/api/auth/change-password', { oldPassword, newPassword }),
+
+  // ---- Setup wizard（契约 v2 §1）----
+  setupStatus: () => get<SetupStatus>('/api/setup/status'),
+  setupRegisterAdmin: (username: string, password: string) =>
+    post<{ ok: boolean; user: { username: string; role: string } }>('/api/setup/admin', { username, password }),
+  setupTestConnection: (payload: { host: string; port: number; database: string; user: string; password: string }) =>
+    post<TestConnectionResult>('/api/setup/test-connection', payload),
+  setupSaveDatasource: (payload: { mode: 'connect' | 'fullstack'; host?: string; port?: number; database?: string; user?: string; password?: string; carId?: number }) =>
+    post<{ ok: boolean }>('/api/setup/datasource', payload),
+  setupCarDiscovery: () => get<CarDiscoveryResult>('/api/setup/car-discovery'),
+  setupSelectCar: (carId: number) => post<{ ok: boolean; carId: number }>('/api/setup/select-car', { carId }),
 
   dashboard: () => get<DashboardData>('/api/dashboard'),
 

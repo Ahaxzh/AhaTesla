@@ -5,6 +5,45 @@ export interface User {
   initialized: boolean
 }
 
+// ---- /setup 初始化向导（契约 v2 §1）----
+
+export type SetupState = 'uninitialized' | 'setup-locked' | 'ready'
+
+export interface SetupStatus {
+  state: SetupState
+  https: boolean
+  carFound: boolean
+}
+
+export type SetupCheckName = 'reachability' | 'auth' | 'readonly' | 'cars'
+
+export interface SetupCheckStep {
+  name: SetupCheckName
+  ok: boolean
+  detail: string
+}
+
+export interface DiscoveredCar {
+  id: number
+  name: string | null
+  model: string | null
+  lastDriveAt?: string | null
+}
+
+export interface TestConnectionResult {
+  ok: boolean
+  steps: SetupCheckStep[]
+  cars: DiscoveredCar[]
+}
+
+export interface CarDiscoveryResult {
+  found: boolean
+  cars: DiscoveredCar[]
+  car: DiscoveredCar | null
+  suggestedCarId: number | null
+  error?: string
+}
+
 export interface Trip {
   id: number
   startAt: string
@@ -121,7 +160,8 @@ export interface PushRules {
 export interface SystemStatus {
   teslamate: {
     dbOk: boolean
-    mqttOk: boolean
+    /** MQTT 为可选增强（AC-5.1/§7.1）：仅在已配置时由后端返回；未配置时无此字段 */
+    mqtt?: { ok: boolean }
     lastDriveAt: string | null
     driveCount: number
   }

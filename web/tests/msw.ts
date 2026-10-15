@@ -79,7 +79,7 @@ export const mockChannels: ChannelsData = {
 }
 
 export const mockSystemStatus: SystemStatus = {
-  teslamate: { dbOk: true, mqttOk: true, lastDriveAt: '2026-10-13T20:00:00+08:00', driveCount: 42 },
+  teslamate: { dbOk: true, mqtt: { ok: true }, lastDriveAt: '2026-10-13T20:00:00+08:00', driveCount: 42 },
   uptime: 86400 * 3 + 3600,
   version: '0.1.0',
 }

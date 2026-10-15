@@ -30,7 +30,7 @@ describe('SystemPage', () => {
     server.use(
       http.get('/api/system/status', () =>
         HttpResponse.json({
-          teslamate: { dbOk: false, mqttOk: false, lastDriveAt: null, driveCount: 0 },
+          teslamate: { dbOk: false, mqtt: { ok: false }, lastDriveAt: null, driveCount: 0 },
           uptime: 60,
           version: '0.1.0',
         }),
@@ -38,6 +38,25 @@ describe('SystemPage', () => {
     )
     renderWithProviders(<SystemPage />)
     expect(await screen.findByText('数据库断开')).toBeInTheDocument()
-    expect(screen.getByText('MQTT 断开')).toBeInTheDocument()
+    // 首帧 status 未加载时 dbOk 默认 false 已显示"数据库断开"，MQTT 文案要等
+    // 查询返回才渲染——必须用 findByText 消除竞态。
+    expect(await screen.findByText('MQTT 断开')).toBeInTheDocument()
+  })
+
+  it('未配置 MQTT 时不显示 MQTT 连接项（AC-5.1 可选增强）', async () => {
+    server.use(
+      http.get('/api/system/status', () =>
+        HttpResponse.json({
+          teslamate: { dbOk: true, lastDriveAt: null, driveCount: 0 },
+          uptime: 60,
+          version: '0.1.0',
+        }),
+      ),
+    )
+    renderWithProviders(<SystemPage />)
+    expect(await screen.findByText('PostgreSQL 正常')).toBeInTheDocument()
+    expect(screen.getByText('未配置（轮询基线）')).toBeInTheDocument()
+    expect(screen.queryByText('MQTT 正常')).not.toBeInTheDocument()
+    expect(screen.queryByText('MQTT 断开')).not.toBeInTheDocument()
   })
 })

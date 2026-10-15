@@ -8,12 +8,13 @@ Type=simple
 User=ahaxzh
 Group=ahaxzh
 WorkingDirectory=/home/ahaxzh/Projects/GitHub/AhaTesla/server
-ExecStart=/home/ahaxzh/.nvm/versions/node/v24.21.0/bin/node src/index.mjs
+ExecStart=/home/ahaxzh/.nvm/versions/node/v24.21.0/bin/node --env-file=.env src/index.mjs
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
 Environment=PORT=18500
-# DB/MQTT 默认值见 server/src/config，可在此覆盖：
+# DB_URL / MQTT_URL / PORT 由 --env-file=.env 从 WorkingDirectory 下的 server/.env 加载。
+# process env 优先于 .env（Node --env-file 不覆盖已存在的环境变量），故此处 Environment= 仍可覆盖 .env：
 # Environment=DB_URL=postgres://teslamate@127.0.0.1:15432/teslamate
 # Environment=MQTT_URL=mqtt://127.0.0.1:11883
 

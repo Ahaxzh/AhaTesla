@@ -65,7 +65,12 @@ export default function SystemPage() {
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
             <Radio className="h-3.5 w-3.5" /> Mosquitto MQTT
           </div>
-          <StatusDot ok={status?.teslamate.mqttOk ?? false} label={status?.teslamate.mqttOk ? 'MQTT 正常' : 'MQTT 断开'} />
+          {/* AC-5.1/§7.1：MQTT 为可选增强，仅在已配置（后端返回 teslamate.mqtt）时显示 */}
+          {status?.teslamate.mqtt ? (
+            <StatusDot ok={status.teslamate.mqtt.ok} label={status.teslamate.mqtt.ok ? 'MQTT 正常' : 'MQTT 断开'} />
+          ) : (
+            <div className="text-sm text-slate-500">未配置（轮询基线）</div>
+          )}
         </div>
         <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
