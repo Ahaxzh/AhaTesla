@@ -128,4 +128,23 @@
 
 ## 10. 实现状态标注
 
-契约先行：本文件描述 v2 目标态。各端点实现落地在 M1/M2 任务卡（Kanban t_234e1abd 子任务），实现完成前 server 现状仍为 v1 行为。
+**v2 全部端点已实现（2026-10-15，M1+M2 收官）**。逐节状态：
+
+| 节 | 端点组 | 状态 | 备注 |
+|---|---|---|---|
+| 1 | /api/setup/*（status/admin/test-connection/datasource/car-discovery） | ✅ 已实现 | 四级校验含 has_table_privilege 元数据探测（M1） |
+| 1 | GET/PUT /api/settings | ✅ 已实现 | GA-36；fuelBaseline 油车基准可配置（M2） |
+| 2 | /api/auth/*（login/refresh/logout/me/change-password/sessions/revoke-all） | ✅ 已实现 | 双 Token AC-3.2 + 连续 5 败锁 15 分钟 AC-3.3（M2） |
+| 3 | GET /api/dashboard | ✅ 已实现 | car 增 state/stateSince/odometerKm/positionAt |
+| 3 | GET /api/dashboard/timeline · /api/dashboard/heatmap | ✅ 已实现 | P2 模块2/4（M2）；前端 Timeline24h/HeatmapCalendar |
+| 3 | GET /api/trips · /api/trips/:id | ✅ 已实现 | 详情含 FIFO 批次/能效/环境/速度轨迹（M2，speed 字段随 route 点返回） |
+| 4 | GET /api/charging（month 筛选）· /api/charging/:id · PUT /:id/cost | ✅ 已实现 | powerCurve 峰值打点 + 桩端效率 + costSource 三态（M2） |
+| 5 | GET/PUT /api/pricing（defaultRate/locations TOU 双模）· /api/pricing/history | ✅ 已实现 | kv pricing:location-tou:<id>（M1 承接） |
+| 5 | POST /api/ledger/summary · /api/ledger/recalculate(+jobId) | ✅ 已实现 | 月度账本 + 7 天补录窗口 + 进度（M1） |
+| 6 | 渠道配置（webpush/telegram/feishu）+ /api/push/env | ✅ 已实现 | 三渠道平权 AC-10.1；Telegram/飞书密文 AES-GCM 落库（M2） |
+| 6 | GET/PUT /api/push-rules（5×3 矩阵） | ✅ 已实现 | B4 矩阵替换 v1 单 bool（M2） |
+| 6 | /api/reports（列表/详情/generate） | ✅ 已实现 | 不可变快照 report_snapshots；周一/月初 08:00 定时（M2） |
+| 7 | /api/system/status（latencyMs/readonlyVerified）· /events（deliveryMs）· /health-lite | ✅ 已实现 | GA-31/32；health-lite 匿名供失联横幅轮询（M2） |
+| 7 | WebSocket /ws | ⏸ 未实现 | 契约标注"可选，前端轮询兜底"；轮询路径已全覆盖，按需后补 |
+
+计价规则（§8）七条全部落地并有单测覆盖（pricing-ledger 测试组）。BREAKING B1~B8 前端已全部同步。

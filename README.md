@@ -11,30 +11,54 @@
 ---
 
 ## 功能
-- 🚗 **行程记录**：里程、能耗、路线图、每公里成本（数据源：TeslaMate PostgreSQL，只读）
-- ⚡ **充电账本**：按充电站单价（geofences）自动计费，支持批次分摊算法
-- 💰 **月度账单**：里程 / 电费 / 油车费用对比
-- 🔔 **飞书推送**：行程结束、充电开始/结束、周报月报（Card 2.0）
+- 🚗 **行程记录**：里程、能耗、路线图（**速度着色 + 悬停速度提示**）、FIFO 批次扣减明细、油车对比（数据源：TeslaMate PostgreSQL，只读）
+- ⚡ **充电账本**：按充电站单价（geofences，支持分时电价 TOU）自动计费，批次分摊算法，功率曲线 + 桩端效率，实付补录
+- 💰 **月度账单**：里程 / 电费 / 油车费用对比、驻车哨兵损耗、含行驶/驻车费用构成
+- 📊 **仪表盘**：24h 状态时间轴、用车热力图、状态卡（行驶中/充电中/哨兵/睡眠语义化）
+- 📄 **周报/月报**：定时生成 + 归档 + 推送（不可变快照）
+- 🔔 **多渠道推送**：Web Push / Telegram / 飞书三渠道平权，5 事件 × 3 渠道矩阵
 - 📱 **Web / PWA**：iPhone 添加到主屏幕，深色科技风 UI，移动优先
-- 🔐 **登录认证**：单用户 JWT + httpOnly cookie，scrypt 密码哈希
+- 🔐 **登录认证**：单用户 JWT 双 Token（Access 24h + Refresh 30d）+ httpOnly cookie，scrypt 密码哈希，失败锁定
 
 ## 快速开始
+
+### 方式 A · connect 版（已有 TeslaMate，推荐）
 
 ```bash
 # 1. 数据桥接（挂入现有 teslamate_default 网络，零侵入）
 docker compose -f deploy/bridge-compose.yml up -d
 
-# 2. 后端
-cd server && npm ci && cp .env.example .env  # 填 DB_URL
+# 2. 在 TeslaMate 库创建只读账号（幂等）
+docker compose -f <你的teslamate>/docker-compose.yml exec database \
+  psql -U teslamate -d teslamate < deploy/SQL/create-ro-user.sql
+
+# 3. 后端
+cd server && npm ci && cp .env.example .env  # 填 DB_URL（只读账号）
 npm test && npm start                        # :18500
 
-# 3. 前端
+# 4. 前端
 cd web && npm ci && npm run dev              # :5173 → proxy /api
 # 生产：npm run build 后由 server 托管 dist
 
-# 4. iPhone PWA
+# 5. iPhone PWA
 # .4 NPM 反代 https://tesla.home.xxx → 192.168.31.3:18500
 # Safari → 分享 → 添加到主屏幕（见 deploy/NPM-SETUP.md）
+```
+
+容器化（仅 AhaTesla 本体）：
+
+```bash
+cp deploy/.env.example.connect server/.env   # 编辑（host 用 host.docker.internal）
+docker compose -f deploy/connect-compose.yml up -d --build
+```
+
+### 方式 B · 全栈版（新主机，TeslaMate+AhaTesla 一体）
+
+```bash
+cp deploy/.env.example.fullstack .env        # 设置 TM_DB_PASSWORD / TM_ENCRYPTION_KEY
+docker compose -f deploy/fullstack-compose.yml --profile fullstack up -d
+# init-ro 服务自动创建只读账号；TeslaMate 首次配置后，浏览器打开 http://127.0.0.1:18500
+# 进入 /setup 向导完成初始化（首注册即管理员）
 ```
 
 ## 架构

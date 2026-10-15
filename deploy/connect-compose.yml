@@ -1,0 +1,32 @@
+# AhaTesla connect 发行版（M3）：连接已有 TeslaMate（不动现有栈）
+# 与 bridge-compose.yml 搭配：桥接容器把 TeslaMate 内网 5432/1883 转发到宿主 127.0.0.1。
+# 本 compose 只跑 AhaTesla 应用本体。
+#
+# 用法：
+#   1) docker compose -f deploy/bridge-compose.yml up -d      # 桥接（已跑过可跳过）
+#   2) cp .env.example.connect .env && 编辑                    # 填 .env（含只读账号）
+#   3) docker compose -f deploy/connect-compose.yml up -d --build
+name: ahatesla
+
+services:
+  ahatesla:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: ahatesla-app
+    restart: unless-stopped
+    env_file:
+      - ../server/.env        # DB_URL/MQTT_URL/PORT 等；host 用 host.docker.internal 或宿主 IP
+    environment:
+      AHA_DATA_DIR: /data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ahatesla-data:/data
+    ports:
+      - "127.0.0.1:18500:18500"   # 仅本机；对外走 NPM HTTPS 反代
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  ahatesla-data:
