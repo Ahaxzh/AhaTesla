@@ -52,7 +52,8 @@ export default function DashboardPage() {
   })
 
   const month = data?.monthStats
-  const saved = month && data ? data.fuelComparison.fuelCostCny - month.costCny : 0
+  // 省钱数：油车对比 − 账本口径电费（FIFO 批次分摊，与电费卡显示一致；v2.2 修复与简单计价的口径混用）
+  const saved = month && data ? data.fuelComparison.fuelCostCny - (ledger?.totalCost ?? month.costCny) : 0
   const car = data?.car
   const pill = statePill(car?.state ?? '')
 

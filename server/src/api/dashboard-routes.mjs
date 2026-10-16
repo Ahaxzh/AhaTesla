@@ -3,7 +3,7 @@ import {
   getCarSnapshot, getDrivingState, getSystemStats, getMonthStats, getWeekStats,
   listCharging, listChargingForStats, resolveCarId
 } from "../core/teslamate-queries.mjs";
-import { listDrivesSql } from "../core/teslamate-queries.mjs";
+import { listDrivesSql, monthStartIso } from "../core/teslamate-queries.mjs";
 import { computeTripViews } from "./trips-routes.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
@@ -50,7 +50,8 @@ export function createDashboardRoutes({ db, state }) {
       }
       const [driving, monthStats, weekStats] = await Promise.all([
         getDrivingState(db, { carId: boundCarId }),
-        getMonthStats(db, new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()),
+        // 「本月」= 自然月（北京时间月初 00:00），与账本卡口径一致（v2.2 修复：原为 30 天滚动窗口导致里程/电费/省钱数互相对不上）
+        getMonthStats(db, monthStartIso()),
         getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
       ]);
       const { sql, params } = listDrivesSql({});
@@ -63,7 +64,7 @@ export function createDashboardRoutes({ db, state }) {
 
       // energy + cost for month/week from drive views over the same windows
       const { sql: monthSql, params: monthParams } = listDrivesSql({
-        from: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
+        from: monthStartIso()
       });
       const monthDrives = await db.query(monthSql, [...monthParams, 200, 0]);
       const monthViews = await computeTripViews(db, monthDrives, {

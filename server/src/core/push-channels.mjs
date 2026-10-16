@@ -263,13 +263,19 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
   };
 
   function eventTitle(event) {
+    // 北京时间戳（推送时间≠事件时间，标注发送时刻避免“昨晚信息今早收到”困惑）
+    const now = new Date();
+    const ts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(now).replace(/\//g, "-");
     switch (event.type) {
-      case "trip_end": return "行程结束";
-      case "charging_start": return "开始充电";
-      case "charging_done": return "充电完成";
+      case "trip_end": return `行程结束 · ${ts}`;
+      case "charging_start": return `开始充电 · ${ts}`;
+      case "charging_done": return `充电完成 · ${ts}`;
       case "weekly": return "每周用车周报";
       case "monthly": return "每月账本月报";
-      default: return "AhaTesla 通知";
+      default: return `AhaTesla 通知 · ${ts}`;
     }
   }
 

@@ -132,6 +132,22 @@ export async function getMonthStats(db, since) {
   `);
 }
 
+/** 自然月起点（北京时间月初 00:00），Dashboard「本月」统计口径 */
+export function monthStartIso(now = new Date(), tz = "Asia/Shanghai") {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    }).format(now);
+    // en-CA → YYYY-MM-DD；截年月拼 01 号，北京时间月初 00:00
+    return new Date(`${parts.slice(0, 7)}-01T00:00:00+08:00`).toISOString();
+  } catch {
+    const d = new Date(now);
+    d.setUTCDate(1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.toISOString();
+  }
+}
+
 export async function getWeekStats(db, since) {
   return db.queryOne(`
     SELECT COALESCE(sum(d.distance), 0) AS distance_km

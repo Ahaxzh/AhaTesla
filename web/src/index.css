@@ -3,6 +3,16 @@
 @tailwind utilities;
 
 @layer base {
+  /* 去掉数字控件右侧原生上下箭头（深色 UI 中显示为白色块） */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
   html {
     -webkit-tap-highlight-color: transparent;
   }
