@@ -36,7 +36,7 @@ export async function getCarSnapshot(db, { carId = null } = {}) {
       SELECT p.battery_level, p.ideal_battery_range_km, p.odometer, p.date
       FROM positions p
       WHERE p.car_id = c.id
-      ORDER BY p.date DESC, p.id DESC
+      ORDER BY p.id DESC
       LIMIT 1
     ) pos ON true
     ORDER BY c.display_priority ASC NULLS LAST, c.id ASC
@@ -187,15 +187,20 @@ export function listDrivesSql({ from, to } = {}) {
              c.efficiency,
              greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
              greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
-             (SELECT p.latitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date ASC, p.id ASC LIMIT 1) AS start_lat,
-             (SELECT p.longitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date ASC, p.id ASC LIMIT 1) AS start_lng,
-             (SELECT p.latitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1) AS end_lat,
-             (SELECT p.longitude::float8 FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1) AS end_lng,
-             (SELECT p.odometer FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1) AS end_odometer,
-             (SELECT count(*)::int FROM positions p WHERE p.drive_id = d.id) AS position_count
+             ep.start_lat, ep.start_lng, ep2.end_lat, ep2.end_lng, ep2.end_odometer, ep2.position_count
       FROM matched m
       JOIN drives d ON d.id = m.id
       JOIN cars c ON c.id = d.car_id
+      LEFT JOIN LATERAL (
+        SELECT p.latitude::float8 AS start_lat, p.longitude::float8 AS start_lng
+        FROM positions p WHERE p.drive_id = d.id ORDER BY p.date ASC, p.id ASC LIMIT 1
+      ) ep ON true
+      LEFT JOIN LATERAL (
+        SELECT p.latitude::float8 AS end_lat, p.longitude::float8 AS end_lng,
+               p.odometer AS end_odometer,
+               (SELECT count(*)::int FROM positions p2 WHERE p2.drive_id = d.id) AS position_count
+        FROM positions p WHERE p.drive_id = d.id ORDER BY p.date DESC, p.id DESC LIMIT 1
+      ) ep2 ON true
       ORDER BY d.end_date DESC
     `,
     params: []
