@@ -133,8 +133,8 @@ export const api = {
     return get<Paged<Charge>>(`/api/charging?${q.toString()}`)
   },
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
-  chargingStats: (period: 'month' | 'year' | 'all' = 'month') =>
-    get<ChargingStats>(`/api/charging/stats?period=${period}`),
+  chargingStats: (period: 'month' | 'year' | 'all' = 'month', month?: string) =>
+    get<ChargingStats>(`/api/charging/stats?period=${period}${month ? `&month=${month}` : ''}`),
   putChargeCost: (id: number, amount: number) =>
     put<{ ok: boolean }>(`/api/charging/${id}/cost`, { amount, source: 'manual' }),
 

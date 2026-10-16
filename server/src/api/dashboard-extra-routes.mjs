@@ -97,7 +97,7 @@ export function createDashboardExtraRoutes({ db, state, healthRef }) {
 
   /** 最近 90 天按本地日期聚合里程（热力图）。 */
   async function heatmap(ctx) {
-    const days = Math.max(7, Math.min(120, Number(ctx.query.days) || 90));
+    const days = Math.max(7, Math.min(400, Number(ctx.query.days) || 90));
     const since = new Date(Date.now() - days * DAY_MS).toISOString();
     const rows = await db.query(`
       SELECT d.end_date AS end_at, d.distance

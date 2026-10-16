@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
@@ -43,7 +44,8 @@ function statePill(state: string): { label: string; cls: string } {
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard })
   const { data: timeline } = useQuery({ queryKey: ['timeline'], queryFn: api.timeline, retry: false })
-  const { data: heatmap } = useQuery({ queryKey: ['heatmap'], queryFn: () => api.heatmap(90), retry: false })
+  const [heatmapDays, setHeatmapDays] = useState(90)
+  const { data: heatmap } = useQuery({ queryKey: ['heatmap', heatmapDays], queryFn: () => api.heatmap(heatmapDays), retry: false })
   // P2 模块3 小字：总电费 = 行驶分摊 + 驻车/哨兵（POST /api/ledger/summary）
   const { data: ledger } = useQuery({
     queryKey: ['ledger-summary'],
@@ -126,7 +128,7 @@ export default function DashboardPage() {
           {timeline && <Timeline24h data={timeline} />}
 
           {/* P2 模块4：用车日历热力图 */}
-          {heatmap && <HeatmapCalendar data={heatmap} />}
+          {heatmap && <HeatmapCalendar data={heatmap} onDaysChange={setHeatmapDays} />}
 
           {/* P2 模块5：最近活动流（行程/充电混合） */}
           <div className="grid gap-4 lg:grid-cols-2">

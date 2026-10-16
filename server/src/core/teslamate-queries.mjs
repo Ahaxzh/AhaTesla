@@ -341,7 +341,8 @@ export async function getChargesCurve(db, chargingProcessId) {
   `, [Number(chargingProcessId)]);
 }
 
-export async function listChargingForStats(db, { sinceIso = null } = {}) {
+export async function listChargingForStats(db, { sinceIso = null, untilIso = null } = {}) {
+  const untilFilter = untilIso ? `AND cp.end_date < (${expr(untilIso, "invalid stats until")})` : "";
   return db.query(`
     SELECT cp.id, cp.end_date, cp.charge_energy_added, cp.cost, cp.duration_min,
            cp.geofence_id, cp.address_id,
@@ -350,7 +351,7 @@ export async function listChargingForStats(db, { sinceIso = null } = {}) {
     FROM charging_processes cp
     LEFT JOIN geofences g ON g.id = cp.geofence_id
     LEFT JOIN addresses a ON a.id = cp.address_id
-    WHERE cp.end_date IS NOT NULL ${sinceIso ? `AND cp.end_date >= (${expr(sinceIso, "invalid stats since")})` : ""}
+    WHERE cp.end_date IS NOT NULL ${sinceIso ? `AND cp.end_date >= (${expr(sinceIso, "invalid stats since")})` : ""} ${untilFilter}
     ORDER BY cp.end_date ASC
   `);
 }

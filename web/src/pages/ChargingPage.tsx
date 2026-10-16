@@ -72,6 +72,10 @@ export default function ChargingPage() {
   const [costInput, setCostInput] = useState('')
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const currentMonth = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }
 
   const listParams = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, month: month || undefined }
   const { data, isLoading } = useQuery({
@@ -80,8 +84,8 @@ export default function ChargingPage() {
     placeholderData: keepPreviousData,
   })
   const { data: stats } = useQuery({
-    queryKey: ['charging-stats'],
-    queryFn: () => api.chargingStats('month'),
+    queryKey: ['charging-stats', month],
+    queryFn: () => api.chargingStats('month', month || currentMonth()),
   })
   const { data: detail } = useQuery({
     queryKey: ['charging-detail', detailId],

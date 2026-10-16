@@ -1,14 +1,12 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  Bell,
   BatteryCharging,
   Gauge,
+  KeyRound,
   LogOut,
   Route,
   Settings,
-  Tag,
-  Activity,
   FileBarChart,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -26,13 +24,10 @@ export const NAV_ITEMS = [
   { to: '/settings', label: '设置', icon: Settings, testid: 'nav-settings' },
 ]
 
-/** 桌面侧栏全部导航（含次级入口：报告/电价/推送/系统） */
+/** 桌面侧栏主导航（电价/推送/系统已并入设置页分区） */
 export const SIDEBAR_ITEMS = [
   ...NAV_ITEMS,
   { to: '/reports', label: '报告', icon: FileBarChart, testid: 'nav-reports' },
-  { to: '/pricing', label: '电价', icon: Tag, testid: 'nav-pricing' },
-  { to: '/push', label: '推送', icon: Bell, testid: 'nav-push' },
-  { to: '/system', label: '系统', icon: Activity, testid: 'nav-system' },
 ]
 
 function NavItem({ to, label, icon: Icon, testid, onClick }: {
@@ -111,8 +106,98 @@ function SidebarCarCard() {
   )
 }
 
-export function AppLayout() {
+/** 左下角头像菜单：用户信息 / 修改密码（跳设置） / 退出登录 */
+function UserMenu() {
   const { user, logout } = useAuth()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [open])
+
+  const handleLogout = async () => {
+    setOpen(false)
+    await logout()
+    navigate('/login', { replace: true })
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      {/* 头像按钮 */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        data-testid="user-menu-button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 transition hover:bg-white/[0.05]"
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tesla/15 text-sm font-semibold text-tesla">
+          {user?.username?.[0]?.toUpperCase() ?? '?'}
+        </div>
+        <div className="min-w-0 flex-1 truncate text-left text-sm text-slate-300">{user?.username ?? '未登录'}</div>
+        <svg
+          viewBox="0 0 24 24"
+          className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      {/* 下拉菜单 */}
+      {open && (
+        <div
+          role="menu"
+          data-testid="user-menu"
+          className="absolute bottom-full left-0 right-0 z-40 mb-2 overflow-hidden rounded-xl border border-white/[0.08] bg-base-800/95 shadow-[0_8px_24px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+        >
+          <div className="border-b border-white/[0.06] px-3.5 py-2.5">
+            <div className="truncate text-sm font-medium text-slate-200">{user?.username}</div>
+            <div className="mt-0.5 text-[10px] text-slate-500">管理员 · 单用户模式</div>
+          </div>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false)
+              navigate('/settings#settings-security')
+            }}
+            data-testid="user-menu-password"
+            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+          >
+            <KeyRound className="h-4 w-4 text-slate-500" />
+            修改密码
+          </button>
+          <button
+            role="menuitem"
+            onClick={handleLogout}
+            data-testid="user-menu-logout"
+            className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+          >
+            <LogOut className="h-4 w-4 text-slate-500" />
+            退出登录
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function AppLayout() {
+  useAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -124,11 +209,6 @@ export function AppLayout() {
       error: (err) => toast(err.message, 'error'),
     })
   }, [navigate, toast])
-
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login', { replace: true })
-  }
 
   return (
     <div className="min-h-dvh bg-base-950">
@@ -150,20 +230,7 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="border-t border-white/[0.06] p-3">
-          <div className="mb-2 flex items-center gap-2.5 px-3 py-1">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-tesla/15 text-sm font-semibold text-tesla">
-              {user?.username?.[0]?.toUpperCase() ?? '?'}
-            </div>
-            <div className="min-w-0 flex-1 truncate text-sm text-slate-300">{user?.username ?? '未登录'}</div>
-          </div>
-          <button
-            onClick={handleLogout}
-            data-testid="logout-button"
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-400 transition hover:bg-white/[0.05] hover:text-slate-200"
-          >
-            <LogOut className="h-[18px] w-[18px]" />
-            退出登录
-          </button>
+          <UserMenu />
         </div>
       </aside>
 

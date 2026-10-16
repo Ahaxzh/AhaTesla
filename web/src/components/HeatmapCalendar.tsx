@@ -83,9 +83,10 @@ function WeekdayBars({ daysData }: { daysData: HeatmapData['daysData'] }) {
   )
 }
 
-export function HeatmapCalendar({ data }: { data: HeatmapData }) {
+export function HeatmapCalendar({ data, onDaysChange }: { data: HeatmapData; onDaysChange?: (d: number) => void }) {
   const [hoverCol, setHoverCol] = useState<{ col: number; date: string; km: number } | null>(null)
   const today = todayStr()
+  const isYear = data.days >= 300
 
   // 按周分列（周一行首）+ 月份标签位置
   const cells = data.daysData
@@ -133,7 +134,24 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
     <section className="glass-card p-5" data-testid="heatmap-card">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-medium text-slate-200">用车日历</h2>
-        <span className="text-[11px] text-slate-500">最近 {data.days} 天 · 按日里程</span>
+        {/* 时间范围切换（近3月 / 近一年） */}
+        <div className="flex items-center gap-1 rounded-lg bg-white/[0.04] p-0.5">
+          {[
+            { d: 90, label: '近3月' },
+            { d: 365, label: '近一年' },
+          ].map(({ d, label }) => (
+            <button
+              key={d}
+              onClick={() => onDaysChange?.(d)}
+              className={`rounded-md px-2 py-0.5 text-[10px] transition ${
+                (d === 365) === isYear ? 'bg-white/[0.08] font-medium text-slate-100' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              data-testid={`heatmap-range-${d}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">

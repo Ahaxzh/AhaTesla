@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AppLayout, NAV_ITEMS, SIDEBAR_ITEMS } from '@/layouts/AppLayout'
 import { renderWithProviders } from './test-utils'
 import { server } from './msw'
@@ -15,7 +16,7 @@ afterAll(() => server.close())
  * - TabBar 容器 lg:hidden（移动显示、桌面隐藏）
  */
 describe('AppLayout 响应式导航', () => {
-  it('桌面侧边栏使用 hidden lg:flex 策略，含全部 8 个导航入口与登出', async () => {
+  it('桌面侧边栏使用 hidden lg:flex 策略，含 5 个主导航入口与头像菜单（v2.2 电价/推送/系统并入设置）', async () => {
     renderWithProviders(<AppLayout />)
     const sidebar = await screen.findByTestId('desktop-sidebar')
     expect(sidebar.className).toContain('hidden')
@@ -23,7 +24,17 @@ describe('AppLayout 响应式导航', () => {
     for (const item of SIDEBAR_ITEMS) {
       expect(screen.getByTestId(item.testid)).toBeInTheDocument()
     }
-    expect(screen.getByTestId('logout-button')).toBeInTheDocument()
+    // 旧次级入口不再出现在侧栏
+    expect(screen.queryByTestId('nav-pricing')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('nav-push')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('nav-system')).not.toBeInTheDocument()
+    // 头像菜单（点击展开：用户信息/修改密码/退出登录）
+    expect(screen.queryByTestId('user-menu')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('user-menu-button'))
+    const menu = screen.getByTestId('user-menu')
+    expect(menu).toBeInTheDocument()
+    expect(screen.getByTestId('user-menu-password')).toBeInTheDocument()
+    expect(screen.getByTestId('user-menu-logout')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-car')).toBeInTheDocument()
   })
 
@@ -38,9 +49,9 @@ describe('AppLayout 响应式导航', () => {
     }
   })
 
-  it('TabBar 为 4 项（概览/行程/充电/设置，PRD §6.1），次级入口只在桌面侧栏', () => {
+  it('TabBar 为 4 项（概览/行程/充电/设置，PRD §6.1），侧栏 5 项（v2.2 电价/推送/系统并入设置）', () => {
     expect(NAV_ITEMS.map((n) => n.to)).toEqual(['/', '/trips', '/charging', '/settings'])
-    expect(SIDEBAR_ITEMS.map((n) => n.to)).toEqual(['/', '/trips', '/charging', '/settings', '/reports', '/pricing', '/push', '/system'])
+    expect(SIDEBAR_ITEMS.map((n) => n.to)).toEqual(['/', '/trips', '/charging', '/settings', '/reports'])
   })
 
   it('移动 TabBar 网格为 4 列', async () => {

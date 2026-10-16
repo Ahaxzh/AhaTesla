@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
+  Activity,
   BellRing,
   Calculator,
   Database,
@@ -11,12 +12,14 @@ import {
   Save,
   Settings as SettingsIcon,
   ShieldCheck,
-
+  Tag,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/api/client'
 import { useToast } from '@/components/Toast'
 import { Toggle } from '@/components/Toggle'
+import { PricingSection } from '@/components/settings/PricingSection'
+import { SystemSection } from '@/components/settings/SystemSection'
 import type { PushEventId, PushChannelId } from '@/types'
 
 const CURRENCIES = [
@@ -39,11 +42,13 @@ const CHANNELS: { id: PushChannelId; label: string }[] = [
   { id: 'feishu', label: '飞书' },
 ]
 
-/** 设置页分区导航（桌面侧栏锚点 / 移动横向滚动） */
+/** 设置页分区导航（桌面侧栏锚点 / 移动横向滚动）— v2.2 电价/系统并入 */
 function SettingsNav({ active }: { active: string }) {
   const items = [
     { id: 'datasource', label: '数据与账本', icon: Database },
+    { id: 'pricing', label: '电价', icon: Tag },
     { id: 'push', label: '推送', icon: BellRing },
+    { id: 'system', label: '系统', icon: Activity },
     { id: 'security', label: '账户安全', icon: KeyRound },
   ]
   return (
@@ -76,7 +81,7 @@ export default function SettingsPage() {
   // 滚动监听高亮当前分区（IntersectionObserver 不可用时静默降级）
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
-    const ids = ['datasource', 'ledger', 'push', 'security']
+    const ids = ['datasource', 'pricing', 'push', 'system', 'security']
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -514,7 +519,18 @@ export default function SettingsPage() {
           </div>
           </div>
 
-          {/* ===== 分区2：推送 ===== */}
+          {/* ===== 分区2：电价（v2.2 从独立页并入） ===== */}
+          <section id="settings-pricing" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-pricing">
+            <h2 className="section-title">
+              <Tag className="h-4 w-4 text-tesla" /> 电价
+            </h2>
+            <p className="section-desc mt-1">默认电价 · 地点单价（来源 TeslaMate geofences）· 费率变更历史</p>
+            <div className="mt-4">
+              <PricingSection />
+            </div>
+          </section>
+
+          {/* ===== 分区3：推送 ===== */}
           <section id="settings-push" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-push-matrix">
             <h2 className="section-title">
               <BellRing className="h-4 w-4 text-tesla" /> 推送
@@ -570,7 +586,18 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {/* ===== 分区3：账户安全 ===== */}
+          {/* ===== 分区4：系统（v2.2 从独立页并入） ===== */}
+          <section id="settings-system" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-system">
+            <h2 className="section-title">
+              <Activity className="h-4 w-4 text-tesla" /> 系统
+            </h2>
+            <p className="section-desc mt-1">服务状态 · 只读安全盾 · 事件日志</p>
+            <div className="mt-4">
+              <SystemSection />
+            </div>
+          </section>
+
+          {/* ===== 分区5：账户安全 ===== */}
           <section id="settings-security" className="glass-card-flat scroll-mt-6 p-5" data-testid="change-password-card">
             <h2 className="section-title">
               <KeyRound className="h-4 w-4 text-tesla" /> 账户安全

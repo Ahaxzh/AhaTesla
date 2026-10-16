@@ -108,14 +108,26 @@ export function createChargingRoutes({ db, state, getStore }) {
     },
 
     async stats(ctx) {
+      // v2.2：优先 month=YYYY-MM（自然月，北京时间），与列表口径完全一致；
+      // period 仅作兼容（month=30天滚动窗口曾导致"本月20次"与列表8次对不上）
       const period = ctx.query.period === "all" ? "all" : ctx.query.period === "year" ? "year" : "month";
-      const sinceIso = period === "month"
-        ? new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
-        : period === "year"
-          ? new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString()
-          : null;
+      const month = /^\d{4}-\d{2}$/.test(String(ctx.query.month || "")) ? String(ctx.query.month) : null;
+      let sinceIso;
+      let untilIso = null;
+      if (month) {
+        // 北京时间自然月 → UTC 边界（+08:00）
+        sinceIso = new Date(`${month}-01T00:00:00+08:00`).toISOString();
+        const [y, m] = month.split("-").map(Number);
+        untilIso = new Date(Date.UTC(y, m, 1, 0, 0, 0) - 8 * 3600 * 1000).toISOString();
+      } else {
+        sinceIso = period === "month"
+          ? new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString()
+          : period === "year"
+            ? new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString()
+            : null;
+      }
       const overrides = overridesMap();
-      const rows = await listChargingForStats(db, { sinceIso });
+      const rows = await listChargingForStats(db, { sinceIso, untilIso });
       let totalKwh = 0;
       let totalCost = 0;
       let pricedSessions = 0;
