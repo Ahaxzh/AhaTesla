@@ -52,13 +52,13 @@ function WeekdayBars({ daysData }: { daysData: HeatmapData['daysData'] }) {
       </div>
       <div className="flex h-16 items-end gap-1">
         {sums.map((s, i) => (
-          <div key={i} className="flex flex-1 flex-col items-center gap-1">
+          <div key={i} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
             <div
-              className={`w-full rounded-[3px] transition-all ${i === best && s.km > 0 ? 'bg-sky-400' : 'bg-sky-500/40'}`}
+              className={`w-full flex-none rounded-[3px] transition-all ${i === best && s.km > 0 ? 'bg-sky-400' : 'bg-sky-500/40'}`}
               style={{ height: `${Math.max((s.km / maxKmSum) * 100, s.km > 0 ? 6 : 2)}%` }}
               title={`周${WEEKDAY_LABELS[i]} · ${s.km.toFixed(0)} km · ${s.days} 天`}
             />
-            <span className={`text-[9px] ${i === best && s.km > 0 ? 'text-sky-400' : 'text-slate-600'}`}>
+            <span className={`flex-none text-[9px] ${i === best && s.km > 0 ? 'text-sky-400' : 'text-slate-600'}`}>
               {WEEKDAY_LABELS[i]}
             </span>
           </div>
@@ -124,17 +124,16 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
         {/* 左：GitHub 风贡献图 */}
         <div className="min-w-0 flex-1">
           <div className="overflow-x-auto pb-1">
-            {/* 月份标签行 */}
-            <div className="relative mb-1 ml-[22px] h-3.5">
-              {monthLabels.map((m) => (
-                <span
-                  key={`${m.col}-${m.label}`}
-                  className="absolute text-[9px] text-slate-500"
-                  style={{ left: `${m.col * 17.5}px` }}
-                >
-                  {m.label}
-                </span>
-              ))}
+            {/* 月份标签：与列同宽的自适应行（每列一个 flex 槽，月初打标签） */}
+            <div className="mb-1 ml-[18px] flex gap-[3px]">
+              {columns.map((_column, ci) => {
+                const label = monthLabels.find((m) => m.col === ci)
+                return (
+                  <div key={ci} className="min-w-0 flex-1">
+                    {label && <span className="block truncate text-[9px] text-slate-500">{label.label}</span>}
+                  </div>
+                )
+              })}
             </div>
             <div className="flex gap-[3px]" data-testid="heatmap-grid">
               {/* 星期标签列（隔行显示防拥挤） */}
@@ -142,24 +141,24 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
                 {WEEKDAY_LABELS.map((d, i) => (
                   <span
                     key={d}
-                    className={`flex h-3.5 w-3.5 items-center justify-center text-[9px] ${i % 2 === 0 ? 'text-slate-600' : 'opacity-0'}`}
+                    className={`flex aspect-square w-3.5 items-center justify-center text-[9px] ${i % 2 === 0 ? 'text-slate-600' : 'opacity-0'}`}
                   >
                     {d}
                   </span>
                 ))}
               </div>
               {columns.map((column, ci) => (
-                <div key={ci} className="flex flex-col gap-[3px]">
+                <div key={ci} className="flex min-w-0 flex-1 flex-col gap-[3px]">
                   {Array.from({ length: 7 }, (_, ri) => {
                     const cell = column[ri]
                     if (!cell || cell.distanceKm < 0) {
-                      return <span key={ri} className="h-3.5 w-3.5" />
+                      return <span key={ri} className="aspect-square w-full" />
                     }
                     const level = intensity(cell.distanceKm, data.maxKm)
                     return (
                       <button
                         key={ri}
-                        className={`h-3.5 w-3.5 rounded-[3px] transition ${LEVEL_CLASS[level]} ${hover?.date === cell.date ? 'ring-1 ring-white/60' : ''}`}
+                        className={`aspect-square w-full rounded-[3px] transition ${LEVEL_CLASS[level]} ${hover?.date === cell.date ? 'ring-1 ring-white/60' : ''}`}
                         aria-label={`${cell.date} ${cell.distanceKm.toFixed(1)} km`}
                         data-testid="heatmap-cell"
                         data-level={level}
