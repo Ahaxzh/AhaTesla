@@ -2,31 +2,43 @@ import { useMemo, useState } from 'react'
 import type { HeatmapData } from '@/types'
 
 /**
- * P2 模块4【Grafana Mileage 提炼】用车日历热力图 — v2.2 GitHub 贡献图风格。
- * 升级：月份标签行 + 右侧统计面板（总里程/出行天数/最高单日/日均/
- * 星期分布迷你柱状图），布局 flex 自适应，消灭右侧留白。
+ * 用车日历热力图 — GitHub 贡献图风格 v3。
+ * 设计要点（对比 GitHub / Grafana 打磨）：
+ * - 量化图例：每档标区间 km 值，不再只有"少—多"
+ * - 0 km / 未来日期 语义区分（未来格不渲染底色，0km 保留极淡底色）
+ * - 今天格子白色描边标记
+ * - tooltip 跟随焦点列，不再固定左下角
+ * - 星期分布柱状图带数值标注、高亮最大值、标题独立行不与柱重叠
  */
 const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日']
 
-function intensity(km: number, maxKm: number): number {
+/** 量化分档（km）：与图例区间文案一致 */
+const LEVEL_THRESHOLDS = [0, 10, 30, 60, 100]
+
+function levelOf(km: number): number {
   if (km <= 0) return 0
-  if (maxKm <= 0) return 1
-  const ratio = km / maxKm
-  if (ratio <= 0.25) return 1
-  if (ratio <= 0.5) return 2
-  if (ratio <= 0.75) return 3
+  if (km <= 10) return 1
+  if (km <= 30) return 2
+  if (km <= 60) return 3
   return 4
 }
 
+/** 深色底上相邻档位对比强化：0 档近透明、末档全亮 */
 const LEVEL_CLASS = [
-  'bg-white/[0.04]',
-  'bg-sky-500/25',
-  'bg-sky-500/45',
-  'bg-sky-500/70',
+  'bg-white/[0.05]',
+  'bg-sky-500/30',
+  'bg-sky-500/55',
+  'bg-sky-500/80',
   'bg-sky-400',
 ]
 
-/** 星期分布条形图：哪天最爱开车 */
+function todayStr(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** 星期分布柱状图：数值标注 + 最大值高亮 */
 function WeekdayBars({ daysData }: { daysData: HeatmapData['daysData'] }) {
   const sums = useMemo(() => {
     const acc = Array.from({ length: 7 }, () => ({ km: 0, days: 0 }))
@@ -44,34 +56,38 @@ function WeekdayBars({ daysData }: { daysData: HeatmapData['daysData'] }) {
 
   return (
     <div data-testid="heatmap-weekday-bars">
-      <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] text-slate-500">星期分布</span>
-        {sums[best]?.km > 0 && (
-          <span className="text-[11px] font-medium text-sky-400">周{WEEKDAY_LABELS[best]}最多</span>
-        )}
-      </div>
-      <div className="flex h-16 items-end gap-1">
-        {sums.map((s, i) => (
-          <div key={i} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
-            <div
-              className={`w-full flex-none rounded-[3px] transition-all ${i === best && s.km > 0 ? 'bg-sky-400' : 'bg-sky-500/40'}`}
-              style={{ height: `${Math.max((s.km / maxKmSum) * 100, s.km > 0 ? 6 : 2)}%` }}
-              title={`周${WEEKDAY_LABELS[i]} · ${s.km.toFixed(0)} km · ${s.days} 天`}
-            />
-            <span className={`flex-none text-[9px] ${i === best && s.km > 0 ? 'text-sky-400' : 'text-slate-600'}`}>
-              {WEEKDAY_LABELS[i]}
-            </span>
-          </div>
-        ))}
+      <p className="mb-2 text-[11px] text-slate-500">星期分布（km）</p>
+      <div className="flex h-20 items-stretch gap-1.5">
+        {sums.map((s, i) => {
+          const isBest = i === best && s.km > 0
+          return (
+            <div key={i} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
+              {s.km > 0 && (
+                <span className={`num text-[9px] leading-none ${isBest ? 'font-semibold text-sky-300' : 'text-slate-500'}`}>
+                  {Math.round(s.km)}
+                </span>
+              )}
+              <div
+                className={`w-full rounded-t-[3px] transition-all ${isBest ? 'bg-sky-400' : 'bg-sky-500/35'}`}
+                style={{ height: `${Math.max((s.km / maxKmSum) * 100, s.km > 0 ? 8 : 2)}%` }}
+                title={`周${WEEKDAY_LABELS[i]} · ${s.km.toFixed(0)} km · ${s.days} 天出行`}
+              />
+              <span className={`flex-none text-[9px] ${isBest ? 'font-medium text-sky-400' : 'text-slate-600'}`}>
+                {WEEKDAY_LABELS[i]}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
 export function HeatmapCalendar({ data }: { data: HeatmapData }) {
-  const [hover, setHover] = useState<{ date: string; km: number } | null>(null)
+  const [hoverCol, setHoverCol] = useState<{ col: number; date: string; km: number } | null>(null)
+  const today = todayStr()
 
-  // 按周分列：周一为行首 + 月份标签位置
+  // 按周分列（周一行首）+ 月份标签位置
   const cells = data.daysData
   const columns: (typeof cells)[] = []
   const monthLabels: { col: number; label: string }[] = []
@@ -82,8 +98,9 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
   let lastMonth = -1
   for (const day of cells) {
     const dt = new Date(`${day.date}T00:00:00`)
+    if (Number.isNaN(dt.getTime())) continue
     const m = dt.getMonth()
-    if (!Number.isNaN(dt.getTime()) && m !== lastMonth) {
+    if (m !== lastMonth) {
       monthLabels.push({ col: columns.length, label: `${m + 1}月` })
       lastMonth = m
     }
@@ -95,7 +112,6 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
   }
   if (col.length > 0) columns.push(col)
 
-  // 统计面板数据
   const stats = useMemo(() => {
     const active = cells.filter((d) => d.distanceKm > 0)
     const total = active.reduce((s, d) => s + d.distanceKm, 0)
@@ -115,18 +131,18 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
 
   return (
     <section className="glass-card p-5" data-testid="heatmap-card">
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-medium text-slate-200">用车日历</h2>
         <span className="text-[11px] text-slate-500">最近 {data.days} 天 · 按日里程</span>
       </div>
 
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch">
-        {/* 左：GitHub 风贡献图 */}
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-stretch">
+        {/* 左：热力图 */}
         <div className="min-w-0 flex-1">
-          <div className="overflow-x-auto pb-1">
-            {/* 月份标签：与列同宽的自适应行（每列一个 flex 槽，月初打标签） */}
-            <div className="mb-1 ml-[18px] flex gap-[3px]">
-              {columns.map((_column, ci) => {
+          <div>
+            {/* 月份标签：与列同宽对齐 */}
+            <div className="mb-1.5 ml-[20px] flex gap-[3px]">
+              {columns.map((_c, ci) => {
                 const label = monthLabels.find((m) => m.col === ci)
                 return (
                   <div key={ci} className="min-w-0 flex-1">
@@ -136,12 +152,11 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
               })}
             </div>
             <div className="flex gap-[3px]" data-testid="heatmap-grid">
-              {/* 星期标签列（隔行显示防拥挤） */}
-              <div className="flex flex-col gap-[3px] pr-1">
+              <div className="mr-0.5 flex w-4 flex-col gap-[3px]">
                 {WEEKDAY_LABELS.map((d, i) => (
                   <span
                     key={d}
-                    className={`flex aspect-square w-3.5 items-center justify-center text-[9px] ${i % 2 === 0 ? 'text-slate-600' : 'opacity-0'}`}
+                    className={`flex aspect-square items-center justify-center text-[8px] ${i % 2 === 0 ? 'text-slate-600' : 'opacity-0'}`}
                   >
                     {d}
                   </span>
@@ -154,17 +169,21 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
                     if (!cell || cell.distanceKm < 0) {
                       return <span key={ri} className="aspect-square w-full" />
                     }
-                    const level = intensity(cell.distanceKm, data.maxKm)
+                    const level = levelOf(cell.distanceKm)
+                    const isToday = cell.date === today
+                    const isHover = hoverCol?.col === ci && hoverCol.date === cell.date
                     return (
                       <button
                         key={ri}
-                        className={`aspect-square w-full rounded-[3px] transition ${LEVEL_CLASS[level]} ${hover?.date === cell.date ? 'ring-1 ring-white/60' : ''}`}
+                        className={`aspect-square w-full rounded-[3px] transition ${LEVEL_CLASS[level]} ${
+                          isToday ? 'ring-1 ring-white/70' : ''
+                        } ${isHover ? 'outline outline-1 outline-white/90' : ''}`}
                         aria-label={`${cell.date} ${cell.distanceKm.toFixed(1)} km`}
                         data-testid="heatmap-cell"
                         data-level={level}
-                        onMouseEnter={() => setHover({ date: cell.date, km: cell.distanceKm })}
-                        onMouseLeave={() => setHover(null)}
-                        onClick={() => setHover({ date: cell.date, km: cell.distanceKm })}
+                        onMouseEnter={() => setHoverCol({ col: ci, date: cell.date, km: cell.distanceKm })}
+                        onMouseLeave={() => setHoverCol(null)}
+                        onClick={() => setHoverCol({ col: ci, date: cell.date, km: cell.distanceKm })}
                       />
                     )
                   })}
@@ -173,23 +192,43 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between">
-            <span className="num text-[11px] text-slate-400" data-testid="heatmap-hover">
-              {hover ? `${hover.date} · ${hover.km.toFixed(1)} km` : '悬停/点击查看单日'}
-            </span>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-slate-600">少</span>
-              {LEVEL_CLASS.map((cls, i) => (
-                <span key={i} className={`h-2.5 w-2.5 rounded-[2px] ${cls}`} />
-              ))}
-              <span className="text-[10px] text-slate-600">多</span>
+          {/* 读数（跟随焦点列）+ 量化图例 */}
+          <div className="relative mt-3 h-5">
+            {hoverCol ? (
+              <span
+                className="num absolute whitespace-nowrap text-[11px] font-medium text-slate-200"
+                style={{
+                  left: `calc(20px + ${hoverCol.col} * (100% - 20px) / ${columns.length})`,
+                }}
+                data-testid="heatmap-hover"
+              >
+                {hoverCol.date.slice(5)} · {hoverCol.km > 0 ? `${hoverCol.km.toFixed(1)} km` : '未出行'}
+              </span>
+            ) : (
+              <span className="num absolute text-[11px] text-slate-600" data-testid="heatmap-hover">
+                悬停查看单日
+              </span>
+            )}
+            <div className="absolute right-0 top-0 flex items-center gap-1">
+              {LEVEL_THRESHOLDS.map((t, i) => {
+                const upper = i < LEVEL_THRESHOLDS.length - 1 ? LEVEL_THRESHOLDS[i + 1] : null
+                return (
+                  <span key={i} className="flex items-center gap-0.5">
+                    <span className={`h-2.5 w-2.5 rounded-[2px] ${LEVEL_CLASS[i]}`} />
+                    <span className="num text-[8px] text-slate-600">
+                      {upper ? `${t}-${upper}` : `${t}+`}
+                    </span>
+                  </span>
+                )
+              })}
+              <span className="num text-[8px] text-slate-600">km</span>
             </div>
           </div>
         </div>
 
-        {/* 右：统计面板（消灭留白） */}
+        {/* 右：统计面板 */}
         <div
-          className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-3 border-white/[0.06] lg:w-56 lg:grid-cols-1 lg:border-l lg:pl-5"
+          className="grid shrink-0 grid-cols-2 gap-x-5 gap-y-3 border-white/[0.06] lg:w-52 lg:grid-cols-1 lg:border-l lg:pl-5"
           data-testid="heatmap-stats"
         >
           <div>
@@ -218,7 +257,7 @@ export function HeatmapCalendar({ data }: { data: HeatmapData }) {
               {stats.avgKm.toFixed(0)} <span className="text-[11px] font-normal text-slate-500">km</span>
             </p>
           </div>
-          <div className="col-span-2 mt-1 lg:col-span-1">
+          <div className="col-span-2 lg:col-span-1">
             <WeekdayBars daysData={cells} />
           </div>
         </div>

@@ -298,7 +298,8 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       if (event.avgTempC != null) insights.push(`🌡 ${event.avgTempC}°C${event.minTempC != null && event.minTempC < event.avgTempC ? `（最低 ${event.minTempC}°C）` : ""}`);
       if (event.avgSpeedKmh != null && event.maxSpeedKmh != null) insights.push(`🏎 均 ${event.avgSpeedKmh} / 峰 ${event.maxSpeedKmh} km/h`);
       if (event.idleRatio != null && event.idleRatio >= 0.15) insights.push(`🚦 堵车怠速占 ${Math.round(event.idleRatio * 100)}%`);
-      if (event.kwhPer100km != null) insights.push(`⚡ ${event.kwhPer100km} kWh/100km`);
+      // 能耗效率：仅在能耗数据有效时显示（避免"0 kWh/100km"假数据）
+      if (event.kwhPer100km != null && event.kwhPer100km > 0) insights.push(`⚡ ${event.kwhPer100km} kWh/100km`);
       if (event.powerMaxKw != null && event.powerMaxKw >= 100) insights.push(`🔥 峰值功率 ${event.powerMaxKw} kW`);
       if (event.tirePressure) {
         const tp = event.tirePressure;
@@ -306,8 +307,10 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
         if (vals.length === 4) {
           const min = Math.min(...vals);
           const max = Math.max(...vals);
+          // 四轮一致显示单值，有差异才显示区间
+          const range = max - min < 0.05 ? `${min.toFixed(1)}` : `${min.toFixed(1)}~${max.toFixed(1)}`;
           const tag = max - min >= 0.3 ? "⚠️" : "🛞";
-          insights.push(`${tag} 胎压 ${min.toFixed(1)}~${max.toFixed(1)} bar`);
+          insights.push(`${tag} 胎压 ${range} bar`);
         }
       }
       if (insights.length) lines.push(insights.join(" · "));
