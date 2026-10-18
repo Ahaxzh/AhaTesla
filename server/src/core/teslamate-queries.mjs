@@ -271,7 +271,8 @@ export async function getGeofences(db) {
            g.cost_per_unit AS price_per_unit,
            g.session_fee,
            g.billing_type::text AS billing_type,
-           g.latitude::float8 AS lat, g.longitude::float8 AS lng
+           g.latitude::float8 AS lat, g.longitude::float8 AS lng,
+           g.radius::float8 AS radius
     FROM geofences g
     ORDER BY g.name ASC
   `);
@@ -389,13 +390,19 @@ export async function getDrivesIncremental(db, sinceId, limit = 50) {
 }
 
 export async function getActiveDrive(db) {
+  // 僵尸行防御：TeslaMate 流断连会在 drives 留下 end_date 永远为 NULL 的历史行
+  // （实测库中 431 条，最老 2022 年）。若按"最新未关闭"直取，僵尸会伪装成
+  // "正在开车"，把闲置超时结算永远压住 → 行程小结迟到数小时甚至隔天。
+  // 真实行程不会超过数小时，12h 窗口足够宽裕。
+  const cutoff = new Date(Date.now() - 12 * 3600_000).toISOString().slice(0, 19);
   const row = await db.queryOne(`
     SELECT d.id, d.start_date AS start_at
     FROM drives d
     WHERE d.end_date IS NULL
+      AND d.start_date >= $1::timestamp
     ORDER BY d.start_date DESC
     LIMIT 1
-  `);
+  `, [cutoff]);
   return row ? { id: row.id, start_at: row.start_at } : null;
 }
 

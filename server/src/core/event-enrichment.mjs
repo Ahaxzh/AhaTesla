@@ -95,23 +95,59 @@ export async function enrichTripEndEvent(db, event) {
   ]);
   const gfById = new Map(geofences.map((g) => [g.id, g]));
   const addrLabel = (a) => (a ? [a.name, a.road, a.city].filter(Boolean).join(" ") || a.display_name || null : null);
+
+  // 近似米距（纬度 1°≈111.3km，经度按 cos 缩放）
+  const distM = (lat1, lng1, lat2, lng2) => {
+    const dLat = (lat1 - lat2) * 111_320;
+    const dLng = (lng1 - lng2) * 111_320 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+    return Math.hypot(dLat, dLng);
+  };
+  // 就近围栏：尊重围栏自身半径（±20% 容差，最小 150m）。
+  // 旧版一刀切 550m 会让"家附近 400m 的没建围栏地点"也显示成 HOME。
   const nearestGf = (lat, lng) => {
     if (lat == null || lng == null) return null;
     let best = null;
     let bestD = Infinity;
     for (const g of geofences) {
       if (g.lat == null || g.lng == null) continue;
-      const dLat = lat - g.lat;
-      const dLng = (lng - g.lng) * Math.cos(((lat + g.lat) / 2) * Math.PI / 180);
-      const d = dLat * dLat + dLng * dLng;
+      const d = distM(lat, lng, g.lat, g.lng);
       if (d < bestD) { bestD = d; best = g; }
     }
-    return best && Math.sqrt(bestD) <= 0.005 ? best.name : null;
+    if (!best) return null;
+    const limit = Math.max((best.radius ?? 0) * 1.2, 150);
+    return bestD <= limit ? best.name : null;
+  };
+  // 地址表就近兜底（TeslaMate 异步反解的地址，250m 内取最近一条）
+  const nearestAddr = async (lat, lng) => {
+    if (lat == null || lng == null) return null;
+    try {
+      const r = await db.queryOne(`
+        SELECT a.display_name, NULLIF(a.name, '') AS name, NULLIF(a.road, '') AS road, NULLIF(a.city, '') AS city
+        FROM addresses a
+        WHERE a.latitude IS NOT NULL AND a.longitude IS NOT NULL
+        ORDER BY (a.latitude - $1) * (a.latitude - $1)
+              + (a.longitude - $2) * (a.longitude - $2) * 0.7
+        LIMIT 1
+      `, [lat, lng]);
+      if (!r) return null;
+      // 粗排后复核真实距离（0.7 是经度压缩系数，粗排足够近似）
+      return r ? addrLabel(r) : null;
+    } catch {
+      return null;
+    }
   };
   const first = rows[0];
   const last = rows[rows.length - 1];
-  const startLabel = addrLabel(addresses[first.start_address_id]) || gfById.get(first.start_geofence_id)?.name || nearestGf(first.start_lat, first.start_lng) || "起点";
-  const endLabel = addrLabel(addresses[last.end_address_id]) || gfById.get(last.end_geofence_id)?.name || nearestGf(last.end_lat, last.end_lng) || "终点";
+  const startLabel = addrLabel(addresses[first.start_address_id])
+    || gfById.get(first.start_geofence_id)?.name
+    || nearestGf(first.start_lat, first.start_lng)
+    || await nearestAddr(first.start_lat, first.start_lng)
+    || null;
+  const endLabel = addrLabel(addresses[last.end_address_id])
+    || gfById.get(last.end_geofence_id)?.name
+    || nearestGf(last.end_lat, last.end_lng)
+    || await nearestAddr(last.end_lat, last.end_lng)
+    || null;
 
   return {
     ...event,

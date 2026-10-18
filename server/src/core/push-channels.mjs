@@ -462,8 +462,15 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
     if (event.type === "trip_end") {
       // v2.2 富化版：路线 + 核心数字 + 驾驶洞察（天气/胎压/拥堵/效率）
       const lines = [];
-      const route = event.startLabel && event.endLabel ? `${event.startLabel} → ${event.endLabel}` : null;
-      if (route) lines.push(`🚗 ${route}`);
+      // 路线行:双侧 A → B;仅终点 → HOME(读作"到 HOME");仅起点 A →;双无 → 整行省略
+      const route = event.startLabel && event.endLabel
+        ? `${event.startLabel} → ${event.endLabel}`
+        : event.endLabel
+          ? `→ ${event.endLabel}`
+          : event.startLabel || null;
+      if (route) {
+        lines.push(`🚗 ${route}`);
+      }
 
       const stats = [];
       if (event.distanceKm != null) stats.push(`${event.distanceKm} km`);
