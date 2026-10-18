@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, BellRing, CheckCircle2, Link2, Lock, RefreshCw, Send, Smartphone, XCircle } from 'lucide-react'
+import { Bell, BellRing, CheckCircle2, Link2, Lock, MessageSquare, RefreshCw, Send, Smartphone, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { useToast } from '@/components/Toast'
@@ -409,6 +409,254 @@ function FeishuCard() {
   )
 }
 
+/** 渠道卡头部:图标 + 名称 + 定位语 + 已配置/未配置徽标(m4b 三渠道共用骨架) */
+function ChannelCardHeader({ icon: Icon, name, tagline, configured, testid }: {
+  icon: typeof Bell
+  name: string
+  tagline: string
+  configured: boolean | undefined
+  testid: string
+}) {
+  return (
+    <div className="mb-4 flex items-center justify-between">
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/[0.12] text-tesla">
+          <Icon className="h-[18px] w-[18px]" />
+        </div>
+        <div>
+          <h2 className="text-sm font-medium text-slate-100">{name}</h2>
+          <p className="text-[11px] text-slate-400">{tagline}</p>
+        </div>
+      </div>
+      {configured != null && (
+        <span
+          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+            configured ? 'bg-emerald-400/10 text-emerald-400' : 'bg-white/[0.06] text-slate-400'
+          }`}
+          data-testid={testid}
+        >
+          {configured ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+          {configured ? '已配置' : '未配置'}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** 企业微信(m4b):群机器人 webhook Key,密文存储 */
+function WecomCard() {
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+  const { data: channels } = useQuery({ queryKey: ['channels'], queryFn: api.channelStatus })
+  const wecom = channels?.wecom
+  const [webhookKey, setWebhookKey] = useState('')
+
+  const save = useMutation({
+    mutationFn: () => api.saveWecom({ enabled: true, webhookKey: webhookKey.trim() || undefined }),
+    onSuccess: () => {
+      toast('企业微信配置已保存', 'success')
+      setWebhookKey('')
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  const test = useMutation({
+    mutationFn: api.testWecom,
+    onSuccess: (res) => toast(res.message || '测试消息已发送', 'success'),
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  return (
+    <section className="glass-card-flat p-5" data-testid="wecom-card">
+      <ChannelCardHeader icon={MessageSquare} name="企业微信" tagline="群机器人 webhook,适合团队/家庭群" configured={wecom == null ? undefined : wecom.configured} testid="wecom-status" />
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="wecom-key" className="mb-1.5 block text-xs font-medium text-slate-400">Webhook Key</label>
+          <input
+            id="wecom-key"
+            type="password"
+            className="input-dark"
+            placeholder={wecom?.webhookKeyAlias ? `已保存（${wecom.webhookKeyAlias}…），留空则不修改` : '群机器人 webhook 地址中 key= 后面的部分'}
+            value={webhookKey}
+            onChange={(e) => setWebhookKey(e.target.value)}
+            data-testid="wecom-key"
+          />
+        </div>
+        <div className="flex gap-2.5 pt-1">
+          <button
+            className="btn-primary flex-1"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || (!webhookKey.trim() && !wecom?.configured)}
+            data-testid="wecom-save"
+          >
+            {save.isPending ? '保存中…' : '保存配置'}
+          </button>
+          <button
+            className="btn-ghost flex-1"
+            onClick={() => test.mutate()}
+            disabled={test.isPending || !wecom?.configured}
+            data-testid="wecom-test"
+          >
+            <Send className="h-4 w-4" />
+            发送测试消息
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/** ntfy(m4b):开源推送服务,server URL + topic,无密钥,可自建 */
+function NtfyCard() {
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+  const { data: channels } = useQuery({ queryKey: ['channels'], queryFn: api.channelStatus })
+  const ntfy = channels?.ntfy
+  const [serverUrl, setServerUrl] = useState('')
+  const [topic, setTopic] = useState('')
+
+  const save = useMutation({
+    mutationFn: () => api.saveNtfy({ enabled: true, serverUrl: serverUrl.trim() || undefined, topic: topic.trim() || undefined }),
+    onSuccess: () => {
+      toast('ntfy 配置已保存', 'success')
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  const test = useMutation({
+    mutationFn: api.testNtfy,
+    onSuccess: (res) => toast(res.message || '测试消息已发送', 'success'),
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  return (
+    <section className="glass-card-flat p-5" data-testid="ntfy-card">
+      <ChannelCardHeader icon={Bell} name="ntfy" tagline="开源推送服务,支持自建" configured={ntfy == null ? undefined : ntfy.configured} testid="ntfy-status" />
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="ntfy-server" className="mb-1.5 block text-xs font-medium text-slate-400">Server URL</label>
+          <input
+            id="ntfy-server"
+            className="input-dark"
+            placeholder={ntfy?.serverUrl || 'https://ntfy.sh'}
+            value={serverUrl}
+            onChange={(e) => setServerUrl(e.target.value)}
+            data-testid="ntfy-server"
+          />
+        </div>
+        <div>
+          <label htmlFor="ntfy-topic" className="mb-1.5 block text-xs font-medium text-slate-400">Topic</label>
+          <input
+            id="ntfy-topic"
+            className="input-dark"
+            placeholder={ntfy?.topic || 'ahatesla'}
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            data-testid="ntfy-topic"
+          />
+        </div>
+        <div className="flex gap-2.5 pt-1">
+          <button
+            className="btn-primary flex-1"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || (!serverUrl.trim() && !topic.trim() && !ntfy?.configured)}
+            data-testid="ntfy-save"
+          >
+            {save.isPending ? '保存中…' : '保存配置'}
+          </button>
+          <button
+            className="btn-ghost flex-1"
+            onClick={() => test.mutate()}
+            disabled={test.isPending || !ntfy?.configured}
+            data-testid="ntfy-test"
+          >
+            <Send className="h-4 w-4" />
+            发送测试消息
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/** Bark(m4b):iOS Bark App 专用,server URL + device key */
+function BarkCard() {
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+  const { data: channels } = useQuery({ queryKey: ['channels'], queryFn: api.channelStatus })
+  const bark = channels?.bark
+  const [serverUrl, setServerUrl] = useState('')
+  const [deviceKey, setDeviceKey] = useState('')
+
+  const save = useMutation({
+    mutationFn: () => api.saveBark({ enabled: true, serverUrl: serverUrl.trim() || undefined, deviceKey: deviceKey.trim() || undefined }),
+    onSuccess: () => {
+      toast('Bark 配置已保存', 'success')
+      setDeviceKey('')
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  const test = useMutation({
+    mutationFn: api.testBark,
+    onSuccess: (res) => toast(res.message || '测试消息已发送', 'success'),
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  return (
+    <section className="glass-card-flat p-5" data-testid="bark-card">
+      <ChannelCardHeader icon={Smartphone} name="Bark" tagline="iOS Bark App 专用" configured={bark == null ? undefined : bark.configured} testid="bark-status" />
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="bark-server" className="mb-1.5 block text-xs font-medium text-slate-400">Server URL</label>
+          <input
+            id="bark-server"
+            className="input-dark"
+            placeholder={bark?.serverUrl || 'https://api.day.app'}
+            value={serverUrl}
+            onChange={(e) => setServerUrl(e.target.value)}
+            data-testid="bark-server"
+          />
+        </div>
+        <div>
+          <label htmlFor="bark-key" className="mb-1.5 block text-xs font-medium text-slate-400">Device Key</label>
+          <input
+            id="bark-key"
+            type="password"
+            className="input-dark"
+            placeholder={bark?.deviceKeyAlias ? `已保存（${bark.deviceKeyAlias}…），留空则不修改` : 'Bark App 里复制的关键字符串'}
+            value={deviceKey}
+            onChange={(e) => setDeviceKey(e.target.value)}
+            data-testid="bark-key"
+          />
+        </div>
+        <div className="flex gap-2.5 pt-1">
+          <button
+            className="btn-primary flex-1"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || (!serverUrl.trim() && !deviceKey.trim() && !bark?.configured)}
+            data-testid="bark-save"
+          >
+            {save.isPending ? '保存中…' : '保存配置'}
+          </button>
+          <button
+            className="btn-ghost flex-1"
+            onClick={() => test.mutate()}
+            disabled={test.isPending || !bark?.configured}
+            data-testid="bark-test"
+          >
+            <Send className="h-4 w-4" />
+            发送测试消息
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function PushPage() {
   const { data: pushEnv } = useQuery({ queryKey: ['push-env'], queryFn: api.pushEnv })
   const [https, setHttps] = useState(false)
@@ -419,11 +667,14 @@ export default function PushPage() {
 
   return (
     <div>
-      <PageHeader icon={BellRing} title="推送" subtitle="Web Push / Telegram / 飞书 三渠道配置（事件开关在「设置 → 推送矩阵」）" />
+      <PageHeader icon={BellRing} title="推送" subtitle="Web Push / Telegram / 飞书 / 企业微信 / ntfy / Bark 六渠道配置（事件开关在「设置 → 推送矩阵」）" />
       <div className="space-y-5">
         <WebPushCard https={https} />
         <TelegramCard />
         <FeishuCard />
+        <WecomCard />
+        <NtfyCard />
+        <BarkCard />
       </div>
     </div>
   )

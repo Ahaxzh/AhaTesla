@@ -170,7 +170,7 @@ function stateIntoStore(s, state) {
 }
 
 /** putChannel 的 ON CONFLICT 用 coalesce 保留旧密文；显式置 null 需单独 UPDATE。 */
-function clearChannelSecret(s, channel) {
+export function clearChannelSecret(s, channel) {
   s.db.prepare("UPDATE channel_secrets SET secret_enc=NULL WHERE channel=?").run(String(channel));
 }
 

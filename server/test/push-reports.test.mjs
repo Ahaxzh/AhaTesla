@@ -77,10 +77,10 @@ test("Telegram 渠道：disabled 不发；配置 + fetch 成功发送", async ()
 
 test("matrixFromRules：v1 布尔规则 → v2 矩阵兼容映射", () => {
   const m1 = matrixFromRules({ tripEnd: true, weeklyReport: false, monthlyReport: true, chargingStart: true, chargingDone: true });
-  assert.deepEqual(m1.tripEnd, { webpush: true, telegram: true, feishu: true });
-  assert.deepEqual(m1.weekly, { webpush: false, telegram: false, feishu: false });
+  assert.deepEqual(m1.tripEnd, { webpush: true, telegram: true, feishu: true, wecom: true, ntfy: true, bark: true });
+  assert.deepEqual(m1.weekly, { webpush: false, telegram: false, feishu: false, wecom: false, ntfy: false, bark: false });
   const m2 = matrixFromRules({}); // 无规则 → 默认矩阵
-  assert.deepEqual(m2.chargingDone, { webpush: false, telegram: false, feishu: true });
+  assert.deepEqual(m2.chargingDone, { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false });
 });
 
 test("Notifier.dispatch：矩阵命中渠道并行投递，单渠道失败隔离（AC-12.2）", async () => {
@@ -493,10 +493,10 @@ test("matrix + Notifier daily：六事件矩阵往返 + 日报标题正文渲染
   // defaultMatrix 含 daily 默认关（feishu on 对齐其他事件）
   const dm = defaultMatrix();
   assert.ok(dm.daily);
-  assert.deepEqual(dm.daily, { webpush: false, telegram: false, feishu: true });
+  assert.deepEqual(dm.daily, { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false });
   // v2 矩阵往返保留 daily
   const rt = matrixFromRules({ matrix: { daily: { webpush: true, telegram: false, feishu: false } } });
-  assert.deepEqual(rt.daily, { webpush: true, telegram: false, feishu: false });
+  assert.deepEqual(rt.daily, { webpush: true, telegram: false, feishu: false, wecom: false, ntfy: false, bark: false });
 
   const sent = [];
   const feishu = { id: "feishu", enabled: () => true, status: async () => ({}), send: async (msg) => { sent.push(msg); return { sent: true }; } };

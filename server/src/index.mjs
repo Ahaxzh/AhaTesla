@@ -24,7 +24,7 @@ import { createEventLog } from "./core/events.mjs";
 import { createFeishuChannel } from "./core/feishu.mjs";
 import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
 import { startMqttBridge } from "./core/mqtt-bridge.mjs";
-import { createNotifier, createTelegramChannel, createWebPushChannel } from "./core/push-channels.mjs";
+import { createNotifier, createTelegramChannel, createWebPushChannel, createWecomChannel, createNtfyChannel, createBarkChannel } from "./core/push-channels.mjs";
 import { startReportScheduler } from "./core/report-engine.mjs";
 import { recordProbe } from "./core/health.mjs";
 import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
@@ -143,6 +143,13 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
   app.put("/api/channels/telegram", requireAuth, (ctx) => push.updateTelegram(ctx));
   app.post("/api/channels/telegram/test", requireAuth, (ctx) => push.testTelegram(ctx));
+  // m4b 三渠道：企业微信 / ntfy / Bark（契约 §channels）
+  app.put("/api/channels/wecom", requireAuth, (ctx) => push.updateWecom(ctx));
+  app.post("/api/channels/wecom/test", requireAuth, (ctx) => push.testWecom(ctx));
+  app.put("/api/channels/ntfy", requireAuth, (ctx) => push.updateNtfy(ctx));
+  app.post("/api/channels/ntfy/test", requireAuth, (ctx) => push.testNtfy(ctx));
+  app.put("/api/channels/bark", requireAuth, (ctx) => push.updateBark(ctx));
+  app.post("/api/channels/bark/test", requireAuth, (ctx) => push.testBark(ctx));
   // BYO 模型（契约 §AI，m4c-c3）
   app.get("/api/ai/config", requireAuth, (ctx) => aiRoutes.get(ctx));
   app.put("/api/ai/config", requireAuth, (ctx) => aiRoutes.put(ctx));
@@ -298,6 +305,9 @@ async function main() {
     feishu: feishuChannel,
     telegram: createTelegramChannel({ logger: (m) => eventLog.log("telegram.error", { message: m }) }),
     webpush: createWebPushChannel({ logger: (m) => eventLog.log("webpush.error", { message: m }) }),
+    wecom: createWecomChannel({ logger: (m) => eventLog.log("wecom.error", { message: m }) }),
+    ntfy: createNtfyChannel({ logger: (m) => eventLog.log("ntfy.error", { message: m }) }),
+    bark: createBarkChannel({ logger: (m) => eventLog.log("bark.error", { message: m }) }),
     ai
   });
   // 报告构建依赖（computeTripViews/listDrivesSql/listChargingForStats 已静态导入）

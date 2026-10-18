@@ -250,7 +250,7 @@ export interface LedgerSummary {
   breakdown: { drivingCost: number; parkingCost: number }
 }
 
-export type PushChannelId = 'webpush' | 'telegram' | 'feishu'
+export type PushChannelId = 'webpush' | 'telegram' | 'feishu' | 'wecom' | 'ntfy' | 'bark'
 export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly'
 
 export interface PushMatrix {
@@ -275,6 +275,10 @@ export interface ChannelStatus {
   webpush: { enabled: boolean; configured: boolean; subscriberCount: number }
   telegram: { enabled: boolean; connected: boolean; botAlias: string | null; chatIdAlias: string | null }
   feishu: { enabled: boolean; connected: boolean; appAlias: string | null; lastEventAt: string | null }
+  /** m4b 三新渠道(未部署后端时可能缺省,消费方需容忍 undefined) */
+  wecom?: { enabled: boolean; configured: boolean; webhookKeyAlias: string | null }
+  ntfy?: { enabled: boolean; configured: boolean; serverUrl: string; topic: string }
+  bark?: { enabled: boolean; configured: boolean; serverUrl: string; deviceKeyAlias: string | null }
 }
 
 export interface ReportListItem {

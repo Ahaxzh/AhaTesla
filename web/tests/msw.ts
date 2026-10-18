@@ -86,22 +86,25 @@ export const mockChannels: ChannelsData = {
   web: { enabled: true },
 }
 
-// v2.1 三渠道状态（/api/channels 新形状）
+// v2.1 渠道状态（/api/channels；m4b 起含企业微信/ntfy/Bark,默认未配置）
 export const mockChannelStatus = {
   webpush: { enabled: true, configured: true, subscriberCount: 1 },
   telegram: { enabled: false, connected: false, botAlias: null, chatIdAlias: null },
   feishu: { enabled: true, connected: true, appAlias: 'cli_test', lastEventAt: '2026-10-12T10:00:00+08:00' },
+  wecom: { enabled: false, configured: false, webhookKeyAlias: null },
+  ntfy: { enabled: false, configured: false, serverUrl: '', topic: '' },
+  bark: { enabled: false, configured: false, serverUrl: '', deviceKeyAlias: null },
 }
 
-// v2 推送矩阵（m4c：6 事件 × 3 渠道）
+// v2 推送矩阵（m4b：6 事件 × 6 渠道,新渠道默认全关）
 export const mockPushMatrix = {
   matrix: {
-    tripEnd: { webpush: true, telegram: false, feishu: true },
-    chargingStart: { webpush: false, telegram: false, feishu: false },
-    chargingDone: { webpush: true, telegram: false, feishu: true },
-    daily: { webpush: true, telegram: false, feishu: false },
-    weekly: { webpush: false, telegram: false, feishu: true },
-    monthly: { webpush: false, telegram: false, feishu: true },
+    tripEnd: { webpush: true, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false },
+    chargingStart: { webpush: false, telegram: false, feishu: false, wecom: false, ntfy: false, bark: false },
+    chargingDone: { webpush: true, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false },
+    daily: { webpush: true, telegram: false, feishu: false, wecom: false, ntfy: false, bark: false },
+    weekly: { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false },
+    monthly: { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false },
   },
   weeklyReportDay: 1,
 }
@@ -243,6 +246,13 @@ export const defaultHandlers = [
   http.get('/api/system/health-lite', () => HttpResponse.json({ dbOk: true, bannerLevel: null, outageMs: 0 })),
   http.put('/api/channels/feishu', () => HttpResponse.json({ ok: true, connected: true })),
   http.post('/api/channels/feishu/test', () => HttpResponse.json({ ok: true, message: '测试卡片已发送' })),
+  // m4b 三新渠道(密钥型字段留空=不修改)
+  http.put('/api/channels/wecom', () => HttpResponse.json({ ok: true })),
+  http.post('/api/channels/wecom/test', () => HttpResponse.json({ ok: true, message: '企业微信测试消息已发送' })),
+  http.put('/api/channels/ntfy', () => HttpResponse.json({ ok: true })),
+  http.post('/api/channels/ntfy/test', () => HttpResponse.json({ ok: true, message: 'ntfy 测试消息已发送' })),
+  http.put('/api/channels/bark', () => HttpResponse.json({ ok: true })),
+  http.post('/api/channels/bark/test', () => HttpResponse.json({ ok: true, message: 'Bark 测试消息已发送' })),
   http.get('/api/push-rules', () => HttpResponse.json(mockPushMatrix)),
   http.put('/api/push-rules', async ({ request }) => HttpResponse.json(await request.json())),
   http.get('/api/ai/config', () => HttpResponse.json(mockAiConfig)),

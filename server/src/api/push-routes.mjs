@@ -15,12 +15,9 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
   return {
     // ---- 渠道状态 ---------------------------------------------------------
     async listChannels(ctx) {
-      const [feishu, telegram, webpush] = await Promise.all([
-        channelsApi().feishu.status(),
-        channelsApi().telegram.status(),
-        channelsApi().webpush.status()
-      ]);
-      return { feishu, telegram, webpush };
+      const entries = Object.entries(channelsApi());
+      const list = await Promise.all(entries.map(([, ch]) => ch.status()));
+      return Object.fromEntries(entries.map(([id], i) => [id, list[i]]));
     },
 
     // ---- Web Push ---------------------------------------------------------
@@ -100,6 +97,86 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
       const r = await channelsApi().telegram.test();
       eventLog?.log("channels.telegram_test", { sent: r.sent });
       if (!r.sent) throw new HttpError(502, "channel_error", `telegram test failed: ${r.reason || "unknown"}`);
+      return { ok: true };
+    },
+
+    // ---- 企业微信（m4b） -----------------------------------------------------
+    async updateWecom(ctx) {
+      const { enabled, webhookKey } = ctx.body || {};
+      if (webhookKey !== undefined && webhookKey !== null && webhookKey !== "" && typeof webhookKey !== "string") {
+        throw new HttpError(400, "bad_request", "webhookKey must be string");
+      }
+      const config = {};
+      if (enabled !== undefined) config.enabled = Boolean(enabled);
+      if (webhookKey) config.webhookKeyAlias = `${String(webhookKey).slice(0, 8)}…`;
+      saveChannelConfig("wecom", { config, secret: webhookKey || undefined });
+      eventLog?.log("channels.wecom_updated", { enabled: config.enabled });
+      const status = await channelsApi().wecom.status();
+      return { ok: true, connected: status.connected };
+    },
+
+    async testWecom(ctx) {
+      const r = await channelsApi().wecom.test();
+      eventLog?.log("channels.wecom_test", { sent: r.sent });
+      if (!r.sent) throw new HttpError(502, "channel_error", `wecom test failed: ${r.reason || "unknown"}`);
+      return { ok: true };
+    },
+
+    // ---- ntfy（m4b；无密钥，serverUrl 可自建） -------------------------------
+    async updateNtfy(ctx) {
+      const { enabled, serverUrl, topic } = ctx.body || {};
+      if (topic !== undefined && topic !== null && topic !== "" && typeof topic !== "string") {
+        throw new HttpError(400, "bad_request", "topic must be string");
+      }
+      if (serverUrl !== undefined && serverUrl !== null && serverUrl !== "" && typeof serverUrl !== "string") {
+        throw new HttpError(400, "bad_request", "serverUrl must be string");
+      }
+      if (serverUrl && !/^https?:\/\//.test(serverUrl)) {
+        throw new HttpError(400, "bad_request", "serverUrl must be http(s) URL");
+      }
+      const config = {};
+      if (enabled !== undefined) config.enabled = Boolean(enabled);
+      if (topic) config.topic = String(topic);
+      if (serverUrl) config.serverUrl = String(serverUrl).replace(/\/+$/, "");
+      saveChannelConfig("ntfy", { config });
+      eventLog?.log("channels.ntfy_updated", { enabled: config.enabled });
+      const status = await channelsApi().ntfy.status();
+      return { ok: true, connected: status.connected };
+    },
+
+    async testNtfy(ctx) {
+      const r = await channelsApi().ntfy.test();
+      eventLog?.log("channels.ntfy_test", { sent: r.sent });
+      if (!r.sent) throw new HttpError(502, "channel_error", `ntfy test failed: ${r.reason || "unknown"}`);
+      return { ok: true };
+    },
+
+    // ---- Bark（m4b；deviceKey 加密，serverUrl 可自建） -----------------------
+    async updateBark(ctx) {
+      const { enabled, serverUrl, deviceKey } = ctx.body || {};
+      if (deviceKey !== undefined && deviceKey !== null && deviceKey !== "" && typeof deviceKey !== "string") {
+        throw new HttpError(400, "bad_request", "deviceKey must be string");
+      }
+      if (serverUrl !== undefined && serverUrl !== null && serverUrl !== "" && typeof serverUrl !== "string") {
+        throw new HttpError(400, "bad_request", "serverUrl must be string");
+      }
+      if (serverUrl && !/^https?:\/\//.test(serverUrl)) {
+        throw new HttpError(400, "bad_request", "serverUrl must be http(s) URL");
+      }
+      const config = {};
+      if (enabled !== undefined) config.enabled = Boolean(enabled);
+      if (deviceKey) config.deviceKeyAlias = `${String(deviceKey).slice(0, 6)}…`;
+      if (serverUrl) config.serverUrl = String(serverUrl).replace(/\/+$/, "");
+      saveChannelConfig("bark", { config, secret: deviceKey || undefined });
+      eventLog?.log("channels.bark_updated", { enabled: config.enabled });
+      const status = await channelsApi().bark.status();
+      return { ok: true, connected: status.connected };
+    },
+
+    async testBark(ctx) {
+      const r = await channelsApi().bark.test();
+      eventLog?.log("channels.bark_test", { sent: r.sent });
+      if (!r.sent) throw new HttpError(502, "channel_error", `bark test failed: ${r.reason || "unknown"}`);
       return { ok: true };
     },
 

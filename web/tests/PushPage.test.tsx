@@ -85,6 +85,108 @@ describe('PushPage（三渠道平权 + 矩阵迁移到设置页）', () => {
   })
 })
 
+// ---- m4b 三新渠道:企业微信 / ntfy / Bark ----------------------------------------
+describe('m4b 新渠道卡片（企业微信/ntfy/Bark）', () => {
+  it('三卡渲染,默认未配置,测试按钮禁用', async () => {
+    renderWithProviders(<PushPage />)
+    expect(await screen.findByTestId('wecom-card')).toBeInTheDocument()
+    expect(screen.getByTestId('ntfy-card')).toBeInTheDocument()
+    expect(screen.getByTestId('bark-card')).toBeInTheDocument()
+    expect(await screen.findByTestId('wecom-status')).toHaveTextContent('未配置')
+    expect(screen.getByTestId('ntfy-status')).toHaveTextContent('未配置')
+    expect(screen.getByTestId('bark-status')).toHaveTextContent('未配置')
+    expect(screen.getByTestId('wecom-test')).toBeDisabled()
+    expect(screen.getByTestId('ntfy-test')).toBeDisabled()
+    expect(screen.getByTestId('bark-test')).toBeDisabled()
+  })
+
+  it('企业微信:填 webhook key 保存断言 PUT body;已配置后测试按钮可发', async () => {
+    const user = userEvent.setup()
+    const bodies: unknown[] = []
+    // 状态化 mock:PUT 成功后 configured 翻转,invalidate 重查自然生效
+    let wecomConfigured = false
+    const channelJson = () =>
+      HttpResponse.json({
+        webpush: { enabled: false, configured: false, subscriberCount: 0 },
+        telegram: { enabled: false, connected: false, botAlias: null, chatIdAlias: null },
+        feishu: { enabled: false, connected: false, appAlias: null, lastEventAt: null },
+        wecom: { enabled: wecomConfigured, configured: wecomConfigured, webhookKeyAlias: wecomConfigured ? 'wk-a' : null },
+        ntfy: { enabled: false, configured: false, serverUrl: '', topic: '' },
+        bark: { enabled: false, configured: false, serverUrl: '', deviceKeyAlias: null },
+      })
+    server.use(
+      http.get('/api/channels', channelJson),
+      http.put('/api/channels/wecom', async ({ request }) => {
+        bodies.push(await request.json())
+        wecomConfigured = true
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    renderWithProviders(<PushPage />)
+    await screen.findByTestId('wecom-card')
+    expect(await screen.findByTestId('wecom-status')).toHaveTextContent('未配置')
+    expect(screen.getByTestId('wecom-save')).toBeDisabled() // 未配置且未填写
+    await user.type(screen.getByTestId('wecom-key'), 'wk-abcdef-1234')
+    expect(screen.getByTestId('wecom-save')).toBeEnabled()
+    await user.click(screen.getByTestId('wecom-save'))
+    await waitFor(() => expect(bodies[0]).toMatchObject({ enabled: true, webhookKey: 'wk-abcdef-1234' }))
+    // 保存触发 invalidate → 重查后状态翻转,测试按钮可用并 toast message
+    expect(await screen.findByTestId('wecom-status')).toHaveTextContent('已配置')
+    expect(screen.getByTestId('wecom-test')).toBeEnabled()
+    await user.click(screen.getByTestId('wecom-test'))
+    expect(await screen.findByText('企业微信测试消息已发送')).toBeInTheDocument()
+  })
+
+  it('ntfy:填 server + topic 保存断言 PUT body', async () => {
+    const user = userEvent.setup()
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/channels/ntfy', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    renderWithProviders(<PushPage />)
+    await screen.findByTestId('ntfy-card')
+    expect(screen.getByTestId('ntfy-save')).toBeDisabled()
+    await user.type(screen.getByTestId('ntfy-server'), 'https://ntfy.example.com')
+    await user.type(screen.getByTestId('ntfy-topic'), 'my-tesla')
+    expect(screen.getByTestId('ntfy-save')).toBeEnabled()
+    await user.click(screen.getByTestId('ntfy-save'))
+    await waitFor(() =>
+      expect(bodies[0]).toMatchObject({ enabled: true, serverUrl: 'https://ntfy.example.com', topic: 'my-tesla' }),
+    )
+  })
+
+  it('Bark:已配置状态下留空保存,body 不含 deviceKey(留空=不修改)', async () => {
+    const user = userEvent.setup()
+    const bodies: unknown[] = []
+    server.use(
+      http.get('/api/channels', () =>
+        HttpResponse.json({
+          webpush: { enabled: false, configured: false, subscriberCount: 0 },
+          telegram: { enabled: false, connected: false, botAlias: null, chatIdAlias: null },
+          feishu: { enabled: false, connected: false, appAlias: null, lastEventAt: null },
+          wecom: { enabled: false, configured: false, webhookKeyAlias: null },
+          ntfy: { enabled: false, configured: false, serverUrl: '', topic: '' },
+          bark: { enabled: true, configured: true, serverUrl: 'https://api.day.app', deviceKeyAlias: 'abcd' },
+        }),
+      ),
+    )
+    server.use(
+      http.put('/api/channels/bark', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    renderWithProviders(<PushPage />)
+    expect(await screen.findByTestId('bark-status')).toHaveTextContent('已配置')
+    // 密钥框留空直接保存:仅 enabled,不带 deviceKey
+    await user.click(screen.getByTestId('bark-save'))
+    await waitFor(() => expect(bodies[0]).toEqual({ enabled: true }))
+  })
+})
+
 // ---- iOS PWA 推送体验:安装引导 / 权限被拒恢复 / 订阅自愈 ------------------------
 describe('WebPush iOS PWA 体验', () => {
   const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'

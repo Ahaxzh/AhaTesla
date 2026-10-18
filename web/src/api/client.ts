@@ -173,6 +173,16 @@ export const api = {
   saveTelegram: (payload: { enabled: boolean; botToken?: string; chatId?: string }) =>
     put<{ ok: boolean; connected: boolean }>('/api/channels/telegram', payload),
   testTelegram: () => post<{ ok: boolean }>('/api/channels/telegram/test'),
+  // ---- m4b 三新渠道:企业微信 / ntfy / Bark(密钥型字段留空=不修改) ----
+  saveWecom: (payload: { enabled: boolean; webhookKey?: string }) =>
+    put<{ ok: boolean }>('/api/channels/wecom', payload),
+  testWecom: () => post<{ ok: boolean; message: string }>('/api/channels/wecom/test'),
+  saveNtfy: (payload: { enabled: boolean; serverUrl?: string; topic?: string }) =>
+    put<{ ok: boolean }>('/api/channels/ntfy', payload),
+  testNtfy: () => post<{ ok: boolean; message: string }>('/api/channels/ntfy/test'),
+  saveBark: (payload: { enabled: boolean; serverUrl?: string; deviceKey?: string }) =>
+    put<{ ok: boolean }>('/api/channels/bark', payload),
+  testBark: () => post<{ ok: boolean; message: string }>('/api/channels/bark/test'),
   pushRulesV2: () => get<PushRulesV2>('/api/push-rules'),
   setPushRulesV2: (payload: PushRulesV2) => put<PushRulesV2>('/api/push-rules', payload),
   // ---- m4c：BYO 模型（OpenAI 兼容，密钥服务端加密，回显只给别名） ----

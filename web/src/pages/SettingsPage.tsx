@@ -40,6 +40,9 @@ const CHANNELS: { id: PushChannelId; label: string }[] = [
   { id: 'webpush', label: 'Web Push' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'feishu', label: '飞书' },
+  { id: 'wecom', label: '企业微信' },
+  { id: 'ntfy', label: 'ntfy' },
+  { id: 'bark', label: 'Bark' },
 ]
 
 const THEME_OPTIONS: { id: ThemeSetting; key: string; zh: string }[] = [
@@ -540,7 +543,7 @@ export default function SettingsPage() {
             <h2 className="section-title">
               <BellRing className="h-4 w-4 text-tesla" /> {t('settings.nav.push', '推送')}
             </h2>
-            <p className="section-desc mt-1">{t('settings.push.desc', '6 类事件 × 3 渠道独立开关 · 渠道密钥在「推送」页配置')}</p>
+            <p className="section-desc mt-1">{t('settings.push.desc', '6 类事件 × 6 渠道独立开关 · 渠道密钥在「推送」页配置')}</p>
             {matrix ? (
               <div className="mt-4 divide-y divide-white/[0.05]" data-testid="push-matrix-list">
                 {EVENTS.map((ev) => {
@@ -558,7 +561,7 @@ export default function SettingsPage() {
                         </div>
                         <div className="mt-0.5 text-[11px] text-slate-500">{ev.desc}</div>
                       </div>
-                      {/* 渠道 chips：点亮即启用，一行搞定 3 渠道 */}
+                      {/* 渠道 chips：点亮即启用，一行搞定 6 渠道 */}
                       <div className="flex shrink-0 gap-1.5">
                         {CHANNELS.map((ch) => {
                           const on = Boolean(matrix[ev.id]?.[ch.id])

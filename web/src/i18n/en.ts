@@ -55,7 +55,7 @@ export const EN: Record<string, string> = {
   'settings.ai.save': 'Save',
   'settings.ai.test': 'Test connection',
   'settings.ai.testing': 'Testing…',
-  'settings.push.desc': '6 events × 3 channels · Channel keys live on the Push page',
+  'settings.push.desc': '6 events × 6 channels · Channel keys live on the Push page',
   'push.daily.label': 'Daily digest',
   'push.daily.desc': "Yesterday's summary at 08:00",
   'settings.system.desc': 'Service status · Read-only shield · Event log',

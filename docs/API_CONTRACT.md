@@ -76,8 +76,8 @@
 
 ## 6. 推送（渠道抽象，v1 演进）
 
-### 渠道配置（三渠道平权，AC-10.1）
-- `GET /api/channels` → {webpush:{enabled, subscriberCount}, telegram:{enabled, connected}, feishu:{enabled, connected, appAlias}}
+### 渠道配置（六渠道平权，AC-10.1 + m4b）
+- `GET /api/channels` → {webpush:{enabled, subscriberCount}, telegram:{enabled, connected}, feishu:{enabled, connected, appAlias}, wecom:{enabled, connected, webhookKeyAlias}, ntfy:{enabled, connected, topic, serverUrl}, bark:{enabled, connected, deviceKeyAlias, serverUrl}}
 - `PUT /api/channels/webpush` {enabled} → {ok}
 - `GET /api/push/env`（匿名）→ {https: bool}（AC-11.0 前端置灰依据）
 - `POST /api/push/webpush/subscribe` {endpoint, keys:{p256dh, auth}} → {ok}
@@ -87,11 +87,17 @@
 - `POST /api/channels/telegram/test` → {ok}
 - `PUT /api/channels/feishu` {enabled, appId, appSecret} → {ok, connected}
 - `POST /api/channels/feishu/test` → {ok, message}
+- `PUT /api/channels/wecom` {enabled, webhookKey} → {ok, connected}（企业微信群机器人，webhookKey 密文存储，m4b）
+- `POST /api/channels/wecom/test` → {ok}
+- `PUT /api/channels/ntfy` {enabled, topic, serverUrl?} → {ok, connected}（serverUrl 缺省 https://ntfy.sh，可自建，m4b）
+- `POST /api/channels/ntfy/test` → {ok}
+- `PUT /api/channels/bark` {enabled, deviceKey, serverUrl?} → {ok, connected}（iOS Bark，deviceKey 密文存储，serverUrl 缺省 https://api.day.app，m4b）
+- `POST /api/channels/bark/test` → {ok}
 
 ### 推送规则（矩阵化）
-- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}}
+- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu,wecom,ntfy,bark}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}}
 - `PUT /api/push-rules` {matrix} → {ok}
-  - v1 为每事件单一 bool → v2 为 6 事件 × 3 渠道矩阵（P6 分组3）；weeklyReportDay 并入 settings
+  - v1 为每事件单一 bool → v2 为 6 事件 × 6 渠道矩阵（P6 分组3 + m4b 三新渠道）；新渠道默认全关（用户显式开）；weeklyReportDay 并入 settings
   - `daily`（m4c-c1）：昨日用车日报，每日 08:00 推送；昨日无行程且无充电自动跳过；不落报告归档表
 
 ### 报告（v2 新增）
@@ -151,7 +157,7 @@
 | 4 | GET /api/charging（month 筛选）· /api/charging/:id · PUT /:id/cost | ✅ 已实现 | powerCurve 峰值打点 + 桩端效率 + costSource 三态（M2） |
 | 5 | GET/PUT /api/pricing（defaultRate/locations TOU 双模）· /api/pricing/history | ✅ 已实现 | kv pricing:location-tou:<id>（M1 承接） |
 | 5 | POST /api/ledger/summary · /api/ledger/recalculate(+jobId) | ✅ 已实现 | 月度账本 + 7 天补录窗口 + 进度（M1） |
-| 6 | 渠道配置（webpush/telegram/feishu）+ /api/push/env | ✅ 已实现 | 三渠道平权 AC-10.1；Telegram/飞书密文 AES-GCM 落库（M2） |
+| 6 | 渠道配置（webpush/telegram/feishu/wecom/ntfy/bark）+ /api/push/env | ✅ 已实现 | 六渠道平权 AC-10.1 + m4b；Telegram/飞书/企微 webhookKey/Bark deviceKey 密文 AES-GCM 落库 |
 | 6 | GET/PUT /api/push-rules（6×3 矩阵） | ✅ 已实现 | B4 矩阵替换 v1 单 bool（M2）；daily 事件 m4c 新增 |
 | 6 | /api/reports（列表/详情/generate） | ✅ 已实现 | 不可变快照 report_snapshots；周一/月初 08:00 定时（M2） |
 | 7 | /api/system/status（latencyMs/readonlyVerified）· /events（deliveryMs）· /health-lite | ✅ 已实现 | GA-31/32；health-lite 匿名供失联横幅轮询（M2） |

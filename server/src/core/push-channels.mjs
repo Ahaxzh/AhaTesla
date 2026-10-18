@@ -8,7 +8,7 @@
 // 安全红线：botToken/appSecret/WebPush 私钥一律经 secret-box 加密落库或存
 // secret.key 文件；明文不进日志、不进 API 回传、不进错误信息。
 
-import { getStore } from "./state.mjs";
+import { getStore, clearChannelSecret } from "./state.mjs";
 import { encryptSecret, decryptSecret } from "./secret-box.mjs";
 import { createFeishuChannel } from "./feishu.mjs";
 
@@ -19,12 +19,15 @@ const CH_KEY = (id) => `push:channel:${id}`;
 export function saveChannelConfig(id, { config = {}, secret }) {
   const store = getStore();
   const cur = store.getChannel(id) || { config: {}, secretEnc: null };
+  const clearing = secret === "";
   store.putChannel(id, {
     config: { ...cur.config, ...config },
     secretEnc: secret !== undefined && secret !== null && secret !== ""
       ? encryptSecret(String(secret))
-      : (secret === "" ? null : cur.secretEnc)
+      : (clearing ? null : cur.secretEnc)
   });
+  // putChannel 的 coalesce 语义：null 不覆盖旧密文 —— 显式清空走单独 UPDATE
+  if (clearing) clearChannelSecret(store, id);
   const saved = store.getChannel(id);
   return { config: saved.config, hasSecret: Boolean(saved.secretEnc) };
 }
@@ -213,15 +216,181 @@ export function createWebPushChannel({
   };
 }
 
+// ---- 企业微信 / ntfy / Bark（m4b：矩阵 6 渠道） -------------------------------
+
+/** 带超时的 fetch + JSON 解析；任何异常返回 null（渠道级失败隔离） */
+async function fetchJsonTimed(fetchImpl, url, init, timeoutMs, logger, tag) {
+  try {
+    const resp = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+    return { ok: resp.ok, status: resp.status, data: await resp.json().catch(() => ({})) };
+  } catch (error) {
+    logger(`${tag} request error: ${String(error?.message || error).slice(0, 120)}`);
+    return null;
+  }
+}
+
+/** 企业微信群机器人：webhook key 加密落库，markdown 卡片 */
+export function createWecomChannel({ fetchImpl = globalThis.fetch, logger = () => {} } = {}) {
+  function cfg() {
+    return loadChannelConfig("wecom");
+  }
+  function enabled() {
+    const { config, secret } = cfg();
+    return Boolean(config.enabled && config.webhookKeyAlias && secret);
+  }
+  async function push({ title, body }) {
+    const { secret } = cfg();
+    const r = await fetchJsonTimed(
+      fetchImpl,
+      `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${secret}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ msgtype: "markdown", markdown: { content: `**${title}**\n${body || ""}` } })
+      },
+      5000,
+      logger,
+      "wecom"
+    );
+    if (!r) return { sent: false, reason: "network_error" };
+    // 企业微信成功 errcode=0；errcode 93000 系列是 key 无效
+    return { sent: r.data?.errcode === 0, reason: r.data?.errcode === 0 ? null : `wecom_errcode_${r.data?.errcode ?? r.status}` };
+  }
+  return {
+    id: "wecom",
+    enabled,
+    async status() {
+      const { config } = cfg();
+      return {
+        enabled: enabled(),
+        connected: enabled(), // webhook 无只读探测 API，configured 即视为可达；test 端点真发一条验证
+        webhookKeyAlias: config.webhookKeyAlias || null
+      };
+    },
+    async test() {
+      if (!enabled()) return { sent: false, reason: "channel_disabled" };
+      return push({ title: "AhaTesla 测试通知", body: "✅ 企业微信通道测试成功" });
+    },
+    async send({ title, body }) {
+      if (!enabled()) return { sent: false, reason: "disabled" };
+      return push({ title, body });
+    }
+  };
+}
+
+/** ntfy：topic 即配置（无密钥）；Title/Click 头承载标题与跳转 */
+export function createNtfyChannel({ fetchImpl = globalThis.fetch, logger = () => {} } = {}) {
+  function cfg() {
+    return loadChannelConfig("ntfy");
+  }
+  function enabled() {
+    const { config } = cfg();
+    return Boolean(config.enabled && config.topic);
+  }
+  function baseUrl(config) {
+    return String(config.serverUrl || "https://ntfy.sh").replace(/\/+$/, "");
+  }
+  async function push({ title, body, url }) {
+    const { config } = cfg();
+    const r = await fetchJsonTimed(
+      fetchImpl,
+      `${baseUrl(config)}/${encodeURIComponent(config.topic)}`,
+      {
+        method: "POST",
+        headers: { Title: title, ...(url ? { Click: url } : {}) },
+        body: `【AhaTesla】${body || ""}`
+      },
+      5000,
+      logger,
+      "ntfy"
+    );
+    if (!r) return { sent: false, reason: "network_error" };
+    return { sent: r.ok, reason: r.ok ? null : `ntfy_status_${r.status}` };
+  }
+  return {
+    id: "ntfy",
+    enabled,
+    async status() {
+      const { config } = cfg();
+      return {
+        enabled: enabled(),
+        connected: enabled(),
+        topic: config.topic || null,
+        serverUrl: config.serverUrl || "https://ntfy.sh"
+      };
+    },
+    async test() {
+      if (!enabled()) return { sent: false, reason: "channel_disabled" };
+      return push({ title: "AhaTesla 测试通知", body: "✅ ntfy 通道测试成功", url: "/" });
+    },
+    async send({ title, body, url }) {
+      if (!enabled()) return { sent: false, reason: "disabled" };
+      return push({ title, body, url });
+    }
+  };
+}
+
+/** Bark（iOS）：device key 加密落库；支持自建 server */
+export function createBarkChannel({ fetchImpl = globalThis.fetch, logger = () => {} } = {}) {
+  function cfg() {
+    return loadChannelConfig("bark");
+  }
+  function enabled() {
+    const { config, secret } = cfg();
+    return Boolean(config.enabled && config.deviceKeyAlias && secret);
+  }
+  async function push({ title, body }) {
+    const { config, secret } = cfg();
+    const base = String(config.serverUrl || "https://api.day.app").replace(/\/+$/, "");
+    const r = await fetchJsonTimed(
+      fetchImpl,
+      `${base}/${secret}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title, body: body || "", group: "AhaTesla" })
+      },
+      5000,
+      logger,
+      "bark"
+    );
+    if (!r) return { sent: false, reason: "network_error" };
+    return { sent: r.ok && r.data?.code === 200, reason: r.ok && r.data?.code === 200 ? null : `bark_status_${r.status}` };
+  }
+  return {
+    id: "bark",
+    enabled,
+    async status() {
+      const { config } = cfg();
+      return {
+        enabled: enabled(),
+        connected: enabled(),
+        deviceKeyAlias: config.deviceKeyAlias || null,
+        serverUrl: config.serverUrl || "https://api.day.app"
+      };
+    },
+    async test() {
+      if (!enabled()) return { sent: false, reason: "channel_disabled" };
+      return push({ title: "AhaTesla 测试通知", body: "✅ Bark 通道测试成功" });
+    },
+    async send({ title, body }) {
+      if (!enabled()) return { sent: false, reason: "disabled" };
+      return push({ title, body });
+    }
+  };
+}
+
 // ---- Notifier 门面：矩阵化 dispatch + SLA 埋点 -------------------------------
 
 export const PUSH_EVENTS = ["tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly"];
-export const PUSH_CHANNELS = ["webpush", "telegram", "feishu"];
+export const PUSH_CHANNELS = ["webpush", "telegram", "feishu", "wecom", "ntfy", "bark"];
 
-// state.pushRules v2：{matrix:{tripEnd:{webpush,telegram,feishu},…}, weeklyReportDay}
+// state.pushRules v2：{matrix:{tripEnd:{webpush,…,bark},…}, weeklyReportDay}；新渠道默认关（用户显式开）
 export function defaultMatrix() {
   const m = {};
-  for (const ev of PUSH_EVENTS) m[ev] = { webpush: false, telegram: false, feishu: true };
+  for (const ev of PUSH_EVENTS) {
+    m[ev] = { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false };
+  }
   return m;
 }
 
@@ -237,29 +406,38 @@ export function matrixFromRules(rules) {
       monthly: rules?.monthlyReport ?? rules?.monthly
     };
     for (const ev of PUSH_EVENTS) {
-      if (legacy[ev] === false) m[ev] = { webpush: false, telegram: false, feishu: false };
-      else if (legacy[ev] === true) m[ev] = { webpush: true, telegram: true, feishu: true };
+      // v1 语义是“全渠道同开同关”，覆盖到全部六渠道
+      if (legacy[ev] === false) m[ev] = Object.fromEntries(PUSH_CHANNELS.map((c) => [c, false]));
+      else if (legacy[ev] === true) m[ev] = Object.fromEntries(PUSH_CHANNELS.map((c) => [c, true]));
     }
     return m;
   }
+  // 只保留已知六渠道键并归一布尔（未知渠道键剔除，防止脏数据进矩阵）
   const out = {};
   for (const ev of PUSH_EVENTS) {
-    out[ev] = { ...(rules.matrix[ev] || {}) };
-    for (const ch of PUSH_CHANNELS) if (typeof out[ev][ch] !== "boolean") out[ev][ch] = false;
+    const row = rules.matrix[ev] || {};
+    out[ev] = {};
+    for (const ch of PUSH_CHANNELS) out[ev][ch] = row[ch] === true;
   }
   return out;
 }
 
-export function createNotifier({ state, eventLog, feishu = null, telegram = null, webpush = null, ai = null, fetchImpl = globalThis.fetch } = {}) {
+export function createNotifier({ state, eventLog, feishu = null, telegram = null, webpush = null, wecom = null, ntfy = null, bark = null, ai = null, fetchImpl = globalThis.fetch } = {}) {
   // feishu 渠道复用既有实现（state.feishu 直连），其余走新配置层
   const feishuChannel = feishu || createFeishuChannel(state, { logger: (m) => logger?.("feishu.error", { message: m }) });
   const telegramChannel = telegram || createTelegramChannel({ fetchImpl, logger: (m) => logger?.("telegram.error", { message: m }) });
   const webpushChannel = webpush;
+  const wecomChannel = wecom || createWecomChannel({ fetchImpl, logger: (m) => logger?.("wecom.error", { message: m }) });
+  const ntfyChannel = ntfy || createNtfyChannel({ fetchImpl, logger: (m) => logger?.("ntfy.error", { message: m }) });
+  const barkChannel = bark || createBarkChannel({ fetchImpl, logger: (m) => logger?.("bark.error", { message: m }) });
 
   const channels = {
     feishu: feishuChannel,
     telegram: telegramChannel,
-    ...(webpushChannel ? { webpush: webpushChannel } : {})
+    ...(webpushChannel ? { webpush: webpushChannel } : {}),
+    wecom: wecomChannel,
+    ntfy: ntfyChannel,
+    bark: barkChannel
   };
 
   function eventTitle(event) {

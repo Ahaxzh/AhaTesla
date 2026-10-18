@@ -41,16 +41,19 @@ describe('SettingsPage', () => {
     expect(screen.queryByTestId('resync-meta')).not.toBeInTheDocument()
   })
 
-  it('推送矩阵：6 事件含每日早报行', async () => {
+  it('推送矩阵：6 事件 × 6 渠道，含每日早报行', async () => {
     renderWithProviders(<SettingsPage />)
     // 矩阵列表要等 pushRules 查询返回（此前是骨架屏）
     const list = await screen.findByTestId('push-matrix-list')
-    // 6 行事件（tripEnd/chargingStart/chargingDone/daily/weekly/monthly）
-    expect(within(list).getAllByTestId(/^matrix-/).length).toBeGreaterThanOrEqual(6 * 3)
+    // 6 行事件 × 6 渠道 chip 全渲染（m4b 起 wecom/ntfy/bark 并列）
+    expect(within(list).getAllByTestId(/^matrix-/).length).toBeGreaterThanOrEqual(6 * 6)
     expect(within(list).getByText('每日早报')).toBeInTheDocument()
-    // msw 默认 daily: webpush=true → chip 按钮处于按下态
+    // msw 默认 daily: webpush=true → chip 按钮处于按下态;新渠道默认关
     expect(screen.getByTestId('matrix-daily-webpush')).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByTestId('matrix-daily-feishu')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('matrix-daily-wecom')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('matrix-daily-ntfy')).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByTestId('matrix-daily-bark')).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('AI 助手分区：填写保存断言 PUT body，测试按钮成功 toast', async () => {
