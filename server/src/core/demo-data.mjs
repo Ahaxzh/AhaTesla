@@ -81,21 +81,23 @@ export function buildDemoDataset(anchorMs = Date.now()) {
   let driveId = 0;
   let chargeId = 0;
   let odometer = 8420;
+  let odometer2 = 1580; // m4e 第二辆车独立里程
 
   // 季节温度（按月，°C）：冬低夏高 + 随机抖动
   const monthTemp = [4, 6, 10, 15, 20, 25, 32, 32, 27, 20, 13, 6];
 
-  const addDrive = (startMs, endMs, fromGf, toGf, km) => {
+  const addDrive = (startMs, endMs, fromGf, toGf, km, carId = 1) => {
     driveId += 1;
     const p = bjParts(startMs);
     const dayTemp = monthTemp[p.mo - 1] + (rand() - 0.5) * 4;
     const tempAvg = round(dayTemp + (p.h < 12 ? -2 : 3), 1);
     const durationMin = Math.max(6, Math.round(km / (28 + rand() * 14) * 60));
     const idealUsed = round(km * (1.06 + rand() * 0.1), 2);
-    odometer = round(odometer + km, 1);
+    if (carId === 2) odometer2 = round(odometer2 + km, 1);
+    else odometer = round(odometer + km, 1);
     drives.push({
       id: driveId,
-      car_id: 1,
+      car_id: carId,
       start_at: new Date(startMs).toISOString(),
       end_at: new Date(endMs).toISOString(),
       distance_km: round(km, 2),
@@ -105,7 +107,7 @@ export function buildDemoDataset(anchorMs = Date.now()) {
       end_address_id: toGf === 1 ? 11 : toGf === 2 ? 22 : 33,
       start_geofence_id: fromGf,
       end_geofence_id: toGf,
-      efficiency: 0.152, // kWh/km（≈15.2 kWh/100km）
+      efficiency: carId === 2 ? 0.165 : 0.152, // kWh/km（Y 略高）
       ideal_used_km: idealUsed,
       rated_used_km: round(idealUsed * 0.96, 2),
       outside_temp_avg: tempAvg,
@@ -114,12 +116,12 @@ export function buildDemoDataset(anchorMs = Date.now()) {
       start_lng: jitterCoord(rand, gfById.get(fromGf).lng, 200),
       end_lat: jitterCoord(rand, gfById.get(toGf).lat, 200),
       end_lng: jitterCoord(rand, gfById.get(toGf).lng, 200),
-      end_odometer: odometer,
+      end_odometer: carId === 2 ? odometer2 : odometer,
       position_count: 0,
     });
   };
 
-  const addHomeCharge = (dayStartMs, kwhNeeded) => {
+  const addHomeCharge = (dayStartMs, kwhNeeded, carId = 1) => {
     chargeId += 1;
     const { y, mo, d } = bjParts(dayStartMs);
     const startMs = bjTime(y, mo, d, 23, Math.floor(rand() * 20));
@@ -129,6 +131,7 @@ export function buildDemoDataset(anchorMs = Date.now()) {
     const startBatt = Math.max(12, Math.round(78 - kwh * 1.4 + rand() * 6));
     charges.push({
       id: chargeId,
+      car_id: carId,
       start_at: new Date(startMs).toISOString(),
       end_at: new Date(endMs).toISOString(),
       charge_energy_added: kwh,
@@ -147,7 +150,7 @@ export function buildDemoDataset(anchorMs = Date.now()) {
     });
   };
 
-  const addSupercharge = (dayStartMs) => {
+  const addSupercharge = (dayStartMs, carId = 1) => {
     chargeId += 1;
     const { y, mo, d } = bjParts(dayStartMs);
     const startMs = bjTime(y, mo, d, 13, 30 + Math.floor(rand() * 90));
@@ -157,6 +160,7 @@ export function buildDemoDataset(anchorMs = Date.now()) {
     const startBatt = Math.round(14 + rand() * 18);
     charges.push({
       id: chargeId,
+      car_id: carId,
       start_at: new Date(startMs).toISOString(),
       end_at: new Date(endMs).toISOString(),
       charge_energy_added: kwh,
@@ -217,6 +221,17 @@ export function buildDemoDataset(anchorMs = Date.now()) {
 
     if (dayKm > 0 && day >= 1) addHomeCharge(dayStart, dayKm * 0.155);
     if (!isWeekend && day > 25 && rand() < 0.04) addSupercharge(dayStart);
+
+    // m4e 第二辆车（Model Y Demo）：约每 3 天一段接送/购物短途 + 当夜家充
+    if (day % 3 === 0 && day >= 1) {
+      const kmy = 8 + rand() * 7;
+      const sy = bjTime(y, mo, d, 16, Math.floor(rand() * 90));
+      const ey = sy + Math.round(kmy / 26 * 3600_000);
+      if (ey <= nowMs - 3 * 3600_000) {
+        addDrive(sy, ey, 1, 2, kmy, 2);
+        addHomeCharge(dayStart, kmy * 0.17, 2);
+      }
+    }
   }
 
   // 「今天」近 3 小时一段短途：让 24h 时间轴/仪表盘有活数据
@@ -226,15 +241,26 @@ export function buildDemoDataset(anchorMs = Date.now()) {
   }
 
   const byEndDesc = [...drives].sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
+  const car1Last = byEndDesc.find((d) => d.car_id === 1);
+  const car2Last = byEndDesc.find((d) => d.car_id === 2);
+  const car1 = {
+    id: 1, name: "Model 3 Demo", model: "Model 3", efficiency: 0.152,
+    current_battery: 62, range_km: 318,
+    odometer_km: odometer,
+    position_at: car1Last?.end_at ?? null,
+    last_drive_at: car1Last?.end_at ?? null,
+  };
+  const car2 = {
+    id: 2, name: "Model Y Demo", model: "Model Y", efficiency: 0.165,
+    current_battery: 58, range_km: 280,
+    odometer_km: odometer2,
+    position_at: car2Last?.end_at ?? null,
+    last_drive_at: car2Last?.end_at ?? null,
+  };
   return {
     generatedAt: nowMs,
-    car: {
-      id: 1, name: "Model 3 Demo", model: "Model 3", efficiency: 0.152,
-      current_battery: 62, range_km: 318,
-      odometer_km: odometer,
-      position_at: byEndDesc[0]?.end_at ?? null,
-      last_drive_at: byEndDesc[0]?.end_at ?? null,
-    },
+    car: car1,
+    cars: [car1, car2],
     drives,
     drivesByEndDesc: byEndDesc,
     charges,
@@ -295,14 +321,22 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
 
   async function query(sql, params = []) {
     const s = String(sql).replace(/\s+/g, " ").trim();
+    // m4e：多数查询首位参数是可选 carId（null=不过滤）
+    const carIdParam = (v) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : null);
 
     // --- geofences / addresses / cars ---
     if (s.includes("FROM geofences")) return dataset.geofences.map((g) => ({ ...g }));
     if (s.includes("FROM addresses")) return dataset.addresses.map((a) => ({ ...a }));
     if (s.includes("FROM cars c ORDER BY")) {
-      return [{ id: dataset.car.id, name: dataset.car.name, model: dataset.car.model, last_drive_at: dataset.car.last_drive_at }];
+      // getCars（m4e 车切换器）
+      return dataset.cars.map((c) => ({ id: c.id, name: c.name }));
     }
-    if (s.includes("FROM cars c")) return [{ ...dataset.car }]; // getCarSnapshot
+    if (s.includes("FROM cars c")) {
+      // getCarSnapshot：带 $1 时按车返回，否则主车
+      const want = carIdParam(params[0]);
+      const car = dataset.cars.find((c) => c.id === want) ?? dataset.car;
+      return [{ ...car }];
+    }
 
     // --- 状态 / 系统统计 ---
     if (s.includes("WHEN ch.id IS NOT NULL")) {
@@ -313,7 +347,7 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
     }
     if (s.includes("COALESCE(sum(d.distance), 0) AS distance_km") && s.includes("drive_minutes")) {
       const since = isoLit(sql, "d.end_date >=");
-      const rows = dataset.drives.filter((d) => since == null || new Date(d.end_at).getTime() >= since);
+      const rows = dataset.drives.filter((d) => (since == null || new Date(d.end_at).getTime() >= since) && (carIdParam(params[0]) == null || d.car_id === carIdParam(params[0])));
       return [{
         distance_km: round(rows.reduce((a, d) => a + d.distance_km, 0), 2),
         drive_count: rows.length,
@@ -322,20 +356,24 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
     }
     if (s.includes("COALESCE(sum(d.distance), 0) AS distance_km")) {
       const since = isoLit(sql, "d.end_date >=");
-      const rows = dataset.drives.filter((d) => since == null || new Date(d.end_at).getTime() >= since);
+      const rows = dataset.drives.filter((d) => (since == null || new Date(d.end_at).getTime() >= since) && (carIdParam(params[0]) == null || d.car_id === carIdParam(params[0])));
       return [{ distance_km: round(rows.reduce((a, d) => a + d.distance_km, 0), 2) }];
     }
     if (s.includes("drive_count")) {
-      return [{ drive_count: dataset.drives.length, last_drive_at: dataset.car.last_drive_at }];
+      const want = carIdParam(params[0]);
+      const rows = want == null ? dataset.drives : dataset.drives.filter((d) => d.car_id === want);
+      const car = want == null ? dataset.car : dataset.cars.find((c) => c.id === want);
+      return [{ drive_count: rows.length, last_drive_at: car?.last_drive_at ?? null }];
     }
 
-    // --- 行程列表（listDrivesSql：WITH matched + 尾部 LIMIT $1 OFFSET $2） ---
+    // --- 行程列表（listDrivesSql：WITH matched + params [carId, limit, offset]） ---
     if (s.includes("WITH matched AS")) {
       const fromMs = isoLit(sql, "d.end_date >=");
       const toMs = isoLit(sql, "d.end_date <=");
-      const rows = dataset.drivesByEndDesc.filter((d) => inRange(d.end_at, fromMs, toMs));
-      const limit = Number(params[0]) || 50;
-      const offset = Number(params[1]) || 0;
+      const want = carIdParam(params[0]);
+      const rows = dataset.drivesByEndDesc.filter((d) => inRange(d.end_at, fromMs, toMs) && (want == null || d.car_id === want));
+      const limit = Number(params[1]) || 50;
+      const offset = Number(params[2]) || 0;
       return rows.slice(offset, offset + limit).map((d) => ({ ...d }));
     }
     if (s.includes("count(*)::int AS total FROM drives")) {
@@ -380,7 +418,10 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
     const month = monthMatch ? monthMatch[1] : null;
     const chargeInMonth = (c) => !month || c.start_at.slice(0, 7) === month;
     if (s.includes("FROM charging_processes cp LEFT JOIN geofences") && s.includes("LIMIT")) {
-      const rows = [...dataset.charges].filter(chargeInMonth).sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
+      const want = carIdParam(params[2]); // m4e：params [limit, offset, carId]
+      const rows = [...dataset.charges]
+        .filter((c) => chargeInMonth(c) && (want == null || c.car_id === want))
+        .sort((a, b) => new Date(b.end_at) - new Date(a.end_at));
       const limit = Number(params[0]) || 50;
       const offset = Number(params[1]) || 0;
       return rows.slice(offset, offset + limit).map((c) => ({
@@ -390,7 +431,8 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
       }));
     }
     if (s.includes("count(*)::int AS total FROM charging_processes")) {
-      return [{ total: dataset.charges.filter(chargeInMonth).length }];
+      const want = carIdParam(params[0]);
+      return [{ total: dataset.charges.filter((c) => chargeInMonth(c) && (want == null || c.car_id === want)).length }];
     }
 
     // --- 时间轴 / 热力图 ---
@@ -428,11 +470,12 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
       return row ? chargesCurve(row) : [];
     }
     if (s.includes("cp.end_date ASC")) {
-      // listChargingForStats（since/until 字面量可选）
+      // listChargingForStats（since/until 字面量可选；m4e $1=carId）
       const since = isoLit(sql, "cp.end_date >=");
       const until = isoLit(sql, "cp.end_date <");
+      const want = carIdParam(params[0]);
       return dataset.charges
-        .filter((c) => inRange(c.end_at, since, until))
+        .filter((c) => inRange(c.end_at, since, until) && (want == null || c.car_id === want))
         .sort((a, b) => new Date(a.end_at) - new Date(b.end_at))
         .map((c) => ({
           ...c,

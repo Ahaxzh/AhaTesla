@@ -79,7 +79,7 @@ test("P1-b 富化失败不抛:批次查询炸 → 事件照常返回(无 fifoBat
 test("P1-c enrichChargingStartEvent:电量+同站外推预估;历史<2 次省略预估", async () => {
   useMemoryStore();
   const mk = (pastRows) => fakeDb([
-    { when: (s) => s.includes("cp.geofence_id, g.name AS location_name"), rows: [{ geofence_id: 1, location_name: "超充站", cost_per_unit: 1.8 }] },
+    { when: (s) => s.includes("cp.geofence_id, cp.car_id, g.name AS location_name"), rows: [{ geofence_id: 1, location_name: "超充站", cost_per_unit: 1.8 }] },
     { when: (s) => s.includes("p.battery_level"), rows: [{ bl: 23.4 }] },
     { when: (s) => s.includes("cp.id <> $2"), rows: pastRows },
     { when: () => true, rows: [] }

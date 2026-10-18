@@ -3,6 +3,7 @@ import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
 import { driveEnergyKwh, batchesFromChargingSessions, allocateDriveCosts } from "../core/pricing-ledger.mjs";
 import { listDrivesSql, getRoutePoints, getAddresses, getGeofences, listChargingForStats } from "../core/teslamate-queries.mjs";
+import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
 
 function addressLabel(address) {
   if (!address) return null;
@@ -160,7 +161,8 @@ export function createTripsRoutes({ db, state }) {
       const { limit, offset } = clampPaging(ctx.query);
       const from = validateIso(ctx.query.from, "from");
       const to = validateIso(ctx.query.to, "to");
-      const { sql, params } = listDrivesSql({ from, to });
+      const carId = carIdFromQuery(ctx, state); // m4e:?carId= > 主车 > 不限
+      const { sql, params } = listDrivesSql({ from, to, carId });
       const rows = await db.query(sql, [...params, limit, offset]);
       const totalRow = await db.queryOne(`
         SELECT count(*)::int AS total
@@ -168,10 +170,12 @@ export function createTripsRoutes({ db, state }) {
         WHERE d.end_date IS NOT NULL
         ${from ? `AND d.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')` : ""}
         ${to ? `AND d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')` : ""}
+        ${carFilterSql(carId)}
       `);
       const items = await computeTripViews(db, rows, {
         defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history
+        history: state.pricing.history,
+        carId
       });
       return { total: totalRow ? totalRow.total : rows.length, items };
     },
@@ -181,11 +185,13 @@ export function createTripsRoutes({ db, state }) {
       if (!drive) throw new HttpError(404, "not_found", "trip not found");
       const [view] = await computeTripViews(db, [drive], {
         defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history
+        history: state.pricing.history,
+        carId: drive.car_id ?? null
       });
 
-      // FIFO 扣减明细（GA-23/24）：重建该行程的批次分配 slices
-      const charging = await listChargingForStats(db, {});
+      // FIFO 扣减明细（GA-23/24）：重建该行程的批次分配 slices（m4e:批次池与
+      // 行程同车隔离 —— 与本行程车主一致地取充电批次）
+      const charging = await listChargingForStats(db, { carId: drive.car_id ?? null });
       const batches = batchesFromChargingSessions(charging);
       const { allocations } = allocateDriveCosts({
         drives: [{ id: drive.id, start_at: drive.start_at, estimated_kwh: driveEnergyKwh(drive) }],

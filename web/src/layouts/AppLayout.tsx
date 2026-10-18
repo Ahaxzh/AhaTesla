@@ -12,6 +12,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { LogoFull } from '@/components/Logo'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCar } from '@/contexts/CarContext'
 import { setApiHandlers, api } from '@/api/client'
 import { useToast } from '@/components/Toast'
 import { HealthBanner } from '@/components/HealthBanner'
@@ -59,11 +60,14 @@ function NavItem({ to, label, labelKey, icon: Icon, testid, onClick }: {
   )
 }
 
-/** 侧栏车辆缩略状态卡（§6.1 桌面端：车辆缩略状态 + 系统健康指示灯） */
+/** 侧栏车辆缩略状态卡（§6.1 桌面端：车辆缩略状态 + 系统健康指示灯）。
+    m4e:数据按当前车拉取;多车时卡片下方渲染切换 chips(单击切车,全局数据随之刷新)。 */
 function SidebarCarCard() {
+  const { cars, currentCarId, setCurrentCarId, isMultiCar, displayName } = useCar()
+  const { t } = useI18n()
   const { data: dashboard } = useQuery({
-    queryKey: ['dashboard'],
-    queryFn: api.dashboard,
+    queryKey: ['dashboard', currentCarId],
+    queryFn: () => api.dashboard(currentCarId),
     staleTime: 60_000,
     retry: false,
   })
@@ -76,36 +80,61 @@ function SidebarCarCard() {
   const car = dashboard?.car
   const battery = car?.currentBattery
   const stateLabel =
-    car?.state === 'charging' ? '充电中'
-    : car?.state === 'driving' ? '行驶中'
-    : car?.state === 'asleep' ? '睡眠中'
-    : car?.state === 'online' ? '哨兵/在线'
-    : car?.state === 'offline' ? '离线'
-    : '待数据'
+    car?.state === 'charging' ? t('car.state.charging', '充电中')
+    : car?.state === 'driving' ? t('car.state.driving', '行驶中')
+    : car?.state === 'asleep' ? t('car.state.asleep', '睡眠中')
+    : car?.state === 'online' ? t('car.state.online', '哨兵/在线')
+    : car?.state === 'offline' ? t('car.state.offline', '离线')
+    : t('car.state.pending', '待数据')
 
   return (
-    <div className="mx-3 mb-3 rounded-xl border border-white/[0.06] bg-white/[0.03] p-3" data-testid="sidebar-car">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-medium text-slate-200">{car?.name ?? 'Tesla'}</span>
-        {/* 系统健康指示灯 */}
-        <span
-          className={`h-2 w-2 shrink-0 rounded-full ${health?.dbOk === false ? 'bg-amber-400' : 'bg-emerald-400'}`}
-          title={health?.dbOk === false ? '数据源异常' : '数据源正常'}
-          role="img"
-          aria-label={health?.dbOk === false ? '数据源异常' : '数据源正常'}
-          data-testid="sidebar-health-dot"
-        />
+    <div className="mx-3 mb-3" data-testid="sidebar-car-wrap">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3" data-testid="sidebar-car">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-xs font-medium text-slate-200">
+            {displayName(currentCarId) || car?.name || 'Tesla'}
+          </span>
+          {/* 系统健康指示灯 */}
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${health?.dbOk === false ? 'bg-amber-400' : 'bg-emerald-400'}`}
+            title={health?.dbOk === false ? t('car.health.bad', '数据源异常') : t('car.health.ok', '数据源正常')}
+            role="img"
+            aria-label={health?.dbOk === false ? t('car.health.bad', '数据源异常') : t('car.health.ok', '数据源正常')}
+            data-testid="sidebar-health-dot"
+          />
+        </div>
+        <div className="mt-1.5 flex items-baseline gap-1.5">
+          <span
+            className={`num text-lg font-semibold ${
+              battery == null ? 'text-slate-500' : battery <= 10 ? 'text-red-400' : battery <= 20 ? 'text-amber-400' : 'text-emerald-400'
+            }`}
+          >
+            {battery != null ? `${battery}%` : '--'}
+          </span>
+          <span className="text-[11px] text-slate-400">{stateLabel}</span>
+        </div>
       </div>
-      <div className="mt-1.5 flex items-baseline gap-1.5">
-        <span
-          className={`num text-lg font-semibold ${
-            battery == null ? 'text-slate-500' : battery <= 10 ? 'text-red-400' : battery <= 20 ? 'text-amber-400' : 'text-emerald-400'
-          }`}
-        >
-          {battery != null ? `${battery}%` : '--'}
-        </span>
-        <span className="text-[11px] text-slate-400">{stateLabel}</span>
-      </div>
+      {/* 多车切换 chips:单击换车;单车实例不渲染(零变化) */}
+      {isMultiCar && (
+        <div className="mt-1.5 flex flex-wrap gap-1" data-testid="car-switcher" role="radiogroup" aria-label={t('car.switch', '切换车辆')}>
+          {cars.map((c) => (
+            <button
+              key={c.id}
+              role="radio"
+              aria-checked={c.id === currentCarId}
+              onClick={() => setCurrentCarId(c.id)}
+              data-testid={`car-option-${c.id}`}
+              className={`truncate rounded-lg border px-2 py-1 text-[11px] transition ${
+                c.id === currentCarId
+                  ? 'border-tesla/50 bg-tesla/15 text-tesla-soft'
+                  : 'border-white/[0.08] text-slate-400 hover:border-white/20 hover:text-slate-200'
+              }`}
+            >
+              {displayName(c.id) || c.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

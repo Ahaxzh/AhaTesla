@@ -7,15 +7,17 @@ import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
+import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtKm } from '@/utils/format'
 
 /** P5 报告页（/reports）：周报/月报卡片瀑布流 + 手动生成（调试） */
 export default function ReportsPage() {
+  const { currentCarId } = useCar()
   const { toast } = useToast()
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'all' | 'weekly' | 'monthly'>('all')
-  const { data, isLoading } = useQuery({ queryKey: ['reports'], queryFn: api.reports })
+  const { data, isLoading } = useQuery({ queryKey: ['reports', currentCarId], queryFn: () => api.reports(currentCarId) })
 
   const generate = useMutation({
     mutationFn: (type: 'weekly' | 'monthly') => api.generateReport(type),

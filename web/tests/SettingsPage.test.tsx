@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import SettingsPage from '@/pages/SettingsPage'
 import { renderWithProviders } from './test-utils'
 import { server } from './msw'
+import { mockSettings } from './msw'
 
 beforeAll(() => server.listen())
 afterEach(() => {
@@ -22,23 +23,44 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
   })
 
-  it('v2.4 分区结构：外观/账本/电价/AI/推送/系统/安全 七分区，导航与卡片一一对应', async () => {
+  it('分区结构：外观/车辆/账本/电价/AI/推送/系统/安全 八分区，导航与卡片一一对应', async () => {
     renderWithProviders(<SettingsPage />)
-    // 七分区卡片齐备
+    // 八分区卡片齐备
     expect(await screen.findByTestId('settings-appearance')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-cars')).toBeInTheDocument()
     expect(screen.getByTestId('settings-ledger')).toBeInTheDocument()
     expect(screen.getByTestId('settings-pricing')).toBeInTheDocument()
     expect(screen.getByTestId('settings-ai')).toBeInTheDocument()
     expect(screen.getByTestId('settings-push-matrix')).toBeInTheDocument()
     expect(screen.getByTestId('settings-system')).toBeInTheDocument()
     expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
-    // 导航锚点与分区一一对应（桌面 aside + 移动横向 两份导航都要 7 项）
+    // 导航锚点与分区一一对应（桌面 aside + 移动横向 两份导航都要 8 项）
     const navs = screen.getAllByTestId('settings-nav')
     expect(navs).toHaveLength(2)
-    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(7)
+    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(8)
     // 去重回归：数据源健康小卡已并入系统分区，设置页不再出现
     expect(screen.queryByText('累计行程')).not.toBeInTheDocument()
     expect(screen.queryByTestId('resync-meta')).not.toBeInTheDocument()
+  })
+
+  it('m4e 车辆分区:主车 radio + 别名输入 + 保存 PUT body', async () => {
+    const user = userEvent.setup()
+    let savedBody: unknown = null
+    server.use(
+      http.put('/api/settings', async ({ request }) => {
+        savedBody = await request.json()
+        return HttpResponse.json({ ok: true, settings: { ...mockSettings } })
+      }),
+    )
+    renderWithProviders(<SettingsPage />)
+    await screen.findByTestId('settings-cars')
+    // 默认两辆 mock,主车为 1(cars 查询异步,等行出现)
+    expect(await screen.findByTestId('car-primary-1')).toBeChecked()
+    expect(screen.getByTestId('car-primary-2')).not.toBeChecked()
+    await user.click(screen.getByTestId('car-primary-2'))
+    await user.type(screen.getByTestId('car-alias-2'), '老婆的Y')
+    await user.click(screen.getByTestId('cars-save'))
+    await waitFor(() => expect(savedBody).toMatchObject({ primaryCarId: 2, carAliases: { '2': '老婆的Y' } }))
   })
 
   it('推送矩阵：9 事件 × 6 渠道，含每日早报与告警三行(P2)', async () => {

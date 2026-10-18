@@ -57,6 +57,7 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
   // 单查询拿全部维度（drives 聚合 + 端点坐标/地址/围栏 + positions 速度/温度/胎压）
   const rows = await db.query(`
     SELECT d.id,
+           d.car_id,
            d.start_date,
            d.distance::float8 AS distance_km,
            d.duration_min,
@@ -178,11 +179,13 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
     || null;
 
   // P1-b 计价批次明细：FIFO 切片聚合到充电地点粒度（行程结算时点批次可能未全结算,
-  // 取当前已可用部分;任何失败静默省略字段——渲染端数据可得才显示）
+  // 取当前已可用部分;任何失败静默省略字段——渲染端数据可得才显示）。
+  // m4e：批次按本行程的车取（allocateDriveCosts 内部还会按 car_id 二次分池兜底）
   let fifoBatches = null;
+  const tripCarId = Number.isInteger(Number(first.car_id)) && Number(first.car_id) > 0 ? Number(first.car_id) : null;
   if (opts.defaultRate != null) {
     try {
-      const sessions = await listChargingForStats(db, {});
+      const sessions = await listChargingForStats(db, { carId: tripCarId });
       const batches = batchesFromChargingSessions(sessions, touOptionsFor(sessions));
       if (batches.length) {
         const { allocations } = allocateDriveCosts({
@@ -212,6 +215,7 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
 
   return {
     ...event,
+    carId: tripCarId,
     distanceKm: round(totalKm, 1),
     durationMin: round(totalMin, 0),
     kwhPer100km: totalKm > 2 ? round((event.energyKwh ?? 0) / totalKm * 100, 1) : null,
@@ -235,7 +239,7 @@ export async function enrichChargingDoneEvent(db, event) {
   try {
     const rows = await db.query(`
       SELECT c.end_battery_level, cp.charge_energy_added::float8 AS added,
-             cp.geofence_id, cp.start_date, cp.end_date, cp.cost,
+             cp.geofence_id, cp.car_id, cp.start_date, cp.end_date, cp.cost,
              g.name AS geofence_name,
              g.cost_per_unit AS geofence_cost_per_unit, g.session_fee AS geofence_session_fee,
              (SELECT p.outside_temp::float8 FROM positions p
@@ -254,17 +258,20 @@ export async function enrichChargingDoneEvent(db, event) {
       tempC: finite(r.temp_c),
       endBattery: finite(r.end_battery_level),
     };
+    if (r.car_id != null) out.carId = Number(r.car_id);
     if (out.endBattery != null && out.endBattery < 80) out.endedEarly = true;
 
-    // P1-d 同站近 5 次有效均价对比（不含本次；分层计价:实付 > 围栏价/TOU > 默认价）
+    // P1-d 同站近 5 次有效均价对比（不含本次；同车；分层计价:实付 > 围栏价/TOU > 默认价）
     if (r.geofence_id != null) {
       try {
-        const sessions = await listChargingForStats(db, {});
+        const sessions = await listChargingForStats(db, { carId: Number.isInteger(Number(r.car_id)) ? Number(r.car_id) : null });
         const opts = touOptionsFor(sessions);
         const priceOf = (s) => priceChargingSession(s, null, opts)?.pricePerUnit ?? null;
         const thisPrice = priceOf({ ...r, charge_energy_added: r.added });
         const past = sessions
-          .filter((s) => Number(s.geofence_id) === Number(r.geofence_id) && Number(s.id) !== id)
+          .filter((s) => Number(s.geofence_id) === Number(r.geofence_id)
+            && Number(s.id) !== id
+            && Number(s.car_id ?? 0) === Number(r.car_id ?? 0))
           .slice(-5)
           .map(priceOf)
           .filter((v) => v != null && v > 0);
@@ -280,13 +287,13 @@ export async function enrichChargingDoneEvent(db, event) {
   }
 }
 
-/** 充电开始事件富化（P1-c）：当前电量 + 同站近 5 次外推的预估时长/费用 */
+/** 充电开始事件富化（P1-c）：当前电量 + 同站近 5 次外推的预估时长/费用；m4e 同车对比 */
 export async function enrichChargingStartEvent(db, event) {
   const id = Number(event.charging_process_id);
   if (!Number.isInteger(id)) return event;
   try {
     const rows = await db.query(`
-      SELECT cp.geofence_id, g.name AS location_name, g.cost_per_unit
+      SELECT cp.geofence_id, cp.car_id, g.name AS location_name, g.cost_per_unit
       FROM charging_processes cp
       LEFT JOIN geofences g ON g.id = cp.geofence_id
       WHERE cp.id = $1
@@ -295,6 +302,7 @@ export async function enrichChargingStartEvent(db, event) {
     if (!r) return event;
     const out = { ...event };
     if (r.location_name) out.locationName = r.location_name;
+    if (r.car_id != null) out.carId = Number(r.car_id);
 
     // 电量：最新有效 position 读数（充电刚开始即起点电量）
     const p = await db.queryOne(
@@ -302,14 +310,15 @@ export async function enrichChargingStartEvent(db, event) {
     ).catch(() => null);
     if (p && finite(p.bl) != null) out.batteryPct = Math.round(finite(p.bl));
 
-    // 同站近 5 次已结算会话外推：≥2 次才给预估（平均时长；固定单价 → 预估费用）
+    // 同站近 5 次已结算会话外推（同车）：≥2 次才给预估（平均时长；固定单价 → 预估费用）
     if (r.geofence_id != null) {
       const past = await db.query(`
         SELECT cp.charge_energy_added::float8 AS kwh, cp.duration_min::float8 AS dur
         FROM charging_processes cp
         WHERE cp.geofence_id = $1 AND cp.end_date IS NOT NULL AND cp.id <> $2
+          AND ($3::int IS NULL OR cp.car_id = $3::int)
         ORDER BY cp.start_date DESC LIMIT 5
-      `, [r.geofence_id, id]);
+      `, [r.geofence_id, id, Number.isInteger(Number(r.car_id)) && Number(r.car_id) > 0 ? Number(r.car_id) : null]);
       if (past.length >= 2) {
         const avg = (f) => past.reduce((s, x) => s + (f(x) ?? 0), 0) / past.length;
         const dur = Math.round(avg((x) => finite(x.dur)));

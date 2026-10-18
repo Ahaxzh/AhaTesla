@@ -21,6 +21,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { Timeline24h } from '@/components/Timeline24h'
 import { HeatmapCalendar } from '@/components/HeatmapCalendar'
 import { useI18n } from '@/i18n'
+import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtKm, fmtKwh, timeAgo } from '@/utils/format'
 import type { Charge, Trip } from '@/types'
 
@@ -45,14 +46,15 @@ function statePill(state: string): { labelKey: string; labelZh: string; cls: str
 
 export default function DashboardPage() {
   const { t } = useI18n()
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard'], queryFn: api.dashboard })
-  const { data: timeline } = useQuery({ queryKey: ['timeline'], queryFn: api.timeline, retry: false })
+  const { currentCarId } = useCar()
+  const { data, isLoading } = useQuery({ queryKey: ['dashboard', currentCarId], queryFn: () => api.dashboard(currentCarId) })
+  const { data: timeline } = useQuery({ queryKey: ['timeline', currentCarId], queryFn: () => api.timeline(currentCarId), retry: false })
   const [heatmapDays, setHeatmapDays] = useState(90)
-  const { data: heatmap } = useQuery({ queryKey: ['heatmap', heatmapDays], queryFn: () => api.heatmap(heatmapDays), retry: false })
+  const { data: heatmap } = useQuery({ queryKey: ['heatmap', heatmapDays, currentCarId], queryFn: () => api.heatmap(heatmapDays, currentCarId), retry: false })
   // P2 模块3 小字：总电费 = 行驶分摊 + 驻车/哨兵（POST /api/ledger/summary）
   const { data: ledger } = useQuery({
-    queryKey: ['ledger-summary'],
-    queryFn: () => api.ledgerSummary(),
+    queryKey: ['ledger-summary', currentCarId],
+    queryFn: () => api.ledgerSummary(undefined, currentCarId),
     retry: false,
   })
 

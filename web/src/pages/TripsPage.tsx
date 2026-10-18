@@ -8,6 +8,7 @@ import { Pagination } from '@/components/Pagination'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
 import { useI18n } from '@/i18n'
+import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
 
 const PAGE_SIZE = 20
@@ -16,6 +17,7 @@ export default function TripsPage() {
   const { t } = useI18n()
   const [page, setPage] = useState(1)
   const today = useMemo(() => new Date(), [])
+  const { currentCarId } = useCar()
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
 
@@ -25,8 +27,9 @@ export default function TripsPage() {
       offset: (page - 1) * PAGE_SIZE,
       from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
       to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+      carId: currentCarId,
     }),
-    [page, from, to],
+    [page, from, to, currentCarId],
   )
 
   const { data, isLoading, isFetching } = useQuery({

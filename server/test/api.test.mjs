@@ -157,7 +157,7 @@ test("change-password：旧密码校验、新密码强度、状态落盘", async
 
 function tripsFakeDb() {
   return createFakeDb((sql, params) => {
-    if (/FROM drives/.test(sql) && /LIMIT \$1 OFFSET \$2/.test(sql) && /position_count/.test(sql)) {
+    if (/FROM drives/.test(sql) && /LIMIT \$2 OFFSET \$3/.test(sql) && /position_count/.test(sql)) {
       return [{
         id: 3241, car_id: 1,
         start_at: "2026-10-13 02:11:40", end_at: "2026-10-13 02:58:09",

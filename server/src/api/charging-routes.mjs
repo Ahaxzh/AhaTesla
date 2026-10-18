@@ -1,6 +1,7 @@
 // charging routes — list + stats with per-location aggregation.
 import { HttpError } from "./http-kit.mjs";
 import { listCharging, countCharging, listChargingForStats, getChargingProcessById, getChargesCurve } from "../core/teslamate-queries.mjs";
+import { carIdFromQuery } from "./car-scope.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
 
@@ -47,9 +48,10 @@ export function createChargingRoutes({ db, state, getStore }) {
       const limit = Math.max(1, Math.min(200, Number(ctx.query.limit) || 50));
       const offset = Math.max(0, Number(ctx.query.offset) || 0);
       const month = /^\d{4}-\d{2}$/.test(String(ctx.query.month || "")) ? String(ctx.query.month) : null;
+      const carId = carIdFromQuery(ctx, state); // m4e
       const overrides = overridesMap();
-      const rows = await listCharging(db, { limit, offset, month });
-      const total = await countCharging(db, { month });
+      const rows = await listCharging(db, { limit, offset, month, carId });
+      const total = await countCharging(db, { month, carId });
       return { total, items: rows.map((r) => toChargeView(r, overrides)) };
     },
 
@@ -127,7 +129,7 @@ export function createChargingRoutes({ db, state, getStore }) {
             : null;
       }
       const overrides = overridesMap();
-      const rows = await listChargingForStats(db, { sinceIso, untilIso });
+      const rows = await listChargingForStats(db, { sinceIso, untilIso, carId: carIdFromQuery(ctx, state) });
       let totalKwh = 0;
       let totalCost = 0;
       let pricedSessions = 0;

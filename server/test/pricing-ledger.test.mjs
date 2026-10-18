@@ -77,7 +77,7 @@ test("行程先耗尽批次再回落默认价（核心分摊语义）", () => {
   assert.equal(allocations[1].batch_kwh, 2);
   assert.equal(allocations[1].default_kwh, 4);
   assert.equal(allocations[1].cost_cny, 7.0); // 2×1.5 + 4×1.0
-  assert.deepEqual(remaining_batches, [{ batch_id: "cp-1", remaining_kwh: 0 }]);
+  assert.deepEqual(remaining_batches, [{ batch_id: "cp-1", car_id: null, remaining_kwh: 0 }]);
   // slices 记录来源
   assert.equal(allocations[1].slices[0].source, "batch");
   assert.equal(allocations[1].slices[1].source, "default");
@@ -204,7 +204,7 @@ test("账本闭合：批次全耗尽时分摊电费总和 ≡ 实付总额（含
   assert.equal(roundTo(total, 2), 30);           // 分摊总和 ≡ 实付总额
   assert.equal(allocations.every((a) => a.default_kwh === 0), true);
   assert.equal(allocations.every((a) => a.cost_complete === true), true);
-  assert.deepEqual(remaining_batches, [{ batch_id: "cp-1", remaining_kwh: 0 }]);
+  assert.deepEqual(remaining_batches, [{ batch_id: "cp-1", car_id: null, remaining_kwh: 0 }]);
 });
 
 test("精度双轨：cost_cny 展示 2 位，cost_cny_precise 保留内部高精度", () => {

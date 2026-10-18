@@ -73,9 +73,9 @@ function isoWeek(date) {
  */
 export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai", deps }) {
   const { start, end, label } = periodRange(now, kind, tz);
-  const { db, state, computeTripViews, listDrivesSql, listChargingForStats, getParkingLoss } = deps;
+  const { db, state, computeTripViews, listDrivesSql, listChargingForStats, getParkingLoss, carId } = deps;
 
-  const { sql, params } = listDrivesSql({ from: start.toISOString(), to: end.toISOString() });
+  const { sql, params } = listDrivesSql({ from: start.toISOString(), to: end.toISOString(), carId });
   const driveRows = await db.query(sql, [...params, 200, 0]);
   const views = await computeTripViews(db, driveRows, {
     defaultRate: state.pricing.defaultRateCnyPerKwh,
@@ -86,8 +86,8 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
   const energyKwh = round(views.reduce((s, v) => s + (v.energyKWh ?? 0), 0), 2);
   const totalCost = round(views.reduce((s, v) => s + (v.costCny ?? 0), 0), 2);
 
-  // 充电侧（周期内结算的会话）
-  const charging = await listChargingForStats(db, { sinceIso: start.toISOString() });
+  // 充电侧（周期内结算的会话；m4e 按车）
+  const charging = await listChargingForStats(db, { sinceIso: start.toISOString(), carId });
   const inWindow = charging.filter((row) => {
     const endAt = row.end_at ?? row.end_date;
     return endAt && isoFromTeslaMate(endAt) && new Date(isoFromTeslaMate(endAt)) < end;
@@ -230,6 +230,7 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
     periodLabel: label,
     periodStart: start.toISOString(),
     periodEnd: end.toISOString(),
+    carId: Number.isInteger(Number(deps.carId)) ? Number(deps.carId) : null,
     carName: deps.carName || null,
     kpi: {
       distanceKm,
@@ -277,9 +278,9 @@ async function cheapestTouHint(deps) {
   return `今晚 ${best.offPeakStart} 后插枪充电享谷价 ¥${Number(best.offPeakRate).toFixed(2)}/kWh`;
 }
 
-/** 窗口内行程里程/电费聚合（日报对比段复用账本口径的 computeTripViews） */
+/** 窗口内行程里程/电费聚合（日报对比段复用账本口径的 computeTripViews；m4e 按车） */
 async function windowStats(deps, start, end) {
-  const { sql, params } = deps.listDrivesSql({ from: start.toISOString(), to: end.toISOString() });
+  const { sql, params } = deps.listDrivesSql({ from: start.toISOString(), to: end.toISOString(), carId: deps.carId });
   const rows = await deps.db.query(sql, [...params, 200, 0]);
   const views = await deps.computeTripViews(deps.db, rows, {
     defaultRate: deps.state.pricing.defaultRateCnyPerKwh,
@@ -370,6 +371,8 @@ function dailyEvent(report, quietTrips = []) {
   return {
     type: "daily",
     dateLabel: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    carId: report.carId ?? null,
+    carName: report.carName ?? null,
     summary: report.closing,
     kpi: report.kpi,
     compare: report.compare ?? null,

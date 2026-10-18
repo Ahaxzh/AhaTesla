@@ -147,7 +147,15 @@ export const mockSettings = {
   distanceUnit: 'km',
   timezone: 'Asia/Shanghai',
   fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 },
+  primaryCarId: 1,
+  carAliases: {},
 }
+
+/** m4e:车辆清单(默认两辆,单车用例覆写) */
+export const mockCars = [
+  { id: 1, name: 'Model 3 长续航', alias: null, isPrimary: true },
+  { id: 2, name: 'Model Y', alias: null, isPrimary: false },
+]
 
 export const mockLedgerSummary = {
   month: new Date().toISOString().slice(0, 7),
@@ -181,6 +189,7 @@ export const defaultHandlers = [
     }
     return HttpResponse.json({ error: { code: 'AUTH_FAILED', message: '用户名或密码错误' } }, { status: 401 })
   }),
+  http.get('/api/cars', () => HttpResponse.json(mockCars)),
   http.get('/api/dashboard', () => HttpResponse.json(mockDashboard)),
   http.get('/api/trips', ({ request }) => {
     const url = new URL(request.url)

@@ -19,6 +19,15 @@ export function resolveCarId(state, fallbackCarId = null) {
   return fallbackCarId;
 }
 
+/** m4e 车辆清单（车切换器/主车选择）。demo 模式由 demo-db 指纹返回双车。 */
+export async function getCars(db) {
+  return db.query(`
+    SELECT c.id, c.name
+    FROM cars c
+    ORDER BY c.display_priority ASC NULLS LAST, c.id ASC
+  `);
+}
+
 export async function getCarSnapshot(db, { carId = null } = {}) {
   const filter = carId ? "WHERE c.id = $1" : "";
   const params = carId ? [carId] : [];
@@ -114,14 +123,16 @@ export async function getDrivingState(db, { carId = null } = {}) {
   return { ...row, state: row.state === "charging" || row.state === "driving" ? row.state : mapVehicleState(row.state) };
 }
 
-export async function getSystemStats(db) {
+export async function getSystemStats(db, carId = null) {
   return db.queryOne(`
-    SELECT (SELECT count(*) FROM drives WHERE end_date IS NOT NULL)::int AS drive_count,
-           (SELECT max(end_date) FROM drives WHERE end_date IS NOT NULL) AS last_drive_at
-  `);
+    SELECT (SELECT count(*) FROM drives d WHERE d.end_date IS NOT NULL
+              AND ($1::int IS NULL OR d.car_id = $1::int))::int AS drive_count,
+           (SELECT max(d.end_date) FROM drives d WHERE d.end_date IS NOT NULL
+              AND ($1::int IS NULL OR d.car_id = $1::int)) AS last_drive_at
+  `, [Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null]);
 }
 
-export async function getMonthStats(db, since) {
+export async function getMonthStats(db, since, carId = null) {
   return db.queryOne(`
     SELECT COALESCE(sum(d.distance), 0) AS distance_km,
            count(*)::int AS drive_count,
@@ -129,7 +140,8 @@ export async function getMonthStats(db, since) {
     FROM drives d
     WHERE d.end_date IS NOT NULL
       AND d.end_date >= ${expr(since, "invalid month start")}
-  `);
+      AND ($1::int IS NULL OR d.car_id = $1::int)
+  `, [Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null]);
 }
 
 /** 自然月起点（北京时间月初 00:00），Dashboard「本月」统计口径 */
@@ -148,20 +160,21 @@ export function monthStartIso(now = new Date(), tz = "Asia/Shanghai") {
   }
 }
 
-export async function getWeekStats(db, since) {
+export async function getWeekStats(db, since, carId = null) {
   return db.queryOne(`
     SELECT COALESCE(sum(d.distance), 0) AS distance_km
     FROM drives d
     WHERE d.end_date IS NOT NULL
       AND d.end_date >= ${expr(since, "invalid week start")}
-  `);
+      AND ($1::int IS NULL OR d.car_id = $1::int)
+  `, [Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null]);
 }
 
 // ---- drives / trips ------------------------------------------------------
 
 // Base drive rows with energy estimate (power integration with efficiency fallback).
-// $1..$n params: [sinceIso?], limit, offset
-export function listDrivesSql({ from, to } = {}) {
+// $1..$n params: [carId?], limit, offset（carId 为 null 时不过滤，单车用户零变化）
+export function listDrivesSql({ from, to, carId } = {}) {
   const where = ["d.end_date IS NOT NULL"];
   if (from !== undefined && from !== null) {
     where.push(`d.end_date >= (${expr(from, "invalid from")} )`);
@@ -169,6 +182,7 @@ export function listDrivesSql({ from, to } = {}) {
   if (to !== undefined && to !== null) {
     where.push(`d.end_date <= (${expr(to, "invalid to")} )`);
   }
+  where.push(`($1::int IS NULL OR d.car_id = $1::int)`);
   return {
     sql: `
       WITH matched AS (
@@ -176,7 +190,7 @@ export function listDrivesSql({ from, to } = {}) {
         FROM drives d
         WHERE ${where.join(" AND ")}
         ORDER BY d.end_date DESC
-        LIMIT $1 OFFSET $2
+        LIMIT $2 OFFSET $3
       )
       SELECT d.id, d.car_id,
              d.start_date AS start_at, d.end_date AS end_at,
@@ -203,7 +217,7 @@ export function listDrivesSql({ from, to } = {}) {
       ) ep2 ON true
       ORDER BY d.end_date DESC
     `,
-    params: []
+    params: [Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null]
   };
 }
 
@@ -213,9 +227,10 @@ export const countDrivesSql = `
   WHERE d.end_date IS NOT NULL
 `;
 
-export async function getDriveByIdSql(id) {
+export async function getDriveByIdSql(db, id, carId = null) {
   const numId = Number(id);
   if (!Number.isInteger(numId) || numId <= 0) throw new Error("invalid drive id");
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   const rows = await db.query(`
     SELECT d.id, d.car_id,
            d.start_date AS start_at, d.end_date AS end_at,
@@ -229,7 +244,8 @@ export async function getDriveByIdSql(id) {
     FROM drives d
     JOIN cars c ON c.id = d.car_id
     WHERE d.id = $1 AND d.end_date IS NOT NULL
-  `, [numId]);
+      AND ($2::int IS NULL OR d.car_id = $2::int)
+  `, [numId, car]);
   return rows[0] ?? null;
 }
 
@@ -280,13 +296,14 @@ export async function getGeofences(db) {
 
 // ---- charging ------------------------------------------------------------
 
-export async function listCharging(db, { limit = 50, offset = 0, month = null } = {}) {
+export async function listCharging(db, { limit = 50, offset = 0, month = null, carId = null } = {}) {
   // month "YYYY-MM" → 该自然月内开始/结束的会话（UTC 口径，与列表页一致）
   const monthFilter = month
     ? `AND cp.start_date >= (('${month}-01'::date)::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < (('${month}-01'::date + interval '1 month')::timestamptz AT TIME ZONE 'UTC')`
     : "";
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   return db.query(`
-    SELECT cp.id,
+    SELECT cp.id, cp.car_id,
            cp.start_date AS start_at, cp.end_date AS end_at,
            cp.charge_energy_added, cp.cost, cp.duration_min,
            cp.start_battery_level, cp.end_battery_level,
@@ -299,25 +316,29 @@ export async function listCharging(db, { limit = 50, offset = 0, month = null } 
     LEFT JOIN geofences g ON g.id = cp.geofence_id
     LEFT JOIN addresses a ON a.id = cp.address_id
     WHERE cp.end_date IS NOT NULL ${monthFilter}
+      AND ($3::int IS NULL OR cp.car_id = $3::int)
     ORDER BY cp.end_date DESC
     LIMIT $1 OFFSET $2
-  `, [limit, offset]);
+  `, [limit, offset, car]);
 }
 
-export async function countCharging(db, { month = null } = {}) {
+export async function countCharging(db, { month = null, carId = null } = {}) {
   const monthFilter = month
     ? `AND cp.start_date >= (('${month}-01'::date)::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < (('${month}-01'::date + interval '1 month')::timestamptz AT TIME ZONE 'UTC')`
     : "";
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   const row = await db.queryOne(`
     SELECT count(*)::int AS total FROM charging_processes cp WHERE cp.end_date IS NOT NULL ${monthFilter}
-  `);
+      AND ($1::int IS NULL OR cp.car_id = $1::int)
+  `, [car]);
   return row ? row.total : 0;
 }
 
 // 单条充电会话（含 charge_energy_used 桩端注入，P4 效率模块）。
-export async function getChargingProcessById(db, id) {
+export async function getChargingProcessById(db, id, carId = null) {
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   return db.queryOne(`
-    SELECT cp.id,
+    SELECT cp.id, cp.car_id,
            cp.start_date AS start_at, cp.end_date AS end_at,
            cp.charge_energy_added, cp.charge_energy_used, cp.cost, cp.duration_min,
            cp.start_battery_level, cp.end_battery_level,
@@ -329,7 +350,8 @@ export async function getChargingProcessById(db, id) {
     LEFT JOIN geofences g ON g.id = cp.geofence_id
     LEFT JOIN addresses a ON a.id = cp.address_id
     WHERE cp.id = $1 AND cp.end_date IS NOT NULL
-  `, [Number(id)]);
+      AND ($2::int IS NULL OR cp.car_id = $2::int)
+  `, [Number(id), car]);
 }
 
 // 充电功率曲线采样（charges 表，SoC × 功率）。
@@ -342,10 +364,11 @@ export async function getChargesCurve(db, chargingProcessId) {
   `, [Number(chargingProcessId)]);
 }
 
-export async function listChargingForStats(db, { sinceIso = null, untilIso = null } = {}) {
+export async function listChargingForStats(db, { sinceIso = null, untilIso = null, carId = null } = {}) {
   const untilFilter = untilIso ? `AND cp.end_date < (${expr(untilIso, "invalid stats until")})` : "";
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   return db.query(`
-    SELECT cp.id, cp.end_date, cp.charge_energy_added, cp.cost, cp.duration_min,
+    SELECT cp.id, cp.car_id, cp.end_date, cp.charge_energy_added, cp.cost, cp.duration_min,
            cp.geofence_id, cp.address_id,
            g.name AS geofence_name, g.cost_per_unit AS geofence_cost_per_unit, g.session_fee AS geofence_session_fee,
            a.display_name AS address_name
@@ -353,8 +376,9 @@ export async function listChargingForStats(db, { sinceIso = null, untilIso = nul
     LEFT JOIN geofences g ON g.id = cp.geofence_id
     LEFT JOIN addresses a ON a.id = cp.address_id
     WHERE cp.end_date IS NOT NULL ${sinceIso ? `AND cp.end_date >= (${expr(sinceIso, "invalid stats since")})` : ""} ${untilFilter}
+      AND ($1::int IS NULL OR cp.car_id = $1::int)
     ORDER BY cp.end_date ASC
-  `);
+  `, [car]);
 }
 
 export async function getLatestChargingProcess(db) {

@@ -11,6 +11,7 @@
 - **初始化状态机**：实例三态 `uninitialized`（无管理员）→ `setup-locked`（管理员已建，/api/setup/* 注册类端点 403）→ `ready`。`GET /api/setup/status` 可匿名查询
 - **金额与精度（PRD §7.3）**：金额 2 位小数、单价 3~4 位小数（均以字符串传输，避免浮点误差）；内部计算高精度，展示层截断
 - **多币种（AC-9.1）**：金额字段统一 `cost` / `totalCost` / `avgPrice` 命名，**不带货币后缀**；货币由实例配置（`/api/settings` currency）决定
+- **多车（m4e/v1.1）**：数据端点接受可选 `?carId=<int>`，缺省 = 主车（settings.primaryCarId，回退绑定车/第一辆）；`GET /api/cars` → `[{id, name}]`（按 display_priority 排序）。账本 FIFO 批次池按车隔离（A 车充电只抵 A 车行程）；电价 geofence 全局共享（TeslaMate 语义）
 - **错误格式**：`{error: {code, message}}`，HTTP 4xx/5xx
 
 ## 数据源
@@ -29,8 +30,10 @@
 - `GET /api/setup/car-discovery`（管理员）→ {found, car:{id,name,model}|null}（前端 2s 轮询，AC-2.3 的 60 秒发现）
 - `POST /api/setup/probe-discovery`（管理员）→ {candidates:[{host, port, reachable}]}（m4a 轨道 B：容器服务名/网关 + `AHATESLA_PROBE_HOSTS` env 展开 + 已配 DB_URL 目标，800ms TCP 探测，只报可达性不猜库名）
 - `POST /api/setup/auto-ro`（管理员）{host, port=5432, database="teslamate", adminUser, adminPassword} → 成功 {ok:true, dsn:"postgres://ahatesla_ro:***@host:port/db", password}（一次性明文仅此返回）；失败 {ok:false, stage:"auth"|"permission"|"verify", error, fallbackSql?} —— adminPassword 仅内存使用绝不落盘/入日志；permission 失败附可复制执行的 fallbackSql；RO 建号幂等（角色存在只改密码）
-- `GET /api/settings`（管理员）→ {currency:{symbol:"¥",code:"CNY"}, distanceUnit:"km"|"mi", timezone, fuelBaseline:{consumptionL100:8.0, pricePerL:8.20}}
-- `PUT /api/settings`（管理员）→ {ok}（fuelBaseline 即 AC-7.4 油车基准可配置）
+- `GET /api/settings`（管理员）→ {currency:{symbol:"¥",code:"CNY"}, distanceUnit:"km"|"mi", timezone, fuelBaseline:{consumptionL100:8.0, pricePerL:8.20}, **primaryCarId:number|null, carAliases:{"<carId>":"别名"}**}
+- `PUT /api/settings`（管理员）→ {ok}（fuelBaseline 即 AC-7.4 油车基准可配置；m4e:primaryCarId 传 null 清除回退向导绑定；carAliases 整体替换,值 1-32 字符）
+- `GET /api/cars`（管理员,m4e）→ [{id, name, alias:string|null, isPrimary:boolean}]（裸数组;前端 CarContext 按数组直接消费）（name 来自 TeslaMate cars 表;alias/isPrimary 来自设置）
+- **`?carId=` 通用查询参数(m4e 多车)**:dashboard / dashboard/timeline / dashboard/heatmap / trips / charging / charging/stats / ledger/summary 接受可选正整数 carId;缺省解析链 = settings.primaryCarId > 向导绑定(datasource.carId)> 不过滤(单库单车旧行为)。非法值 400。账本 FIFO 批次按车隔离(能量不跨车混池)。推送事件在多车实例(>1 辆)标题带 `· 车别名/车名` 后缀,单车实例零变化。
 
 ## 2. 认证（v1 演进）
 

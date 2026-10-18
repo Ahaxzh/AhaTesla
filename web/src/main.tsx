@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import { ToastProvider } from './components/Toast'
 import { ThemeProvider } from './contexts/ThemeContext'
+import { CarProvider } from './contexts/CarContext'
 import { I18nProvider } from './i18n'
 import './index.css'
 
@@ -21,15 +22,17 @@ export const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <I18nProvider>
-          <ToastProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </ToastProvider>
-        </I18nProvider>
-      </ThemeProvider>
+      <CarProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <ToastProvider>
+              <BrowserRouter>
+                <App />
+              </BrowserRouter>
+            </ToastProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </CarProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

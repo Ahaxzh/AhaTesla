@@ -4,6 +4,7 @@ import {
   Activity,
   BellRing,
   Calculator,
+  Car,
   KeyRound,
   Palette,
   Settings as SettingsIcon,
@@ -11,6 +12,7 @@ import {
   Tag,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCar } from '@/contexts/CarContext'
 import { useTheme, type ThemeSetting } from '@/contexts/ThemeContext'
 import { useI18n, type Lang } from '@/i18n'
 import { api } from '@/api/client'
@@ -63,6 +65,7 @@ function SettingsNav({ active }: { active: string }) {
   const { t } = useI18n()
   const items = [
     { id: 'appearance', label: t('settings.nav.appearance', '外观'), icon: Palette },
+    { id: 'cars', label: t('settings.nav.cars', '车辆'), icon: Car },
     { id: 'ledger', label: t('settings.nav.ledger', '账本参数'), icon: Calculator },
     { id: 'pricing', label: t('settings.nav.pricing', '电价'), icon: Tag },
     { id: 'ai', label: t('settings.nav.ai', 'AI 助手'), icon: Sparkles },
@@ -101,7 +104,7 @@ export default function SettingsPage() {
   // 滚动监听高亮当前分区（IntersectionObserver 不可用时静默降级）
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
-    const ids = ['appearance', 'ledger', 'pricing', 'ai', 'push', 'system', 'security']
+    const ids = ['appearance', 'cars', 'ledger', 'pricing', 'ai', 'push', 'system', 'security']
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -116,6 +119,31 @@ export default function SettingsPage() {
     })
     return () => obs.disconnect()
   }, [])
+
+  // ---- m4e 车辆管理(主车/别名;车清单来自 useCar) ----
+  const { cars } = useCar()
+  const [carPrimaryId, setCarPrimaryId] = useState<number | null>(null)
+  const [carAliases, setCarAliases] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (cars.length && carPrimaryId == null) {
+      setCarPrimaryId(cars.find((c) => c.isPrimary)?.id ?? cars[0]?.id ?? null)
+      setCarAliases(Object.fromEntries(cars.map((c) => [String(c.id), c.alias ?? ''])))
+    }
+  }, [cars, carPrimaryId])
+
+  const saveCars = useMutation({
+    mutationFn: () =>
+      api.saveSettings({
+        primaryCarId: carPrimaryId ?? undefined,
+        carAliases,
+      }),
+    onSuccess: () => {
+      toast(t('settings.cars.saved', '车辆设置已保存'), 'success')
+      void queryClient.invalidateQueries({ queryKey: ['cars'] })
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
 
   // ---- 账本参数 ----
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings })
@@ -346,6 +374,62 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+          </section>
+
+          {/* ===== m4e 分区：车辆（主车/别名管理） ===== */}
+          <section id="settings-cars" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-cars">
+            <h2 className="section-title">
+              <Car className="h-4 w-4 text-tesla" /> {t('settings.nav.cars', '车辆')}
+            </h2>
+            <p className="section-desc mt-1">{t('settings.cars.desc', '多车实例管理主车与显示别名（清单来自 TeslaMate）')}</p>
+            <div className="mt-4 max-w-xl space-y-2.5">
+              {cars.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-xs text-slate-500">
+                  {t('settings.cars.empty', '未发现车辆（完成向导或等待 TeslaMate 同步）')}
+                </div>
+              ) : (
+                cars.map((c) => (
+                  <div key={c.id} className="flex flex-col gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:flex-row sm:items-center">
+                    <label className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <input
+                        type="radio"
+                        name="car-primary"
+                        checked={carPrimaryId === c.id}
+                        onChange={() => setCarPrimaryId(c.id)}
+                        aria-label={`${c.name} 设为主车`}
+                        data-testid={`car-primary-${c.id}`}
+                        className="h-4 w-4 accent-[#E82127]"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] text-slate-200">{c.name}</span>
+                        <span className="block text-[11px] text-slate-500">
+                          {carPrimaryId === c.id ? t('settings.cars.isPrimary', '主车 · 缺省展示') : `${t('settings.cars.carId', '车辆')} #${c.id}`}
+                        </span>
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      className="input-dark sm:max-w-52"
+                      placeholder={t('settings.cars.aliasPh', '别名（显示用，可空）')}
+                      value={carAliases[String(c.id)] ?? ''}
+                      onChange={(e) => setCarAliases((prev) => ({ ...prev, [String(c.id)]: e.target.value }))}
+                      aria-label={`${t('settings.cars.alias', '别名')} ${c.name}`}
+                      data-testid={`car-alias-${c.id}`}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+            {cars.length > 0 && (
+              <button
+                className="btn-primary mt-4"
+                onClick={() => saveCars.mutate()}
+                disabled={saveCars.isPending}
+                data-testid="cars-save"
+              >
+                {saveCars.isPending ? t('settings.saving', '保存中…') : t('settings.cars.save', '保存车辆设置')}
+              </button>
+            )}
           </section>
 
           {/* ===== 分区2：账本参数（货币/单位/油车基准 + 重算） ===== */}

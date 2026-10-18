@@ -5,6 +5,7 @@
 // 重算为异步 job（jobId + 进度），补录费用 7 天窗口内触发重算（AC-7.6）。
 import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round } from "../core/util.mjs";
+import { carIdFromQuery } from "./car-scope.mjs";
 import {
   batchesFromChargingSessions,
   allocateDriveCosts,
@@ -62,12 +63,13 @@ export function createLedgerRoutes({ db, state, getStore }) {
   }
 
   return {
-    // POST /api/ledger/summary?month=YYYY-MM（契约 §5，v2 新增）
+    // POST /api/ledger/summary?month=YYYY-MM（契约 §5，v2 新增；m4e: ?carId= 按车出账）
     async summary(ctx) {
       const month = ctx.query.month || new Date().toISOString().slice(0, 7);
       const { startIso, endIso } = await monthWindow(month);
+      const carId = carIdFromQuery(ctx, state); // m4e
 
-      const charging = await listChargingForStats(db, { sinceIso: startIso });
+      const charging = await listChargingForStats(db, { sinceIso: startIso, carId });
       const monthCharging = charging.filter((row) => {
         const end = row.end_at ?? row.end_date;
         return end && end < endIso;
@@ -77,7 +79,7 @@ export function createLedgerRoutes({ db, state, getStore }) {
         touByGeofenceId: await touByGeofenceId()
       });
 
-      const { sql, params } = listDrivesSql({ from: startIso, to: endIso });
+      const { sql, params } = listDrivesSql({ from: startIso, to: endIso, carId });
       // listDrivesSql 尾部 LIMIT $1 OFFSET $2 需要补分页参数（月度账本取全量，上限 5000）
       const driveRows = await db.query(sql, [...params, 5000, 0]);
       const drives = driveRows.map((drive) => ({

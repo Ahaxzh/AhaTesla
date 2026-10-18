@@ -36,6 +36,10 @@ describe('AppLayout 响应式导航', () => {
     expect(screen.getByTestId('user-menu-password')).toBeInTheDocument()
     expect(screen.getByTestId('user-menu-logout')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-car')).toBeInTheDocument()
+    // m4e:默认 mock 两辆车 → 切换 chips 渲染且可点选
+    expect(screen.getByTestId('car-switcher')).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('car-option-2'))
+    expect(screen.getByTestId('car-option-2')).toHaveAttribute('aria-checked', 'true')
   })
 
   it('移动 TabBar 使用 lg:hidden 策略，含 5 个主入口（报告并入，修复移动端不可达）', async () => {

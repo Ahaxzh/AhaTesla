@@ -123,6 +123,7 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/auth/me", requireAuth, (ctx) => auth.me(ctx));
 
   app.get("/api/dashboard", requireAuth, (ctx) => dashboard.dashboard(ctx));
+  app.get("/api/cars", requireAuth, (ctx) => dashboard.cars(ctx));
   app.get("/api/dashboard/timeline", requireAuth, (ctx) => dashboardExtra.timeline(ctx));
   app.get("/api/dashboard/heatmap", requireAuth, (ctx) => dashboardExtra.heatmap(ctx));
   app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
@@ -333,6 +334,42 @@ async function main() {
 
   const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
 
+  // ---- m4e 多车:推送事件的车辆标记(60s 车辆缓存) --------------------------
+  let carsCache = { at: 0, list: null };
+  async function carsListCached() {
+    if (carsCache.list && Date.now() - carsCache.at < 60_000) return carsCache.list;
+    try {
+      const rows = await db.query("SELECT id, name FROM cars ORDER BY id ASC");
+      carsCache = { at: Date.now(), list: rows };
+    } catch {
+      carsCache = { at: Date.now(), list: carsCache.list || [] }; // 查询失败沿用旧缓存
+    }
+    return carsCache.list;
+  }
+  async function carIdOfEvent(event) {
+    try {
+      if (event.type === "trip_end" && Array.isArray(event.segment_ids) && event.segment_ids.length) {
+        const r = await db.queryOne("SELECT car_id FROM drives WHERE id = $1", [Number(event.segment_ids[0])]);
+        return r?.car_id ?? null;
+      }
+      if ((event.type === "charging_start" || event.type === "charging_done" || event.type === "chargeInterrupt")
+        && event.charging_process_id) {
+        const r = await db.queryOne("SELECT car_id FROM charging_processes WHERE id = $1", [Number(event.charging_process_id)]);
+        return r?.car_id ?? null;
+      }
+    } catch { /* 查不到就不标记 */ }
+    return null;
+  }
+  async function carLabelForEvent(event) {
+    const cars = await carsListCached();
+    if (!cars || cars.length <= 1) return null; // 单车实例:标题零变化
+    const carId = event.carId ?? await carIdOfEvent(event);
+    if (carId == null) return null;
+    const car = cars.find((c) => Number(c.id) === Number(carId));
+    if (!car) return null;
+    return state.settings?.carAliases?.[String(carId)] || car.name;
+  }
+
   async function dispatchPush(rawEvent) {
     // 事件富化（v2.2 + P1 b/c/d）：天气/胎压/速度/怠速 + 计价批次 + 充电预估/对比
     let event = rawEvent;
@@ -347,6 +384,12 @@ async function main() {
     } catch (error) {
       eventLog.log("push.enrich_error", { message: error.message });
     }
+    // m4e 多车:车辆标记。cars ≤1 时零变化(不挂 carLabel,标题不加后缀);
+    // 多车时 trip/charging 事件按事件源车挂 `carLabel`(别名优先),标题后缀 `· 别名`。
+    try {
+      const label = await carLabelForEvent(event);
+      if (label) event.carLabel = label;
+    } catch { /* 标记失败不影响推送 */ }
     // 矩阵化投递（GA-08/AC-12.2）：多渠道并行 + 单渠道失败隔离 + deliveryMs 埋点
     const t0 = Date.now();
     const { results } = await notifier.dispatch(event);

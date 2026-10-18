@@ -28,6 +28,7 @@ import type {
   Trip,
   TripDetail,
   User,
+  CarInfo,
 } from '@/types'
 
 export class ApiError extends Error {
@@ -89,6 +90,9 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
 }
 
 const get = <T>(path: string) => request<T>(path)
+/** m4e:可选 carId 拼 query(缺省=主车,后端语义);undefined 时不加参数 */
+const withCar = (path: string, carId?: number) =>
+  carId == null ? path : `${path}${path.includes('?') ? '&' : '?'}carId=${carId}`
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
 const put = <T>(path: string, body?: unknown) =>
@@ -119,38 +123,43 @@ export const api = {
   setupAutoRo: (payload: { host: string; port: number; database: string; user: string; password: string }) =>
     post<{ ok: true; dsn: string } | { ok: false; stage: string; error: string; fallbackSql: string }>('/api/setup/auto-ro', payload),
 
-  dashboard: () => get<DashboardData>('/api/dashboard'),
+  // ---- m4e 车辆 ----
+  cars: () => get<CarInfo[]>('/api/cars'),
 
-  trips: (params: { limit?: number; offset?: number; from?: string; to?: string } = {}) => {
+  dashboard: (carId?: number) => get<DashboardData>(withCar('/api/dashboard', carId)),
+
+  trips: (params: { limit?: number; offset?: number; from?: string; to?: string; carId?: number } = {}) => {
     const q = new URLSearchParams()
     if (params.limit != null) q.set('limit', String(params.limit))
     if (params.offset != null) q.set('offset', String(params.offset))
     if (params.from) q.set('from', params.from)
     if (params.to) q.set('to', params.to)
+    if (params.carId != null) q.set('carId', String(params.carId))
     return get<Paged<Trip>>(`/api/trips?${q.toString()}`)
   },
   trip: (id: number | string) => get<TripDetail>(`/api/trips/${id}`),
 
-  charging: (params: { limit?: number; offset?: number; month?: string } = {}) => {
+  charging: (params: { limit?: number; offset?: number; month?: string; carId?: number } = {}) => {
     const q = new URLSearchParams()
     if (params.limit != null) q.set('limit', String(params.limit))
     if (params.offset != null) q.set('offset', String(params.offset))
     if (params.month) q.set('month', params.month)
+    if (params.carId != null) q.set('carId', String(params.carId))
     return get<Paged<Charge>>(`/api/charging?${q.toString()}`)
   },
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
-  chargingStats: (period: 'month' | 'year' | 'all' = 'month', month?: string) =>
-    get<ChargingStats>(`/api/charging/stats?period=${period}${month ? `&month=${month}` : ''}`),
+  chargingStats: (period: 'month' | 'year' | 'all' = 'month', month?: string, carId?: number) =>
+    get<ChargingStats>(withCar(`/api/charging/stats?period=${period}${month ? `&month=${month}` : ''}`, carId)),
   putChargeCost: (id: number, amount: number) =>
     put<{ ok: boolean }>(`/api/charging/${id}/cost`, { amount, source: 'manual' }),
 
   // ---- v2.1：时间轴 / 热力图 / 设置 / 账本 / 推送 / 报告 ----
-  timeline: () => get<TimelineData>('/api/dashboard/timeline'),
-  heatmap: (days = 90) => get<HeatmapData>(`/api/dashboard/heatmap?days=${days}`),
+  timeline: (carId?: number) => get<TimelineData>(withCar('/api/dashboard/timeline', carId)),
+  heatmap: (days = 90, carId?: number) => get<HeatmapData>(withCar(`/api/dashboard/heatmap?days=${days}`, carId)),
   settings: () => get<InstanceSettings>('/api/settings'),
   saveSettings: (payload: Partial<InstanceSettings>) => put<{ ok: boolean; settings: InstanceSettings }>('/api/settings', payload),
-  ledgerSummary: (month?: string) =>
-    post<LedgerSummary>(`/api/ledger/summary${month ? `?month=${month}` : ''}`, {}),
+  ledgerSummary: (month?: string, carId?: number) =>
+    post<LedgerSummary>(withCar(`/api/ledger/summary${month ? `?month=${month}` : ''}`, carId), {}),
   startRecalculate: (payload: { all?: boolean; from?: string; to?: string }) =>
     post<{ jobId: string }>('/api/ledger/recalculate', payload),
   recalculateStatus: (jobId: string) => get<RecalcJob>(`/api/ledger/recalculate/${jobId}`),
@@ -190,7 +199,7 @@ export const api = {
   saveAiConfig: (payload: { enabled: boolean; baseUrl: string; model: string; apiKey?: string }) =>
     put<{ ok: boolean }>('/api/ai/config', payload),
   aiTest: () => post<{ ok: boolean; preview?: string; error?: string }>('/api/ai/test'),
-  reports: () => get<{ items: ReportListItem[] }>('/api/reports'),
+  reports: (carId?: number) => get<{ items: ReportListItem[] }>(withCar('/api/reports', carId)),
   reportDetail: (id: number | string) => get<ReportDetail>(`/api/reports/${id}`),
   generateReport: (type: 'weekly' | 'monthly') => post<{ ok: boolean; id: number }>('/api/reports/generate', { type }),
   healthLite: () => get<HealthLite>('/api/system/health-lite'),

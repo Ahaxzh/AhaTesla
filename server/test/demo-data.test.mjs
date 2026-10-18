@@ -32,7 +32,7 @@ test("90 天历史结构：工作日通勤 + 周末出游 + 充电会话 + geofe
 test("demo db：行程列表分页切片（listDrivesSql 形状 LIMIT $1 OFFSET $2）", async () => {
   const db = createDemoDb({ dataset: buildDemoDataset(ANCHOR) });
   const { sql, params } = listDrivesSql({});
-  assert.deepEqual(params, []);
+  assert.deepEqual(params, [null]); // m4e 首位 carId(null=不过滤)
   const page1 = await db.query(sql, [...params, 20, 0]);
   const page2 = await db.query(sql, [...params, 20, 20]);
   assert.equal(page1.length, 20);
@@ -53,7 +53,7 @@ test("demo db：窗口过滤（from 字面量生效）+ 总数一致", async () 
   const db = createDemoDb({ dataset: buildDemoDataset(ANCHOR) });
   const from = new Date(ANCHOR - 7 * 86_400_000).toISOString();
   const { sql } = listDrivesSql({ from });
-  const rows = await db.query(sql, [200, 0]);
+  const rows = await db.query(sql, [null, 200, 0]); // m4e [carId, limit, offset]
   assert.ok(rows.length > 0 && rows.length <= 30, `近 7 天行程量级合理（实际 ${rows.length}）`);
   for (const r of rows) assert.ok(new Date(r.end_at).getTime() >= new Date(from).getTime());
   const total = await db.queryOne("SELECT count(*)::int AS total FROM drives d WHERE d.end_date IS NOT NULL", []);

@@ -237,6 +237,17 @@ export interface InstanceSettings {
   distanceUnit: 'km' | 'mi'
   timezone: string
   fuelBaseline: { literPer100km: number; fuelPriceCnyPerL: number }
+  /** m4e 多车:主车(缺省 carId 时后端用);别名覆盖 TeslaMate 车名 */
+  primaryCarId?: number
+  carAliases?: Record<string, string>
+}
+
+/** m4e:GET /api/cars → 车辆清单(name 来自 TeslaMate,alias/isPrimary 来自本地设置) */
+export interface CarInfo {
+  id: number
+  name: string
+  alias?: string | null
+  isPrimary?: boolean
 }
 
 export interface LedgerSummary {

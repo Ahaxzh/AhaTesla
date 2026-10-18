@@ -9,6 +9,7 @@ import { SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
+import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice } from '@/utils/format'
 import type { ChargeDetail } from '@/types'
 
@@ -80,15 +81,16 @@ export default function ChargingPage() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   }
 
-  const listParams = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, month: month || undefined }
+  const { currentCarId } = useCar()
+  const listParams = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, month: month || undefined, carId: currentCarId }
   const { data, isLoading } = useQuery({
     queryKey: ['charging', listParams],
     queryFn: () => api.charging(listParams),
     placeholderData: keepPreviousData,
   })
   const { data: stats } = useQuery({
-    queryKey: ['charging-stats', month],
-    queryFn: () => api.chargingStats('month', month || currentMonth()),
+    queryKey: ['charging-stats', month, currentCarId],
+    queryFn: () => api.chargingStats('month', month || currentMonth(), currentCarId),
   })
   const { data: detail, isError: detailError, refetch: refetchDetail } = useQuery({
     queryKey: ['charging-detail', detailId],

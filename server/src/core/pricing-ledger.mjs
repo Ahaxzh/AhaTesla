@@ -188,6 +188,7 @@ export function batchesFromChargingSessions(sessions, options = {}) {
     batches.push({
       batch_id: `cp-${session.id}`,
       charging_process_id: Number(session.id),
+      car_id: Number.isInteger(Number(session.car_id)) && Number(session.car_id) > 0 ? Number(session.car_id) : null,
       available_at_ms: availableMs,
       energy_kwh: round(energy),
       unit_price_cny_per_kwh: round(priced.pricePerUnit, 6),
@@ -318,6 +319,10 @@ function drawFromDefaultTariff(queueResult, defaultRate, defaultRateHistory, dri
 
 // Distribute a chronological series of drives over the batch pool.
 //
+// m4e 多车分池：批次与行程都按 car_id 分池 —— A 车充电的批次只抵 A 车行程
+// （电能不跨车转移）。car_id 缺失（null/undefined）的行共用一个"无主池"，
+// 单车数据（或存量调用点不带 car_id）因此保持与历史完全一致的行为。
+//
 // Returns {allocations, remaining_batches}. Each allocation carries the drive's
 // energy split across its sources (batch / default / unpriced), the trip cost as
 // shown to the user (`cost_cny`, 2dp) and a high-precision internal twin
@@ -326,7 +331,19 @@ function drawFromDefaultTariff(queueResult, defaultRate, defaultRateHistory, dri
 // time and a non-negative energy figure; `cost_complete` is false whenever any
 // of its energy could not be priced.
 export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHistory = [] } = {}) {
-  const queue = buildBatchQueue(batches);
+  const poolKey = (row) => {
+    const id = Number(row?.car_id);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  };
+
+  // 按车分池建队列；同一池内保持时间序 FIFO 语义不变
+  const pools = new Map();
+  const poolFor = (key) => {
+    if (!pools.has(key)) pools.set(key, { queue: [], drives: [] });
+    return pools.get(key);
+  };
+  const queueRows = buildBatchQueue(batches);
+  for (const batch of queueRows) poolFor(poolKey(batch)).queue.push(batch);
 
   const orderedDrives = (Array.isArray(drives) ? drives : [])
     .map((drive, index) => ({ ...drive, index, drive_at_ms: timeMs(drive.start_at ?? drive.start_date) }))
@@ -334,51 +351,55 @@ export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHi
       (a.drive_at_ms ?? Number.POSITIVE_INFINITY) - (b.drive_at_ms ?? Number.POSITIVE_INFINITY)
       || a.index - b.index
     );
+  for (const drive of orderedDrives) poolFor(poolKey(drive)).drives.push(drive);
 
   const allocations = [];
-  for (const drive of orderedDrives) {
-    const energy = finiteNumber(drive.estimated_kwh ?? drive.energy_kwh);
+  for (const { queue, drives: poolDrives } of pools.values()) {
+    for (const drive of poolDrives) {
+      const energy = finiteNumber(drive.estimated_kwh ?? drive.energy_kwh);
 
-    // A drive with no usable time or energy cannot be billed at all.
-    if (drive.drive_at_ms === null || energy === null || energy < 0) {
+      // A drive with no usable time or energy cannot be billed at all.
+      if (drive.drive_at_ms === null || energy === null || energy < 0) {
+        allocations.push({
+          drive_id: drive.id,
+          energy_kwh: null,
+          batch_kwh: 0,
+          default_kwh: 0,
+          unpriced_kwh: 0,
+          cost_cny: null,
+          allocation_reliable: false,
+          cost_complete: false,
+          slices: []
+        });
+        continue;
+      }
+
+      const drawn = drawFromBatches(queue, energy, drive.drive_at_ms);
+      const tail = drawFromDefaultTariff(drawn, defaultRate, defaultRateHistory, drive.drive_at_ms);
+      const totalCost = drawn.cost + tail.cost;
+
       allocations.push({
         drive_id: drive.id,
-        energy_kwh: null,
-        batch_kwh: 0,
-        default_kwh: 0,
-        unpriced_kwh: 0,
-        cost_cny: null,
-        allocation_reliable: false,
-        cost_complete: false,
-        slices: []
+        energy_kwh: round(energy),
+        batch_kwh: round(drawn.drawnKwh),
+        default_kwh: round(tail.defaultKwh),
+        unpriced_kwh: round(tail.unpricedKwh),
+        cost_cny: tail.unpricedKwh > 0 ? null : round(totalCost, 2),
+        cost_cny_precise: tail.unpricedKwh > 0 ? null : round(totalCost, 10),
+        allocation_reliable: true,
+        cost_complete: tail.unpricedKwh === 0,
+        slices: tail.slices
       });
-      continue;
     }
-
-    const drawn = drawFromBatches(queue, energy, drive.drive_at_ms);
-    const tail = drawFromDefaultTariff(drawn, defaultRate, defaultRateHistory, drive.drive_at_ms);
-    const totalCost = drawn.cost + tail.cost;
-
-    allocations.push({
-      drive_id: drive.id,
-      energy_kwh: round(energy),
-      batch_kwh: round(drawn.drawnKwh),
-      default_kwh: round(tail.defaultKwh),
-      unpriced_kwh: round(tail.unpricedKwh),
-      cost_cny: tail.unpricedKwh > 0 ? null : round(totalCost, 2),
-      cost_cny_precise: tail.unpricedKwh > 0 ? null : round(totalCost, 10),
-      allocation_reliable: true,
-      cost_complete: tail.unpricedKwh === 0,
-      slices: tail.slices
-    });
   }
 
   return {
     allocations,
-    remaining_batches: queue.map((batch) => ({
+    remaining_batches: [...pools.values()].flatMap(({ queue }) => queue.map((batch) => ({
       batch_id: batch.batch_id,
+      car_id: poolKey(batch),
       remaining_kwh: round(batch.remaining_kwh)
-    }))
+    })))
   };
 }
 

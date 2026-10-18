@@ -3,6 +3,7 @@
 import { healthState } from "../core/health.mjs";
 import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
+import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -21,25 +22,26 @@ export function createDashboardExtraRoutes({ db, state, healthRef }) {
   /** 最近 24h 状态区间：drives（行驶）+ charging_processes（充电）+ states 填充。 */
   async function timeline(ctx) {
     const since = new Date(Date.now() - DAY_MS).toISOString();
+    const carId = carIdFromQuery(ctx, state); // m4e
     // 1) 行驶段
     const drives = await db.query(`
       SELECT d.start_date AS start_at, d.end_date AS end_at
       FROM drives d
-      WHERE d.end_date IS NOT NULL AND d.end_date >= (${sinceTs(since)})
+      WHERE d.end_date IS NOT NULL AND d.end_date >= (${sinceTs(since)})${carFilterSql(carId)}
       ORDER BY d.start_date ASC
     `).catch(() => []);
     // 2) 充电段
     const charges = await db.query(`
       SELECT cp.start_date AS start_at, cp.end_date AS end_at
       FROM charging_processes cp
-      WHERE cp.end_date IS NOT NULL AND cp.end_date >= (${sinceTs(since)})
+      WHERE cp.end_date IS NOT NULL AND cp.end_date >= (${sinceTs(since)})${carFilterSql(carId, "cp.car_id")}
       ORDER BY cp.start_date ASC
     `).catch(() => []);
     // 3) states 线性状态段
     const stateRows = await db.query(`
       SELECT s.start_date AS start_at, s.end_date AS end_at, s.state
       FROM states s
-      WHERE s.start_date >= (${sinceTs(new Date(Date.now() - 2 * DAY_MS).toISOString())})
+      WHERE s.start_date >= (${sinceTs(new Date(Date.now() - 2 * DAY_MS).toISOString())})${carFilterSql(carId, "s.car_id")}
       ORDER BY s.start_date ASC
     `).catch(() => []);
 
@@ -99,10 +101,11 @@ export function createDashboardExtraRoutes({ db, state, healthRef }) {
   async function heatmap(ctx) {
     const days = Math.max(7, Math.min(400, Number(ctx.query.days) || 90));
     const since = new Date(Date.now() - days * DAY_MS).toISOString();
+    const carId = carIdFromQuery(ctx, state); // m4e
     const rows = await db.query(`
       SELECT d.end_date AS end_at, d.distance
       FROM drives d
-      WHERE d.end_date IS NOT NULL AND d.end_date >= (${sinceTs(since)})
+      WHERE d.end_date IS NOT NULL AND d.end_date >= (${sinceTs(since)})${carFilterSql(carId)}
       ORDER BY d.end_date ASC
     `).catch(() => []);
     // 本地日期聚合（实例时区）
@@ -139,7 +142,10 @@ export function createSettingsRoutes({ state, getStore }) {
       currency: state.settings?.currency ?? DEFAULTS.currency,
       distanceUnit: state.settings?.distanceUnit ?? DEFAULTS.distanceUnit,
       timezone: state.settings?.timezone ?? DEFAULTS.timezone,
-      fuelBaseline: { ...DEFAULTS.fuelBaseline, ...(state.fuelBaseline || {}) }
+      fuelBaseline: { ...DEFAULTS.fuelBaseline, ...(state.fuelBaseline || {}) },
+      // m4e 多车:主车设定 + 车别名(carId → 别名,推送/界面显示用)
+      primaryCarId: state.settings?.primaryCarId ?? null,
+      carAliases: state.settings?.carAliases ?? {}
     };
   }
 
@@ -169,6 +175,30 @@ export function createSettingsRoutes({ state, getStore }) {
         }
         s.timezone = body.timezone;
       }
+      // m4e 多车:主车与别名。primaryCarId=null 表示清除(回退向导绑定);
+      // carAliases 整体替换,键为 carId 字符串,值 ≤32 字符,≤32 键。
+      if (body.primaryCarId !== undefined) {
+        if (body.primaryCarId === null) s.primaryCarId = null;
+        else {
+          const n = Number(body.primaryCarId);
+          if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, "bad_request", "primaryCarId must be a positive integer or null");
+          s.primaryCarId = n;
+        }
+      }
+      if (body.carAliases !== undefined) {
+        if (body.carAliases === null || typeof body.carAliases !== "object" || Array.isArray(body.carAliases)) {
+          throw new HttpError(400, "bad_request", "carAliases must be an object");
+        }
+        const entries = Object.entries(body.carAliases);
+        if (entries.length > 32) throw new HttpError(400, "bad_request", "too many carAliases entries (max 32)");
+        const out = {};
+        for (const [k, v] of entries) {
+          if (!/^\d+$/.test(String(k))) throw new HttpError(400, "bad_request", "carAliases keys must be numeric car ids");
+          if (typeof v !== "string" || !v.trim() || v.length > 32) throw new HttpError(400, "bad_request", "carAliases values must be 1-32 chars");
+          out[String(k)] = v.trim();
+        }
+        s.carAliases = out;
+      }
       state.settings = s;
       if (body.fuelBaseline !== undefined) {
         const fb = body.fuelBaseline;
@@ -180,7 +210,9 @@ export function createSettingsRoutes({ state, getStore }) {
       }
       const store = getStore();
       store.kvPut("app:settings", JSON.stringify({
-        currency: s.currency, distanceUnit: s.distanceUnit, timezone: s.timezone
+        currency: s.currency, distanceUnit: s.distanceUnit, timezone: s.timezone,
+        ...(s.primaryCarId != null ? { primaryCarId: s.primaryCarId } : {}),
+        ...(s.carAliases ? { carAliases: s.carAliases } : {})
       }));
       if (state.fuelBaseline) store.kvPut("app:fuelBaseline", JSON.stringify(state.fuelBaseline));
       return { ok: true, settings: current() };

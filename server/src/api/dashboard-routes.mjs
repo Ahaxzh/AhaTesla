@@ -8,6 +8,7 @@ import { computeTripViews } from "./trips-routes.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
 import { isDemo } from "../core/demo-data.mjs";
+import { carIdFromQuery, carsPayload } from "./car-scope.mjs";
 
 export const VERSION = "0.1.0";
 export const FUEL_REFERENCE = Object.freeze({
@@ -19,8 +20,8 @@ export const FUEL_REFERENCE = Object.freeze({
 });
 
 export function createDashboardRoutes({ db, state }) {
-  async function recentChargesViews(limit) {
-    const rows = await listCharging(db, { limit, offset: 0 });
+  async function recentChargesViews(limit, carId = null) {
+    const rows = await listCharging(db, { limit, offset: 0, carId });
     return rows.map((row) => {
       const priced = priceChargingSession(row, state.pricing.defaultRateCnyPerKwh);
       return {
@@ -40,32 +41,40 @@ export function createDashboardRoutes({ db, state }) {
   }
 
   return {
+    // GET /api/cars(m4e):车辆清单 + 别名 + 主车标记;demo 模式走 demo 数据
+    async cars(ctx) {
+      return await carsPayload(db, state); // 契约:裸数组(前端 CarContext 按数组消费,包一层会炸 list.find)
+    },
+
     async dashboard(ctx) {
-      // 主绑定 car_id（AC-2.3）：向导选定值优先，未绑定时回退快照第一辆车。
+      // 主绑定 car_id（AC-2.3 + m4e）：?carId= > settings.primaryCarId > 向导绑定 >
+      // 快照第一辆车。未绑定且无参数时保持旧回退(快照第一辆)。
+      const requestedCarId = carIdFromQuery(ctx, state);
       let boundCarId = null;
       let car = null;
       try { car = await getCarSnapshot(db); } catch { /* teslamate down */ }
-      boundCarId = resolveCarId(state, car?.id ?? null);
+      boundCarId = requestedCarId ?? resolveCarId(state, car?.id ?? null);
       if (boundCarId !== car?.id) {
         car = await getCarSnapshot(db, { carId: boundCarId }).catch(() => car);
       }
       const [driving, monthStats, weekStats] = await Promise.all([
         getDrivingState(db, { carId: boundCarId }),
         // 「本月」= 自然月（北京时间月初 00:00），与账本卡口径一致（v2.2 修复：原为 30 天滚动窗口导致里程/电费/省钱数互相对不上）
-        getMonthStats(db, monthStartIso()),
-        getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString())
+        getMonthStats(db, monthStartIso(), boundCarId),
+        getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), boundCarId)
       ]);
-      const { sql, params } = listDrivesSql({});
+      const { sql, params } = listDrivesSql({ carId: boundCarId });
       const driveRows = await db.query(sql, [...params, 5, 0]);
       const recentTrips = await computeTripViews(db, driveRows, {
         defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history
+        history: state.pricing.history,
+        carId: boundCarId
       });
-      const recentCharges = await recentChargesViews(5);
+      const recentCharges = await recentChargesViews(5, boundCarId);
 
       // energy + cost for month/week from drive views over the same windows
       const { sql: monthSql, params: monthParams } = listDrivesSql({
-        from: monthStartIso()
+        from: monthStartIso(), carId: boundCarId
       });
       const monthDrives = await db.query(monthSql, [...monthParams, 200, 0]);
       const monthViews = await computeTripViews(db, monthDrives, {
@@ -76,7 +85,7 @@ export function createDashboardRoutes({ db, state }) {
       const monthCost = monthViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
 
       const { sql: weekSql, params: weekParams } = listDrivesSql({
-        from: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString()
+        from: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), carId: boundCarId
       });
       const weekDrives = await db.query(weekSql, [...weekParams, 200, 0]);
       const weekViews = await computeTripViews(db, weekDrives, {

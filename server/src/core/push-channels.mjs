@@ -498,18 +498,20 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", hour12: false,
     }).format(now).replace(/\//g, "-");
+    // m4e 多车:dispatchPush 侧预挂 event.carLabel(单车实例不挂,标题零变化)
+    const carSuffix = event.carLabel ? ` · ${event.carLabel}` : "";
     switch (event.type) {
-      case "trip_end": return `行程结束 · ${ts}`;
-      case "charging_start": return `开始充电 · ${ts}`;
-      case "charging_done": return `${event.endedEarly ? "⚠ 充电提前中止" : "充电完成"} · ${ts}`;
-      case "daily": return `昨日用车日报 · ${event.dateLabel || ts}`;
-      case "weekly": return "每周用车周报";
-      case "monthly": return "每月账本月报";
+      case "trip_end": return `行程结束 · ${ts}${carSuffix}`;
+      case "charging_start": return `开始充电 · ${ts}${carSuffix}`;
+      case "charging_done": return `${event.endedEarly ? "⚠ 充电提前中止" : "充电完成"} · ${ts}${carSuffix}`;
+      case "daily": return `昨日用车日报 · ${event.dateLabel || ts}${carSuffix}`;
+      case "weekly": return `每周用车周报${carSuffix}`;
+      case "monthly": return `每月账本月报${carSuffix}`;
       case "outage": return `⚠ 数据断联 · ${ts}`;
       case "outage_recovered": return `✅ 数据已恢复 · ${ts}`;
-      case "chargeInterrupt": return `⚠ 充电提前中止 · ${ts}`;
-      case "tirePressure": return `🛞 胎压偏低 · ${ts}`;
-      default: return `AhaTesla 通知 · ${ts}`;
+      case "chargeInterrupt": return `⚠ 充电提前中止 · ${ts}${carSuffix}`;
+      case "tirePressure": return `🛞 胎压偏低 · ${ts}${carSuffix}`;
+      default: return `AhaTesla 通知 · ${ts}${carSuffix}`;
     }
   }
 
