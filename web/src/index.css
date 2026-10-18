@@ -39,6 +39,16 @@
   input[type='number']::-webkit-inner-spin-button {
     -webkit-appearance: none;
   }
+  /* 全局键盘焦点环：可交互元素统一 tesla 描边（input/select 自带 focus 样式，不重复加） */
+  a:focus-visible,
+  button:focus-visible,
+  [role='button']:focus-visible,
+  [role='radio']:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid rgba(232, 33, 39, 0.7);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
 }
 
 @layer components {
@@ -67,7 +77,7 @@
     @apply text-[11px] leading-relaxed text-slate-500;
   }
   .input-dark {
-    @apply w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-tesla/60 focus:bg-white/[0.06] focus:shadow-[0_0_0_3px_rgba(232,33,39,0.12)];
+    @apply w-full rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-tesla/60 focus:bg-white/[0.06] focus:shadow-[0_0_0_3px_rgba(232,33,39,0.12)] disabled:cursor-not-allowed disabled:opacity-50;
   }
   select.input-dark {
     @apply appearance-none pr-9;
@@ -81,9 +91,9 @@
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
-  /* 小按钮（行内操作/工具栏） */
+  /* 小按钮（行内操作/工具栏）— 圆角与 btn-primary/btn-ghost 统一为 xl */
   .btn-mini {
-    @apply inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-1.5 text-xs font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .skeleton {
     @apply animate-pulse rounded-lg bg-white/[0.06];
@@ -95,13 +105,26 @@
   @apply inline-flex rounded-xl border border-white/10 bg-white/[0.03] p-1;
 }
 .seg-item {
-  @apply flex-1 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition;
+  @apply flex-1 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-tesla/70;
 }
 .seg-item:hover {
   @apply text-slate-200;
 }
 .seg-item-active {
   @apply bg-white/[0.08] text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)];
+}
+
+/* 用车日历：容器查询量宽（100cqw），格子尺寸有界弹性 clamp(下限, 均分, 22px)。
+   桌面下限 9px（GitLab 同密度，保证一年 53 列在窄左栏也不溢出）；
+   触屏把下限提到 13px 保证可点；真放不下由外层 overflow-x-auto 横向滚动 */
+.heatmap-box {
+  container-type: inline-size;
+  --cell-min: 9px;
+}
+@media (pointer: coarse) {
+  .heatmap-box {
+    --cell-min: 13px;
+  }
 }
 
 @keyframes fade-up {
@@ -116,4 +139,304 @@
 }
 .fade-up {
   animation: fade-up 0.35s ease both;
+}
+
+/* 24h 时间轴：触屏段按钮最小命中宽（鼠标 2px 足够，手指不够） */
+@media (pointer: coarse) {
+  .tl-seg {
+    min-width: 10px;
+  }
+}
+
+/* ============================================================
+   浅色主题覆盖层（html[data-theme='light']，由 ThemeContext 写入）
+   原则：不改上面的暗色规则；本段全部 unlayered（晚于 @layer utilities
+   生效）+ 属性选择器加权，逐类映射"白叠加→黑叠加 / slate 亮文→slate 深文"。
+   类名清单来自全站 census（grep white/slate/base 工具类），新增页面若
+   引入新的 white/[0.0x] 档位需同步补到这里。
+   ============================================================ */
+
+/* ---- 基础底色与文字 ---- */
+[data-theme='light'] body {
+  background: #f4f5f6;
+  color: #1e293b;
+}
+[data-theme='light'] .bg-base-950 {
+  background-color: #f4f5f6;
+}
+[data-theme='light'] .bg-base-900\/80 {
+  background-color: rgba(255, 255, 255, 0.85);
+}
+[data-theme='light'] .bg-base-900\/90 {
+  background-color: rgba(255, 255, 255, 0.88);
+}
+[data-theme='light'] .bg-base-900\/95 {
+  background-color: rgba(255, 255, 255, 0.9);
+}
+[data-theme='light'] .bg-base-800\/95 {
+  background-color: rgba(255, 255, 255, 0.92);
+}
+[data-theme='light'] .bg-slate-600 {
+  background-color: #cbd5e1; /* slate-300（中性待定态圆点） */
+}
+[data-theme='light'] .bg-slate-800 {
+  background-color: #e2e8f0; /* slate-200 */
+}
+
+[data-theme='light'] .text-white {
+  color: #0f172a; /* slate-900 */
+}
+[data-theme='light'] .text-slate-100 {
+  color: #1e293b; /* slate-800 */
+}
+[data-theme='light'] .text-slate-200 {
+  color: #1e293b;
+}
+[data-theme='light'] .text-slate-300 {
+  color: #334155; /* slate-700 */
+}
+[data-theme='light'] .text-slate-400 {
+  color: #64748b; /* slate-500 */
+}
+[data-theme='light'] .text-slate-600 {
+  color: #475569; /* slate-600 */
+}
+
+/* ---- 边框（白描边→黑描边） ---- */
+[data-theme='light'] .border-white\/10 {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+[data-theme='light'] .border-white\/15 {
+  border-color: rgba(15, 23, 42, 0.16);
+}
+[data-theme='light'] .border-white\/20 {
+  border-color: rgba(15, 23, 42, 0.2);
+}
+[data-theme='light'] .border-white\/\[0\.06\] {
+  border-color: rgba(15, 23, 42, 0.08);
+}
+[data-theme='light'] .border-white\/\[0\.08\] {
+  border-color: rgba(15, 23, 42, 0.1);
+}
+[data-theme='light'] .border-white\/\[0\.12\] {
+  border-color: rgba(15, 23, 42, 0.14);
+}
+[data-theme='light'] .border-slate-800 {
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+/* ---- 背景叠加（白玻璃→黑叠加） ---- */
+[data-theme='light'] .bg-white\/\[0\.02\] {
+  background-color: rgba(15, 23, 42, 0.02);
+}
+[data-theme='light'] .bg-white\/\[0\.03\] {
+  background-color: rgba(15, 23, 42, 0.03);
+}
+[data-theme='light'] .bg-white\/\[0\.04\] {
+  background-color: rgba(15, 23, 42, 0.04);
+}
+[data-theme='light'] .bg-white\/\[0\.05\] {
+  background-color: rgba(15, 23, 42, 0.05);
+}
+[data-theme='light'] .bg-white\/\[0\.06\] {
+  background-color: rgba(15, 23, 42, 0.06);
+}
+[data-theme='light'] .bg-white\/\[0\.08\] {
+  background-color: rgba(15, 23, 42, 0.07);
+}
+
+/* ---- 分割线（divide 作用于子元素，需复刻子选择器） ---- */
+[data-theme='light'] .divide-white\/\[0\.04\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(15, 23, 42, 0.08);
+}
+[data-theme='light'] .divide-white\/\[0\.05\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+/* ---- ring（Logo 描边等） ---- */
+[data-theme='light'] .ring-white\/90 {
+  --tw-ring-color: rgba(15, 23, 42, 0.2);
+}
+
+/* ---- hover 变体 ---- */
+[data-theme='light'] .hover\:text-slate-200:hover {
+  color: #334155;
+}
+[data-theme='light'] .hover\:text-slate-300:hover {
+  color: #334155;
+}
+[data-theme='light'] .hover\:text-white:hover {
+  color: #0f172a;
+}
+[data-theme='light'] .hover\:bg-white\/\[0\.02\]:hover {
+  background-color: rgba(15, 23, 42, 0.02);
+}
+[data-theme='light'] .hover\:bg-white\/\[0\.03\]:hover {
+  background-color: rgba(15, 23, 42, 0.03);
+}
+[data-theme='light'] .hover\:bg-white\/\[0\.05\]:hover {
+  background-color: rgba(15, 23, 42, 0.05);
+}
+[data-theme='light'] .hover\:bg-white\/\[0\.06\]:hover {
+  background-color: rgba(15, 23, 42, 0.06);
+}
+[data-theme='light'] .hover\:bg-white\/\[0\.08\]:hover {
+  background-color: rgba(15, 23, 42, 0.07);
+}
+[data-theme='light'] .hover\:border-white:hover {
+  border-color: rgba(15, 23, 42, 0.25);
+}
+[data-theme='light'] .hover\:border-white\/\[0\.12\]:hover {
+  border-color: rgba(15, 23, 42, 0.25);
+}
+
+/* ---- 强调色（浅底对比度，400 系文字全部加深一档） ---- */
+[data-theme='light'] .text-emerald-400 {
+  color: #059669; /* emerald-600 */
+}
+[data-theme='light'] .text-amber-400 {
+  color: #b45309; /* amber-700 */
+}
+[data-theme='light'] .text-amber-300 {
+  color: #b45309;
+}
+[data-theme='light'] .text-amber-400\/80 {
+  color: rgba(180, 83, 9, 0.9);
+}
+[data-theme='light'] .text-red-400 {
+  color: #dc2626; /* red-600 */
+}
+[data-theme='light'] .text-sky-400 {
+  color: #0284c7; /* sky-600 */
+}
+[data-theme='light'] .text-tesla-soft {
+  color: #e82127;
+}
+/* 实心状态圆点：加深一档保证白卡上可辨 */
+[data-theme='light'] .bg-emerald-400 {
+  background-color: #10b981; /* emerald-500 */
+}
+[data-theme='light'] .bg-amber-400 {
+  background-color: #f59e0b; /* amber-500 */
+}
+[data-theme='light'] .bg-sky-400 {
+  background-color: #0ea5e9; /* sky-500 */
+}
+/* 彩色软底 chip（/10 一档）：底色同步换深色系 */
+[data-theme='light'] .bg-emerald-400\/10 {
+  background-color: rgba(5, 150, 105, 0.1);
+}
+[data-theme='light'] .bg-amber-400\/10 {
+  background-color: rgba(180, 83, 9, 0.08);
+}
+[data-theme='light'] .bg-sky-400\/10 {
+  background-color: rgba(2, 132, 199, 0.08);
+}
+[data-theme='light'] .bg-red-400\/\[0\.06\] {
+  background-color: rgba(220, 38, 38, 0.06);
+}
+[data-theme='light'] .bg-red-400\/\[0\.08\] {
+  background-color: rgba(220, 38, 38, 0.07);
+}
+[data-theme='light'] .border-emerald-400\/30 {
+  border-color: rgba(5, 150, 105, 0.35);
+}
+[data-theme='light'] .border-emerald-400\/20 {
+  border-color: rgba(5, 150, 105, 0.25);
+}
+[data-theme='light'] .border-amber-400\/20 {
+  border-color: rgba(180, 83, 9, 0.22);
+}
+[data-theme='light'] .border-amber-500\/30 {
+  border-color: rgba(180, 83, 9, 0.3);
+}
+[data-theme='light'] .border-sky-400\/25 {
+  border-color: rgba(2, 132, 199, 0.28);
+}
+[data-theme='light'] .border-red-400\/30 {
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+/* ---- 组件类浅色等价物（原生 CSS 覆盖 @layer components 产出） ---- */
+[data-theme='light'] .glass-card,
+[data-theme='light'] .glass-card-flat {
+  background-color: #ffffff;
+  border-color: rgba(15, 23, 42, 0.06);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.05);
+}
+[data-theme='light'] .glass-card:hover {
+  background-color: #fdfdfe;
+}
+[data-theme='light'] .section-title {
+  color: #1e293b;
+}
+[data-theme='light'] .section-desc {
+  color: #64748b;
+}
+[data-theme='light'] .page-title {
+  color: #0f172a;
+}
+[data-theme='light'] .input-dark {
+  background-color: #ffffff;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #0f172a;
+}
+[data-theme='light'] .input-dark::placeholder {
+  color: #94a3b8; /* slate-400 */
+}
+[data-theme='light'] .input-dark:focus {
+  border-color: rgba(232, 33, 39, 0.6);
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(232, 33, 39, 0.12);
+}
+[data-theme='light'] .btn-primary {
+  /* tesla 红底白字保持，阴影减淡 */
+  box-shadow:
+    0 1px 2px rgba(176, 22, 27, 0.25),
+    0 0 0 1px rgba(232, 33, 39, 0.25) inset;
+}
+[data-theme='light'] .btn-ghost {
+  background-color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(15, 23, 42, 0.1);
+  color: #1e293b;
+}
+[data-theme='light'] .btn-ghost:hover {
+  background-color: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.2);
+}
+[data-theme='light'] .btn-mini {
+  background-color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(15, 23, 42, 0.1);
+  color: #334155;
+}
+[data-theme='light'] .btn-mini:hover {
+  background-color: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.2);
+  color: #0f172a;
+}
+[data-theme='light'] .seg {
+  background-color: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+[data-theme='light'] .seg-item {
+  color: #64748b;
+}
+[data-theme='light'] .seg-item:hover {
+  color: #334155;
+}
+[data-theme='light'] .seg-item-active {
+  /* 浅色分段控件：灰轨道上的白色药丸（iOS 风） */
+  background-color: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+}
+[data-theme='light'] .skeleton {
+  background-color: rgba(15, 23, 42, 0.06);
+}
+
+/* ---- 滚动条 ---- */
+[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
 }

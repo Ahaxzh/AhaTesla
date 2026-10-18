@@ -15,28 +15,30 @@ import { useAuth } from '@/contexts/AuthContext'
 import { setApiHandlers, api } from '@/api/client'
 import { useToast } from '@/components/Toast'
 import { HealthBanner } from '@/components/HealthBanner'
+import { useI18n } from '@/i18n'
 
-/** 移动端 TabBar 4 项（PRD §6.1）：概览/行程/充电/设置 */
+/** 导航项（移动端 TabBar 与桌面侧栏共用）：概览/行程/充电/报告/设置 */
 export const NAV_ITEMS = [
-  { to: '/', label: '概览', icon: Gauge, testid: 'nav-dashboard' },
-  { to: '/trips', label: '行程', icon: Route, testid: 'nav-trips' },
-  { to: '/charging', label: '充电', icon: BatteryCharging, testid: 'nav-charging' },
-  { to: '/settings', label: '设置', icon: Settings, testid: 'nav-settings' },
+  { to: '/', label: '概览', labelKey: 'nav.dashboard', icon: Gauge, testid: 'nav-dashboard' },
+  { to: '/trips', label: '行程', labelKey: 'nav.trips', icon: Route, testid: 'nav-trips' },
+  { to: '/charging', label: '充电', labelKey: 'nav.charging', icon: BatteryCharging, testid: 'nav-charging' },
+  { to: '/reports', label: '报告', labelKey: 'nav.reports', icon: FileBarChart, testid: 'nav-reports' },
+  { to: '/settings', label: '设置', labelKey: 'nav.settings', icon: Settings, testid: 'nav-settings' },
 ]
 
 /** 桌面侧栏主导航（电价/推送/系统已并入设置页分区） */
-export const SIDEBAR_ITEMS = [
-  ...NAV_ITEMS,
-  { to: '/reports', label: '报告', icon: FileBarChart, testid: 'nav-reports' },
-]
+export const SIDEBAR_ITEMS = NAV_ITEMS
 
-function NavItem({ to, label, icon: Icon, testid, onClick }: {
+function NavItem({ to, label, labelKey, icon: Icon, testid, onClick }: {
   to: string
   label: string
+  labelKey?: string
   icon: typeof Gauge
   testid: string
   onClick?: () => void
 }) {
+  const { t } = useI18n()
+  const text = labelKey ? t(labelKey, label) : label
   return (
     <NavLink
       to={to}
@@ -46,13 +48,13 @@ function NavItem({ to, label, icon: Icon, testid, onClick }: {
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
           isActive
-            ? 'bg-tesla/12 font-medium text-tesla'
+            ? 'bg-tesla/[0.12] font-medium text-tesla'
             : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
         }`
       }
     >
       <Icon className="h-[18px] w-[18px] shrink-0" />
-      {label}
+      {text}
     </NavLink>
   )
 }
@@ -89,6 +91,8 @@ function SidebarCarCard() {
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${health?.dbOk === false ? 'bg-amber-400' : 'bg-emerald-400'}`}
           title={health?.dbOk === false ? '数据源异常' : '数据源正常'}
+          role="img"
+          aria-label={health?.dbOk === false ? '数据源异常' : '数据源正常'}
           data-testid="sidebar-health-dot"
         />
       </div>
@@ -100,16 +104,30 @@ function SidebarCarCard() {
         >
           {battery != null ? `${battery}%` : '--'}
         </span>
-        <span className="text-[10px] text-slate-500">{stateLabel}</span>
+        <span className="text-[11px] text-slate-400">{stateLabel}</span>
       </div>
     </div>
   )
+}
+
+/** 跳转设置页锚点并滚动到位：react-router 不会自动滚 hash，需手动找元素；
+    路由切换有渲染时差，rAF 重试若干帧（分区骨架同步渲染，通常 1~2 帧内命中） */
+function goToSettingsAnchor(navigate: (to: string) => void, section: string) {
+  navigate(`/settings#settings-${section}`)
+  let tries = 0
+  const scroll = () => {
+    const el = document.getElementById(`settings-${section}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    else if (++tries < 30) requestAnimationFrame(scroll)
+  }
+  requestAnimationFrame(scroll)
 }
 
 /** 左下角头像菜单：用户信息 / 修改密码（跳设置） / 退出登录 */
 function UserMenu() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -167,19 +185,19 @@ function UserMenu() {
         >
           <div className="border-b border-white/[0.06] px-3.5 py-2.5">
             <div className="truncate text-sm font-medium text-slate-200">{user?.username}</div>
-            <div className="mt-0.5 text-[10px] text-slate-500">管理员 · 单用户模式</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">{t('menu.role', '管理员 · 单用户模式')}</div>
           </div>
           <button
             role="menuitem"
             onClick={() => {
               setOpen(false)
-              navigate('/settings#settings-security')
+              goToSettingsAnchor(navigate, 'security')
             }}
             data-testid="user-menu-password"
             className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
           >
             <KeyRound className="h-4 w-4 text-slate-500" />
-            修改密码
+            {t('menu.password', '修改密码')}
           </button>
           <button
             role="menuitem"
@@ -188,7 +206,7 @@ function UserMenu() {
             className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
           >
             <LogOut className="h-4 w-4 text-slate-500" />
-            退出登录
+            {t('menu.logout', '退出登录')}
           </button>
         </div>
       )}
@@ -200,6 +218,7 @@ export function AppLayout() {
   useAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
+  const { t } = useI18n()
 
   useEffect(() => {
     setApiHandlers({
@@ -212,9 +231,6 @@ export function AppLayout() {
 
   return (
     <div className="min-h-dvh bg-base-950">
-      {/* GA-32：全站数据源失联横幅 */}
-      <HealthBanner />
-
       {/* 桌面侧边栏（§6.1：车辆缩略状态 + 导航 + 登出） */}
       <aside
         data-testid="desktop-sidebar"
@@ -234,17 +250,20 @@ export function AppLayout() {
         </div>
       </aside>
 
-      {/* 主内容 */}
-      <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-5 sm:px-6 lg:ml-60 lg:pb-10 lg:pt-8">
-        <Outlet />
-      </main>
+      {/* 主内容（含 GA-32 失联横幅：置于内容列内，避免叠印侧栏） */}
+      <div className="lg:pl-60">
+        <HealthBanner />
+        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-6 lg:pb-10 lg:pt-[max(2rem,env(safe-area-inset-top))]">
+          <Outlet />
+        </main>
+      </div>
 
       {/* 移动端底部 TabBar（§6.1：4 项 概览/行程/充电/设置） */}
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="mx-auto max-w-md border-t border-white/[0.06] bg-base-900/90 px-2 pt-1 backdrop-blur-xl">
+        <div className="border-t border-white/[0.06] bg-base-900/90 backdrop-blur-xl">
           <nav
             data-testid="mobile-tabbar"
-            className="grid grid-cols-4"
+            className="mx-auto grid max-w-md grid-cols-5 px-2 pt-1"
             aria-label="底部导航"
           >
             {NAV_ITEMS.map((item) => (
@@ -254,13 +273,13 @@ export function AppLayout() {
                 end={item.to === '/'}
                 data-testid={`${item.testid}-mobile`}
                 className={({ isActive }) =>
-                  `flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] transition ${
-                    isActive ? 'text-tesla' : 'text-slate-500'
+                  `flex flex-col items-center gap-1 rounded-lg py-2 text-[11px] transition ${
+                    isActive ? 'text-tesla' : 'text-slate-400'
                   }`
                 }
               >
                 <item.icon className="h-5 w-5" />
-                {item.label}
+                {t(item.labelKey ?? '', item.label)}
               </NavLink>
             ))}
           </nav>

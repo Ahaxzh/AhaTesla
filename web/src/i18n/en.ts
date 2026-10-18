@@ -1,0 +1,60 @@
+/**
+ * 英文词典（key 与调用点 t(key, zhDefault) 的 key 一一对应）。
+ * 语义:lang='en' 时命中返回英文,未命中由 t() 回退调用点的中文默认文案。
+ */
+export const EN: Record<string, string> = {
+  // 导航与用户菜单
+  'nav.dashboard': 'Overview',
+  'nav.trips': 'Trips',
+  'nav.charging': 'Charging',
+  'nav.reports': 'Reports',
+  'nav.settings': 'Settings',
+  'menu.password': 'Change password',
+  'menu.logout': 'Sign out',
+  'menu.role': 'Admin · Single-user mode',
+
+  // 设置页
+  'settings.title': 'Settings',
+  'settings.subtitle': 'Single-user mode',
+  'settings.nav.appearance': 'Appearance',
+  'settings.nav.ledger': 'Ledger',
+  'settings.nav.pricing': 'Pricing',
+  'settings.nav.push': 'Push',
+  'settings.nav.system': 'System',
+  'settings.nav.security': 'Security',
+  'settings.appearance.desc': 'Theme & language (stored on this device)',
+  'settings.theme': 'Theme',
+  'settings.theme.system': 'System',
+  'settings.theme.light': 'Light',
+  'settings.theme.dark': 'Dark',
+  'settings.lang': 'Language',
+  'settings.lang.zh': '中文',
+  'settings.lang.en': 'English',
+  'settings.ledger.desc': 'Currency · Fuel baseline · History recalculation',
+  'settings.currency': 'Currency',
+  'settings.distance': 'Distance unit',
+  'settings.unit.km': 'km',
+  'settings.unit.mi': 'miles',
+  'settings.fuel': 'Fuel car baseline',
+  'settings.fuel.consumption': 'Consumption (L/100km)',
+  'settings.fuel.price': 'Fuel price',
+  'settings.save': 'Save',
+  'settings.saving': 'Saving…',
+  'settings.recalc': 'Recalculate history',
+  'settings.recalc.desc': 'Recompute all costs with current pricing rules',
+  'settings.recalc.start': 'Start',
+  'settings.recalc.done': 'Recalculation complete',
+  'settings.pricing.desc': 'Default rate · Location rates (TOU) · Rate history',
+  'settings.push.desc': '5 events × 3 channels · Channel keys live on the Push page',
+  'settings.system.desc': 'Service status · Read-only shield · Event log',
+  'settings.security.desc': 'Changing the password revokes other signed-in sessions',
+  'settings.pw.old': 'Current password',
+  'settings.pw.new': 'New password',
+  'settings.pw.confirm': 'Confirm new password',
+  'settings.pw.submit': 'Change password',
+  'settings.saved': 'Settings saved',
+
+  // 通用
+  'common.cancel': 'Cancel',
+  'common.close': 'Close',
+}

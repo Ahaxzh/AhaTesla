@@ -59,8 +59,16 @@ export const mockDashboard: DashboardData = {
 export const mockPricing: PricingData = {
   defaultRateCnyPerKwh: 0.52,
   locations: [
-    { id: 1, name: '家庭充电桩', pricePerUnit: 0.5, sessionFee: null, billingType: 'kWh' },
-    { id: 2, name: '超充 上海站', pricePerUnit: 1.85, sessionFee: 0, billingType: 'kWh' },
+    {
+      id: 1,
+      name: '家庭充电桩',
+      pricePerUnit: 0.5,
+      sessionFee: null,
+      billingType: 'kWh',
+      priceMode: 'tou',
+      tou: { offPeakStart: '23:00', offPeakEnd: '07:00', offPeakRate: 0.3, peakRate: 1 },
+    },
+    { id: 2, name: '超充 上海站', pricePerUnit: 1.85, sessionFee: 0, billingType: 'kWh', priceMode: 'fixed' },
   ],
 }
 
@@ -212,6 +220,9 @@ export const defaultHandlers = [
     return HttpResponse.json({ ok: true, rate: body.rate })
   }),
   http.get('/api/pricing/history', () => HttpResponse.json([])),
+  http.put('/api/pricing/locations/:id', async ({ request, params }) =>
+    HttpResponse.json({ ok: true, id: Number(params.id), ...((await request.json().catch(() => ({}))) as object) }),
+  ),
   http.get('/api/channels', () => HttpResponse.json(mockChannelStatus)),
   http.get('/api/push/env', () => HttpResponse.json({ https: true, vapidPublicKey: 'BTest' })),
   http.get('/api/dashboard/timeline', () => HttpResponse.json(mockTimeline)),

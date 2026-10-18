@@ -1,14 +1,38 @@
 /**
- * 电价设置分区（v2.2 从独立「电价」页并入设置页）。
- * 内容：默认电价 · 地点单价表（teslamate geofences）· 费率变更历史
+ * 电价设置分区（v2.2 从独立「电价」页并入设置页；v2.4 吸收围栏分时电价）。
+ * 内容：默认电价 · 地点单价表（teslamate geofences，行内展开分时/固定编辑）· 费率变更历史
  */
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Database, History, Save } from 'lucide-react'
+import { ChevronDown, Database, History, Save } from 'lucide-react'
 import { api } from '@/api/client'
 import { EmptyState } from '@/components/EmptyState'
 import { useToast } from '@/components/Toast'
 import { fmtDateTime } from '@/utils/format'
+import type { PricingLocation } from '@/types'
+
+/** 行内分时编辑面板的受控状态（同一时间只展开一行） */
+function useTouEditor() {
+  const [editId, setEditId] = useState<number | null>(null)
+  const [mode, setMode] = useState<'tou' | 'fixed'>('tou')
+  const [offStart, setOffStart] = useState('23:00')
+  const [offEnd, setOffEnd] = useState('07:00')
+  const [offRate, setOffRate] = useState('0.30')
+  const [peakRate, setPeakRate] = useState('1.00')
+
+  const open = (loc: PricingLocation) => {
+    setEditId((prev) => (prev === loc.id ? null : loc.id))
+    setMode(loc.priceMode === 'tou' ? 'tou' : 'fixed')
+    if (loc.tou) {
+      setOffStart(loc.tou.offPeakStart)
+      setOffEnd(loc.tou.offPeakEnd)
+      setOffRate(String(loc.tou.offPeakRate))
+      setPeakRate(String(loc.tou.peakRate))
+    }
+  }
+  const close = () => setEditId(null)
+  return { editId, mode, setMode, offStart, setOffStart, offEnd, setOffEnd, offRate, setOffRate, peakRate, setPeakRate, open, close }
+}
 
 export function PricingSection() {
   const queryClient = useQueryClient()
@@ -41,10 +65,34 @@ export function PricingSection() {
     saveMutation.mutate(value)
   }
 
+  // ---- 围栏分时电价（行内展开，PUT /api/pricing/locations/:id） ----
+  const tou = useTouEditor()
+
+  const saveTou = useMutation({
+    mutationFn: (id: number) =>
+      api.setLocationPricing(id, tou.mode === 'tou'
+        ? {
+            priceMode: 'tou',
+            tou: {
+              offPeakStart: tou.offStart,
+              offPeakEnd: tou.offEnd,
+              offPeakRate: Number(tou.offRate),
+              peakRate: Number(tou.peakRate),
+            },
+          }
+        : { priceMode: 'fixed' }),
+    onSuccess: () => {
+      toast(tou.mode === 'tou' ? '分时电价已保存' : '已改为固定计价', 'success')
+      tou.close()
+      void queryClient.invalidateQueries({ queryKey: ['pricing'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
+
   return (
     <div className="space-y-5">
       {/* 默认价编辑 */}
-      <div data-testid="default-rate-card">
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4" data-testid="default-rate-card">
         <h3 className="text-xs font-medium text-slate-300">默认电价</h3>
         <p className="section-desc mt-1">充电记录无地点单价时按此价格计费，变更只影响之后的新行程。</p>
         <div className="mt-3 flex max-w-sm items-center gap-3">
@@ -79,13 +127,13 @@ export function PricingSection() {
         </div>
       </div>
 
-      {/* 地点单价表 */}
+      {/* 地点单价表（行内分时编辑） */}
       <div className="overflow-hidden rounded-xl border border-white/[0.06]" data-testid="location-table">
         <div className="flex items-center gap-2 px-4 py-3">
           <Database className="h-4 w-4 text-tesla" />
-          <span className="text-xs font-medium text-slate-200">地点单价</span>
+          <span className="text-xs font-medium text-slate-200">地点电价</span>
           <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-slate-400">
-            teslamate geofences
+            teslamate geofences · 点击行配置分时
           </span>
         </div>
         {isLoading ? (
@@ -95,30 +143,30 @@ export function PricingSection() {
             ))}
           </div>
         ) : !data || data.locations.length === 0 ? (
-          <EmptyState icon={Database} title="暂无地点单价" description="在 TeslaMate 中配置 geofence 电价后会自动同步" />
+          <EmptyState icon={Database} title="暂无地点电价" description="在 TeslaMate 中配置 geofence 电价后会自动同步" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-y border-white/[0.06] bg-white/[0.02] text-left text-[11px] uppercase tracking-wide text-slate-500">
+                <tr className="border-y border-white/[0.06] bg-white/[0.02] text-left text-[11px] uppercase tracking-wide text-slate-400">
                   <th className="px-4 py-2.5 font-medium">地点</th>
                   <th className="px-4 py-2.5 text-right font-medium">单价 (元/kWh)</th>
                   <th className="px-4 py-2.5 text-right font-medium">服务费</th>
                   <th className="px-4 py-2.5 font-medium">计费方式</th>
+                  <th className="w-10 px-2 py-2.5" aria-label="展开分时配置" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.04]">
                 {data.locations.map((loc) => (
-                  <tr key={loc.id} className="transition hover:bg-white/[0.02]">
-                    <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-200">{loc.name}</td>
-                    <td className="num px-4 py-2.5 text-right font-medium text-white">
-                      {loc.pricePerUnit != null ? `¥${loc.pricePerUnit.toFixed(2)}` : '--'}
-                    </td>
-                    <td className="num px-4 py-2.5 text-right text-slate-400">
-                      {loc.sessionFee != null ? `¥${loc.sessionFee.toFixed(2)}` : '--'}
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-400">{loc.billingType}</td>
-                  </tr>
+                  <LocationRow
+                    key={loc.id}
+                    loc={loc}
+                    expanded={tou.editId === loc.id}
+                    onToggle={() => tou.open(loc)}
+                    editor={tou}
+                    saving={saveTou.isPending}
+                    onSave={() => saveTou.mutate(loc.id)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -133,14 +181,14 @@ export function PricingSection() {
           <span className="text-xs font-medium text-slate-300">费率变更历史</span>
         </div>
         {!history || history.length === 0 ? (
-          <p className="py-3 text-xs text-slate-500">暂无变更记录</p>
+          <p className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-xs text-slate-500">暂无变更记录</p>
         ) : (
           <ul className="divide-y divide-white/[0.04] rounded-xl border border-white/[0.06] px-4">
             {history.map((h, i) => (
               <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-xs">
                 <span className="num text-slate-400">{fmtDateTime(h.changedAt)}</span>
                 <span className="num text-slate-300">
-                  ¥{h.from.toFixed(2)} <span className="text-slate-600">→</span>{' '}
+                  ¥{h.from.toFixed(2)} <span className="text-slate-500">→</span>{' '}
                   <span className="font-medium text-tesla">¥{h.to.toFixed(2)}</span>
                 </span>
                 <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-slate-500">{h.source}</span>
@@ -150,5 +198,124 @@ export function PricingSection() {
         )}
       </div>
     </div>
+  )
+}
+
+/** 单行地点：固定价/分时摘要 + 展开后的分时编辑表单 */
+function LocationRow({
+  loc,
+  expanded,
+  onToggle,
+  editor,
+  saving,
+  onSave,
+}: {
+  loc: PricingLocation
+  expanded: boolean
+  onToggle: () => void
+  editor: ReturnType<typeof useTouEditor>
+  saving: boolean
+  onSave: () => void
+}) {
+  const isTou = loc.priceMode === 'tou'
+  return (
+    <>
+      <tr className={`transition hover:bg-white/[0.02] ${expanded ? 'bg-white/[0.03]' : ''}`}>
+        <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-200" title={loc.name}>{loc.name}</td>
+        <td className="num px-4 py-2.5 text-right font-medium text-white">
+          {isTou && loc.tou
+            ? <span title={`谷 ¥${loc.tou.offPeakRate.toFixed(3)} / 峰 ¥${loc.tou.peakRate.toFixed(3)}`}>分时</span>
+            : loc.pricePerUnit != null ? `¥${loc.pricePerUnit.toFixed(2)}` : '--'}
+        </td>
+        <td className="num px-4 py-2.5 text-right text-slate-400">
+          {loc.sessionFee != null ? `¥${loc.sessionFee.toFixed(2)}` : '--'}
+        </td>
+        <td className="px-4 py-2.5 text-slate-400">
+          {isTou && loc.tou ? (
+            <span className="num" title="谷段 → 峰段">
+              <span className="text-sky-400">谷 {loc.tou.offPeakStart}~{loc.tou.offPeakEnd} ¥{loc.tou.offPeakRate.toFixed(2)}</span>
+              <span className="mx-1.5 text-slate-600">/</span>
+              <span className="text-amber-400">峰 ¥{loc.tou.peakRate.toFixed(2)}</span>
+            </span>
+          ) : (
+            `固定 · ${loc.billingType}`
+          )}
+        </td>
+        <td className="px-2 py-2.5">
+          <button
+            onClick={onToggle}
+            aria-expanded={expanded}
+            aria-label={`${loc.name} 分时电价配置`}
+            data-testid={`tou-toggle-${loc.id}`}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-white"
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="bg-white/[0.02]" data-testid="tou-form">
+          <td colSpan={5} className="px-4 pb-4">
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs font-medium text-slate-300">{loc.name} · 计费方式</span>
+                <div className="seg" role="radiogroup" aria-label={`${loc.name} 计费方式`}>
+                  {(['tou', 'fixed'] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => editor.setMode(m)}
+                      className={`seg-item ${editor.mode === m ? 'seg-item-active' : ''}`}
+                      role="radio"
+                      aria-checked={editor.mode === m}
+                      data-testid={`tou-mode-${m}`}
+                    >
+                      {m === 'tou' ? '分时（谷/峰）' : '固定单价'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {editor.mode === 'tou' ? (
+                <>
+                  <div className="mt-3 flex items-center gap-4 text-[11px] text-slate-500">
+                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-sky-400" />谷段（如夜间家充）</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-amber-400" />峰段（日间快充）</span>
+                    <span>按充电起止跨时段比例计价</span>
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">谷段开始</label>
+                      <input type="time" className="input-dark num" value={editor.offStart} onChange={(e) => editor.setOffStart(e.target.value)} data-testid="tou-off-start" />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">谷段结束</label>
+                      <input type="time" className="input-dark num" value={editor.offEnd} onChange={(e) => editor.setOffEnd(e.target.value)} data-testid="tou-off-end" />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">谷段单价（元/kWh）</label>
+                      <input type="number" step="0.001" min="0" inputMode="decimal" className="input-dark num" value={editor.offRate} onChange={(e) => editor.setOffRate(e.target.value)} data-testid="tou-off-rate" />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">峰段单价（元/kWh）</label>
+                      <input type="number" step="0.001" min="0" inputMode="decimal" className="input-dark num" value={editor.peakRate} onChange={(e) => editor.setPeakRate(e.target.value)} data-testid="tou-peak-rate" />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="section-desc mt-3">按上表固定单价计费（单价来自 TeslaMate geofence 配置）。</p>
+              )}
+              <button
+                className="btn-primary mt-4"
+                onClick={onSave}
+                disabled={saving}
+                data-testid="tou-save"
+              >
+                <Save className="h-4 w-4" />
+                {saving ? '保存中…' : editor.mode === 'tou' ? '保存分时电价' : '改为固定计价'}
+              </button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }

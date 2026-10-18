@@ -4,8 +4,10 @@ import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from '@/components/Toast'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { ThemeProvider } from '@/contexts/ThemeContext'
+import { I18nProvider } from '@/i18n'
 
-/** 统一的组件渲染入口（router + react-query + toast + auth） */
+/** 统一的组件渲染入口（router + react-query + toast + auth + theme + i18n） */
 export function renderWithProviders(
   ui: ReactElement,
   { route = '/', ...options }: { route?: string } & Parameters<typeof render>[1] = {},
@@ -16,11 +18,15 @@ export function renderWithProviders(
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <AuthProvider>
-            <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
-          </AuthProvider>
-        </ToastProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <ToastProvider>
+              <AuthProvider>
+                <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+              </AuthProvider>
+            </ToastProvider>
+          </I18nProvider>
+        </ThemeProvider>
       </QueryClientProvider>
     )
   }

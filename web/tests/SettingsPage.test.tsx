@@ -1,13 +1,17 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import SettingsPage from '@/pages/SettingsPage'
 import { renderWithProviders } from './test-utils'
 import { server } from './msw'
 
 beforeAll(() => server.listen())
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  server.resetHandlers()
+  localStorage.clear()
+  document.documentElement.dataset.theme = ''
+})
 afterAll(() => server.close())
 
 describe('SettingsPage', () => {
@@ -16,6 +20,41 @@ describe('SettingsPage', () => {
     // v2.2：账户信息合并进页头（无独立 account-card）
     expect(await screen.findByText(/aha.*单用户模式/s)).toBeInTheDocument()
     expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
+  })
+
+  it('v2.4 分区结构：外观/账本/电价/推送/系统/安全 六分区，导航与卡片一一对应', async () => {
+    renderWithProviders(<SettingsPage />)
+    // 六分区卡片齐备
+    expect(await screen.findByTestId('settings-appearance')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-ledger')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-pricing')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-push-matrix')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-system')).toBeInTheDocument()
+    expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
+    // 导航锚点与分区一一对应（桌面 aside + 移动横向 两份导航都要 6 项）
+    const navs = screen.getAllByTestId('settings-nav')
+    expect(navs).toHaveLength(2)
+    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(6)
+    // 去重回归：数据源健康小卡已并入系统分区，设置页不再出现
+    expect(screen.queryByText('累计行程')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('resync-meta')).not.toBeInTheDocument()
+  })
+
+  it('外观分区：主题切换写 dataset，语言切换即时生效', async () => {
+    renderWithProviders(<SettingsPage />)
+    await screen.findByTestId('settings-appearance')
+    // 默认中文（桌面导航 + 分区标题各出现一次）
+    expect(screen.getAllByText('外观').length).toBeGreaterThanOrEqual(2)
+    fireEvent.click(screen.getByTestId('theme-light'))
+    expect(document.documentElement.dataset.theme).toBe('light')
+    fireEvent.click(screen.getByTestId('theme-dark'))
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    // 切英文：页面标题 + 分区导航即时变英文（词典命中；Appearance 在两份导航+分区标题共 3 处）
+    fireEvent.click(screen.getByTestId('lang-en'))
+    expect(await screen.findByText('Settings')).toBeInTheDocument()
+    expect(screen.getAllByText('Appearance')).toHaveLength(3)
+    fireEvent.click(screen.getByTestId('lang-zh'))
+    expect((await screen.findAllByText('外观')).length).toBeGreaterThanOrEqual(2)
   })
 
   it('密码不一致与过短密码被前端拦截', async () => {

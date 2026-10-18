@@ -35,7 +35,7 @@ export function HealthBanner() {
         TeslaMate 数据库连接中断，当前展示离线缓存数据
         {outageMin >= 1 && <span className="opacity-80">（已失联 {outageMin} 分钟）</span>}
       </span>
-      <Link to="/system" className="ml-1 shrink-0 underline underline-offset-2">
+      <Link to="/settings#settings-system" className="ml-1 shrink-0 underline underline-offset-2">
         检查连接
       </Link>
     </div>
