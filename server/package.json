@@ -13,7 +13,7 @@
     "test:live": "AHA_LIVE=1 node --test \"test/live/*.test.mjs\""
   },
   "dependencies": {
-    "mqtt": "^5.10.1",
+    "mqtt": "^5.16.1",
     "pg": "^8.13.1",
     "undici": "^8.12.1",
     "web-push": "^3.6.7"
