@@ -1,24 +1,35 @@
-# AhaTesla 全栈发行版（M3）：AhaTesla + TeslaMate 一体化部署
-# 适用：全新主机，没有现成 TeslaMate 的用户。
-# 已有 TeslaMate 的用户请用 connect-compose.yml（桥接模式，不动现有栈）。
+# AhaTesla 全栈发行版（m4a）：AhaTesla + TeslaMate 一体化部署
+# 适用：全新主机，没有现成 TeslaMate 的用户 —— 一条命令全套。
+# 已有 TeslaMate 的用户请用 connect-compose.yml（轨道 B，直接挂你的现有网络）。
 #
-# 用法：
-#   cp .env.example.fullstack .env   # 编辑数据库密码等
-#   docker compose -f deploy/fullstack-compose.yml --profile fullstack up -d
+# 用法（务必带 --profile fullstack，不带则所有服务都不启动，防止半残栈）：
+#   cd AhaTesla
+#   cp deploy/.env.example.fullstack deploy/.env   # 只需填 2 个密钥（文件内附生成命令）
+#   docker compose -f deploy/fullstack-compose.yml --profile fullstack up -d --build
 #
-# 安全红线：teslamate 库对 AhaTesla 只读账号；桥接仅内网；无公网端口（经 NPM 反代）。
+# 然后浏览器打开 http://<主机IP>:18500 → /setup 向导：
+#   注册管理员 → 按引导打开 http://<主机IP>:4000 登录特斯拉账号 → 回到向导等车出现 → 完成
+#
+# 端口说明：
+#   18500  AhaTesla（默认仅绑 127.0.0.1；局域网访问请改 "18500:18500" 或走 NPM HTTPS 反代）
+#   4000   TeslaMate 登录界面（默认仅绑 127.0.0.1；远程主机上需要从你的电脑访问时放开）
+#   5432   PostgreSQL 不对外，仅容器网络内可达
+#
+# 安全红线：teslamate 库对 AhaTesla 只读账号（init-ro 自动创建）；无公网端口。
 name: ahatesla-fullstack
 
 services:
-  # ---------- TeslaMate 栈（profile: fullstack） ----------
+  # ---------- TeslaMate 栈 ----------
   teslamate-db:
     image: postgres:17
     container_name: ahatesla-db
     restart: unless-stopped
+    profiles: ["fullstack"]
     environment:
       POSTGRES_USER: teslamate
-      POSTGRES_PASSWORD: ${TM_DB_PASSWORD:?请在 .env 设置 TM_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${TM_DB_PASSWORD:?请在 deploy/.env 设置 TM_DB_PASSWORD（生成命令见 .env.example.fullstack）}
       POSTGRES_DB: teslamate
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - tm-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -33,6 +44,7 @@ services:
     image: eclipse-mosquitto:2
     container_name: ahatesla-mqtt
     restart: unless-stopped
+    profiles: ["fullstack"]
     command: mosquitto -c /mosquitto-no-auth.conf
     # 允许本地匿名（仅容器网络内可达，不映射宿主端口）
     security_opt:
@@ -49,39 +61,25 @@ services:
       teslamate-mqtt:
         condition: service_started
     environment:
-      ENCRYPTION_KEY: ${TM_ENCRYPTION_KEY:?请在 .env 设置 TM_ENCRYPTION_KEY}
+      ENCRYPTION_KEY: ${TM_ENCRYPTION_KEY:?请在 deploy/.env 设置 TM_ENCRYPTION_KEY（openssl rand -base64 32）}
       DATABASE_USER: teslamate
       DATABASE_PASS: ${TM_DB_PASSWORD}
       DATABASE_NAME: teslamate
       DATABASE_HOST: teslamate-db
       MQTT_HOST: teslamate-mqtt
+      TZ: ${TZ:-Asia/Shanghai}
       # 中国区特斯拉 API 网关（可选，按需取消注释）
       # TESLA_API_HOST: https://tesla.cn
     volumes:
       - tm-import:/import
-    security_opt:
-      - no-new-privileges:true
-
-  # ---------- AhaTesla ----------
-  ahatesla:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    container_name: ahatesla-app
-    restart: unless-stopped
-    depends_on:
-      teslamate-db:
-        condition: service_healthy
-    environment:
-      PORT: 18500
-      DB_URL: postgres://ahatesla_ro:${TM_DB_PASSWORD}@teslamate-db:5432/teslamate
-      MQTT_URL: mqtt://teslamate-mqtt:1883
-      AHA_DATA_DIR: /data
-      # 只读账号在首次启动时由 init-ro 自动创建（见下方 init-ro 服务）
-    volumes:
-      - ahatesla-data:/data
     ports:
-      - "127.0.0.1:18500:18500"   # 仅本机；对外走 NPM HTTPS 反代
+      - "127.0.0.1:4000:4000"    # Tesla 登录界面；远程主机部署时改为 "4000:4000" 或走反代
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:4000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
 
@@ -110,6 +108,40 @@ services:
         echo "read-only role ahatesla_ro ready"
       '
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  # ---------- AhaTesla ----------
+  ahatesla:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: ahatesla-app
+    restart: unless-stopped
+    profiles: ["fullstack"]
+    depends_on:
+      teslamate-db:
+        condition: service_healthy
+      teslamate:
+        condition: service_started
+      init-ro:
+        condition: service_completed_successfully
+    environment:
+      PORT: 18500
+      TZ: ${TZ:-Asia/Shanghai}
+      DB_URL: postgres://ahatesla_ro:${TM_DB_PASSWORD}@teslamate-db:5432/teslamate
+      MQTT_URL: mqtt://teslamate-mqtt:1883
+      AHA_DATA_DIR: /data
+    volumes:
+      - ahatesla-data:/data
+    ports:
+      - "127.0.0.1:18500:18500"   # 仅本机；对外走 NPM HTTPS 反代（见 NPM-SETUP.md）
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:18500/api/system/health-lite || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     security_opt:
       - no-new-privileges:true
 

@@ -316,4 +316,113 @@ describe('SetupPage 向导', () => {
     await user.click(screen.getByTestId('setup-skip-ledger'))
     expect(await screen.findByTestId('setup-enable-webpush')).toBeInTheDocument()
   })
+
+  it('Step2 模式A：自动发现候选卡渲染，点选预填 host/port（m4a 轨道B a 层）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    server.use(
+      http.post('/api/setup/probe-discovery', () =>
+        HttpResponse.json({
+          candidates: [
+            { host: '192.168.1.20', port: 5432, source: 'docker 网络' },
+            { host: '10.0.0.8', port: 5433, source: '局域网扫描' },
+          ],
+        }),
+      ),
+    )
+    await renderSetupReady()
+    await registerAdmin(user)
+    // 骨架 → 候选卡
+    expect(await screen.findByTestId('probe-candidates')).toBeInTheDocument()
+    const cand = screen.getByTestId('probe-candidate-192.168.1.20')
+    expect(cand).toHaveTextContent('192.168.1.20:5432')
+    await user.click(cand)
+    expect((screen.getByLabelText('PostgreSQL Host') as HTMLInputElement).value).toBe('192.168.1.20')
+    expect((screen.getByLabelText('端口') as HTMLInputElement).value).toBe('5432')
+  })
+
+  it('Step2 模式A：一键建只读账号成功 → 连接表单自动填入并 toast（m4a 轨道B b 层）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    server.use(
+      http.post('/api/setup/auto-ro', () =>
+        HttpResponse.json({
+          ok: true,
+          dsn: 'postgres://ahatesla_ro:ro-pass-9@127.0.0.1:5432/teslamate',
+        }),
+      ),
+    )
+    await renderSetupReady()
+    await registerAdmin(user)
+    await user.type(screen.getByLabelText('PostgreSQL Host'), '127.0.0.1')
+    await user.type(screen.getByTestId('auto-ro-user'), 'teslamate')
+    await user.type(screen.getByTestId('auto-ro-pwd'), 'tm-admin-pass')
+    await user.click(screen.getByTestId('auto-ro-button'))
+    await waitFor(() => {
+      expect((screen.getByLabelText('用户名（只读账号）') as HTMLInputElement).value).toBe('ahatesla_ro')
+      expect((screen.getByLabelText('密码') as HTMLInputElement).value).toBe('ro-pass-9')
+    })
+    expect(await screen.findByText(/只读账号已创建/)).toBeInTheDocument()
+    expect(screen.getByTestId('auto-ro-button')).toHaveTextContent('已创建')
+  })
+
+  it('Step2 模式A：一键建号失败（权限不足）→ fallbackSql + 复制按钮 + 我已手工执行（m4a 轨道B b 层降级）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    server.use(
+      http.post('/api/setup/auto-ro', () =>
+        HttpResponse.json({
+          ok: false,
+          stage: 'permission',
+          error: '当前账号无创建角色权限',
+          fallbackSql: 'CREATE ROLE ahatesla_ro LOGIN PASSWORD \'…\';\nGRANT SELECT ON ALL TABLES …',
+        }),
+      ),
+    )
+    await renderSetupReady()
+    await registerAdmin(user)
+    await user.type(screen.getByLabelText('PostgreSQL Host'), '127.0.0.1')
+    await user.type(screen.getByTestId('auto-ro-user'), 'teslamate')
+    await user.type(screen.getByTestId('auto-ro-pwd'), 'wrong')
+    await user.click(screen.getByTestId('auto-ro-button'))
+    const sql = await screen.findByTestId('auto-ro-sql')
+    expect(sql).toHaveTextContent('CREATE ROLE')
+    expect(screen.getByText(/无创建角色权限/)).toBeInTheDocument()
+    expect(screen.getByTestId('auto-ro-copy')).toBeInTheDocument()
+    // 我已手工执行 → 失败区收起，按钮转为已创建态
+    await user.click(screen.getByTestId('auto-ro-done'))
+    await waitFor(() => expect(screen.queryByTestId('auto-ro-sql')).not.toBeInTheDocument())
+    expect(screen.getByTestId('auto-ro-button')).toHaveTextContent('已创建')
+  })
+
+  it('Step2 模式B：Tesla 登录引导卡与链接指向当前主机:4000（m4a 轨道A）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    await renderSetupReady()
+    await registerAdmin(user)
+    await user.click(screen.getByTestId('setup-mode-fullstack'))
+    expect(screen.getByTestId('tesla-login-guide')).toBeInTheDocument()
+    expect(screen.getByTestId('tesla-login-guide')).toHaveTextContent(/不接触 Tesla 密码|自动检测到车辆/)
+    const link = screen.getByTestId('tesla-login-link') as HTMLAnchorElement
+    expect(link.href).toContain(':4000/sessions/new')
+    expect(link.href).toContain(window.location.hostname)
+    // 旧 testid 保留兼容（外层 span）
+    expect(screen.getByTestId('setup-teslamate-link')).toBeInTheDocument()
+  })
 })

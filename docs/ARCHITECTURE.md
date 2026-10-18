@@ -22,7 +22,7 @@
 └────────────┬───────────────────────────────┘
              │
    ┌─────────┴──────────┐
-   │ web/ React19+Vite  │   .4 NPM 反代 → https://tesla.home.xxx
+   │ web/ React19+Vite  │   NPM 反代 → https://tesla.home.example.com
    │ +TS+Tailwind+PWA   │   iPhone 添加到主屏幕
    └────────────────────┘
 ```

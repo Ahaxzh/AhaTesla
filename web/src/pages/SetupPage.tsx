@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircle2, CircleDashed, ExternalLink, Lock, ShieldCheck, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, CircleDashed, Copy, ExternalLink, Lock, ShieldCheck, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/components/Toast'
 import { LogoMark } from '@/components/Logo'
 import type { CarDiscoveryResult, DiscoveredCar, SetupCheckStep, SetupState } from '@/types'
 
@@ -192,6 +193,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
 // ---- Step 2 数据源接入（双模分支 + 四级校验 + 车辆发现）----
 
 function Step2Datasource({ onDone }: { onDone: () => void }) {
+  const { toast } = useToast()
   const [mode, setMode] = useState<Mode>('connect')
   const [host, setHost] = useState('')
   const [port, setPort] = useState('5432')
@@ -208,6 +210,83 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
   const [discovery, setDiscovery] = useState<CarDiscoveryResult | null>(null)
   const [selectedCarId, setSelectedCarId] = useState<number | null>(null)
   const discoveryTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ---- m4a 轨道B 三层接入：自动发现 / 一键建号 / 手动 DSN ----
+  const [candidates, setCandidates] = useState<{ host: string; port: number; source: string }[] | null>(null)
+  const [probing, setProbing] = useState(false)
+  const [adminUser, setAdminUser] = useState('')
+  const [adminPwd, setAdminPwd] = useState('')
+  const [roBusy, setRoBusy] = useState(false)
+  const [roDone, setRoDone] = useState(false)
+  const [roFail, setRoFail] = useState<{ stage: string; error: string; fallbackSql: string } | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [dsn, setDsn] = useState('')
+  const [dsnError, setDsnError] = useState('')
+
+  // 进入 connect 模式即探测局域网内可达的 TeslaMate 库（失败/为空 → 静默收起）
+  useEffect(() => {
+    if (mode !== 'connect') return
+    let alive = true
+    setProbing(true)
+    api
+      .setupProbeDiscovery()
+      .then((r) => { if (alive) setCandidates(r.candidates ?? []) })
+      .catch(() => { if (alive) setCandidates([]) })
+      .finally(() => { if (alive) setProbing(false) })
+    return () => { alive = false }
+  }, [mode])
+
+  /** 解析 postgres:// DSN 并预填连接表单（一键建号成功回填与高级手填共用） */
+  const applyDsn = (raw: string): boolean => {
+    try {
+      const u = new URL(raw.trim())
+      setHost(u.hostname || '127.0.0.1')
+      setPort(u.port || '5432')
+      setDatabase(decodeURIComponent(u.pathname.replace(/^\//, '')) || 'teslamate')
+      if (u.username) setUser(decodeURIComponent(u.username))
+      if (u.password) setPassword(decodeURIComponent(u.password))
+      setDsnError('')
+      return true
+    } catch {
+      setDsnError('DSN 格式无法解析，示例：postgres://user:pass@host:5432/teslamate')
+      return false
+    }
+  }
+
+  const onAutoRo = async () => {
+    setRoBusy(true)
+    setRoFail(null)
+    try {
+      const r = await api.setupAutoRo({
+        host: host.trim() || '127.0.0.1',
+        port: Number(port) || 5432,
+        database: database.trim() || 'teslamate',
+        user: adminUser.trim(),
+        password: adminPwd,
+      })
+      if (r.ok) {
+        applyDsn(r.dsn)
+        setRoDone(true)
+        toast('只读账号已创建，连接信息已填入下方表单', 'success')
+      } else {
+        setRoFail({ stage: r.stage, error: r.error, fallbackSql: r.fallbackSql })
+      }
+    } catch (err) {
+      setRoFail({ stage: 'network', error: err instanceof Error ? err.message : '请求失败', fallbackSql: '' })
+    } finally {
+      setRoBusy(false)
+    }
+  }
+
+  const copySql = async () => {
+    if (!roFail?.fallbackSql) return
+    try {
+      await navigator.clipboard.writeText(roFail.fallbackSql)
+      toast('SQL 已复制', 'success')
+    } catch {
+      /* 剪贴板不可用（如非安全上下文）→ 用户可手动选择文本复制 */
+    }
+  }
 
   const canSubmit = mode === 'fullstack' || (host.trim() && user.trim() && password)
 
@@ -294,6 +373,9 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
   const multiCar = (discovery?.cars.length ?? 0) > 1
   const readyToNext = mode === 'fullstack' ? saved && discovery?.found : verified && saved
 
+  // m4a 轨道A：捆绑 TeslaMate 的地址按当前访问主机推导（容器网络内同宿主可达）
+  const teslamateUrl = `http://${typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'}:4000/sessions/new`
+
   return (
     <div className="glass-card space-y-5 p-6" data-testid="setup-datasource">
       <div>
@@ -326,6 +408,80 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
 
       {mode === 'connect' ? (
         <div className="space-y-3">
+          {/* a. 自动发现：探测可达库，点选预填（无结果静默收起） */}
+          {probing && <div className="skeleton h-14" data-testid="probe-skeleton" />}
+          {!probing && candidates && candidates.length > 0 && (
+            <div className="space-y-1.5" data-testid="probe-candidates">
+              <p className="text-xs font-medium text-slate-400">发现可达的 TeslaMate 数据库</p>
+              {candidates.map((c) => (
+                <button
+                  key={`${c.host}:${c.port}`}
+                  type="button"
+                  data-testid={`probe-candidate-${c.host}`}
+                  onClick={() => { setHost(c.host); setPort(String(c.port)) }}
+                  className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                    host === c.host ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-300 hover:border-white/20 hover:text-white'
+                  }`}
+                >
+                  <span className="num">{c.host}:{c.port}</span>
+                  <span className="text-[11px] text-slate-500">{c.source}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* b. 一键建只读账号：管理凭据仅本次使用，不落盘 */}
+          <div className="space-y-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5" data-testid="auto-ro-panel">
+            <div className="text-xs font-medium text-slate-300">一键创建只读账号（推荐）</div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              用 TeslaMate 管理员凭据自动创建只读账号并填入下方表单；凭据仅本次使用，不落盘。
+            </p>
+            <details className="text-[11px] text-slate-500">
+              <summary className="cursor-pointer select-none">密码在哪找？</summary>
+              <p className="mt-1 pl-3">在 TeslaMate 部署目录的 docker-compose.yml（DATABASE_PASS 环境变量）或 .env 文件中。</p>
+            </details>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label htmlFor="auto-ro-user" className="mb-1.5 block text-xs font-medium text-slate-400">TeslaMate 管理用户名</label>
+                <input id="auto-ro-user" data-testid="auto-ro-user" className="input-dark" value={adminUser} onChange={(e) => setAdminUser(e.target.value)} placeholder="teslamate" autoComplete="off" />
+              </div>
+              <div>
+                <label htmlFor="auto-ro-pwd" className="mb-1.5 block text-xs font-medium text-slate-400">管理密码</label>
+                <input id="auto-ro-pwd" data-testid="auto-ro-pwd" className="input-dark" type="password" value={adminPwd} onChange={(e) => setAdminPwd(e.target.value)} placeholder="••••••" autoComplete="off" />
+              </div>
+            </div>
+            <button
+              type="button"
+              data-testid="auto-ro-button"
+              className="btn-primary w-full"
+              disabled={roBusy || !adminUser.trim() || !adminPwd || !host.trim()}
+              onClick={onAutoRo}
+            >
+              {roBusy ? '创建中…' : roDone ? '已创建 ✓' : '自动创建只读账号'}
+            </button>
+            {roFail && (
+              <div className="space-y-2" data-testid="auto-ro-fail">
+                <p role="alert" className="text-xs text-tesla-soft">
+                  自动创建失败（{roFail.stage}）：{roFail.error}{roFail.fallbackSql ? '。请手工执行以下 SQL 后点「我已手工执行」：' : ''}
+                </p>
+                {roFail.fallbackSql && (
+                  <pre data-testid="auto-ro-sql" className="num max-h-40 overflow-auto rounded-lg border border-white/[0.08] bg-base-950/60 p-2.5 text-[11px] leading-relaxed text-slate-300">{roFail.fallbackSql}</pre>
+                )}
+                <div className="flex gap-2">
+                  {roFail.fallbackSql && (
+                    <button type="button" data-testid="auto-ro-copy" className="btn-mini" onClick={copySql}>
+                      <Copy className="h-3.5 w-3.5" /> 复制 SQL
+                    </button>
+                  )}
+                  <button type="button" data-testid="auto-ro-done" className="btn-mini" onClick={() => { setRoFail(null); setRoDone(true) }}>
+                    我已手工执行
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* c. 连接表单（最终确认层，四级校验入口） */}
           <div className="grid grid-cols-[1fr_88px] gap-3">
             <Field id="setup-host" label="PostgreSQL Host" value={host} onChange={setHost} placeholder="127.0.0.1" />
             <Field id="setup-port" label="端口" value={port} onChange={setPort} placeholder="5432" />
@@ -368,23 +524,61 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
               <ShieldCheck className="h-4 w-4" /> 校验通过，可保存接入
             </p>
           )}
+
+          {/* 高级：手动粘贴 DSN 兜底（TeslaMate 在其他机器/裸机场景） */}
+          <div data-testid="setup-advanced">
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              aria-expanded={advancedOpen}
+              className="flex w-full items-center justify-center gap-1 text-xs text-slate-500 transition hover:text-slate-300"
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
+              高级 · 手动粘贴 DSN
+            </button>
+            {advancedOpen && (
+              <div className="mt-2 space-y-2">
+                <input
+                  aria-label="postgres:// DSN"
+                  data-testid="setup-dsn-input"
+                  className="input-dark num"
+                  value={dsn}
+                  onChange={(e) => setDsn(e.target.value)}
+                  placeholder="postgres://user:pass@host:5432/teslamate"
+                />
+                {dsnError && <p role="alert" className="text-[11px] text-tesla-soft">{dsnError}</p>}
+                <button type="button" data-testid="setup-dsn-apply" className="btn-mini" disabled={!dsn.trim()} onClick={() => applyDsn(dsn)}>
+                  解析并填入
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-3" data-testid="setup-fullstack-panel">
-          <p className="text-sm text-slate-300">检测到同栈部署模式：</p>
+          {/* m4a 轨道A：Tesla 登录引导（授权只在 TeslaMate，AhaTesla 不碰 Tesla 密码） */}
+          <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5" data-testid="tesla-login-guide">
+            <div className="text-xs font-medium text-slate-300">在 TeslaMate 中登录你的 Tesla 账号</div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              登录后 TeslaMate 开始同步车辆数据，本页会自动检测到车辆并继续，无需其他操作。
+            </p>
+            <span data-testid="setup-teslamate-link">
+              <a
+                href={teslamateUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm text-tesla hover:underline"
+                data-testid="tesla-login-link"
+              >
+                打开 TeslaMate 登录页 <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </span>
+            <p className="num text-[11px] text-slate-500">{teslamateUrl}</p>
+          </div>
           <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-400">
-            <li>点击下方链接在新窗口打开 TeslaMate，完成 Tesla 账号授权（授权仅发生在 TeslaMate，AhaTesla 不接触 Tesla 密码）。</li>
+            <li>在上方卡片打开 TeslaMate，完成 Tesla 账号授权（授权仅发生在 TeslaMate，AhaTesla 不接触 Tesla 密码）。</li>
             <li>回到本页，向导会自动轮询发现你的车辆（最长 60 秒）。</li>
           </ol>
-          <a
-            href="http://127.0.0.1:4000/sessions/new"
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-tesla hover:underline"
-            data-testid="setup-teslamate-link"
-          >
-            打开 TeslaMate 授权页 <ExternalLink className="h-3.5 w-3.5" />
-          </a>
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-300">
             <Lock className="mr-1 inline h-3.5 w-3.5" />
             安全提示：TeslaMate Web 默认无密码，请勿将 4000 端口映射公网；建议仅内网访问并由 AhaTesla 反代保护（AC-4.1）。

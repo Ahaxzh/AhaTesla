@@ -1,11 +1,21 @@
-# AhaTesla connect 发行版（M3）：连接已有 TeslaMate（不动现有栈）
-# 与 bridge-compose.yml 搭配：桥接容器把 TeslaMate 内网 5432/1883 转发到宿主 127.0.0.1。
-# 本 compose 只跑 AhaTesla 应用本体。
+# AhaTesla connect 发行版（m4a）：连接已有 TeslaMate —— 一条命令接入，不动现有栈
 #
-# 用法：
-#   1) docker compose -f deploy/bridge-compose.yml up -d      # 桥接（已跑过可跳过）
-#   2) cp .env.example.connect .env && 编辑                    # 填 .env（含只读账号）
+# 原理：直接挂入你现有 TeslaMate 的 docker 网络（默认 teslamate_default），
+#       容器内按服务名直连 database:5432 / mosquitto:1883，零新增桥接容器。
+#
+# 用法（3 步）：
+#   1) cd AhaTesla && docker network ls | grep teslamate   # 确认网络名（默认 teslamate_default）
+#   2) cp deploy/.env.example.connect deploy/.env          # 一般无需编辑；TESLAMATE_DB_HOST 不对时改它
 #   3) docker compose -f deploy/connect-compose.yml up -d --build
+#   然后浏览器打开 http://<主机IP>:18500 → 向导选「已有 TeslaMate」→ 填 teslamate 库密码
+#   → 自动创建只读账号并完成四级校验（自动建号失败时向导会给一条可复制的 SQL 降级路径）
+#
+# 你的 TeslaMate 在另一台机器 / 网络名不是 teslamate_default？
+#   - 网络名不同：改下方 networks.teslamate_default.name，或 docker network connect <你的网络> ahatesla-app
+#   - 跨机器：改 deploy/.env 的 DB_URL/MQTT_URL 指向对端（例 postgres://...@192.168.1.10:5432/teslamate），
+#     并把 networks 段与 networks 引用删除（用默认 bridge + extra_hosts 即可）
+#
+# 端口：18500 仅绑 127.0.0.1；对外走 NPM HTTPS 反代（见 NPM-SETUP.md）
 name: ahatesla
 
 services:
@@ -15,18 +25,37 @@ services:
       dockerfile: deploy/Dockerfile
     container_name: ahatesla-app
     restart: unless-stopped
-    env_file:
-      - ../server/.env        # DB_URL/MQTT_URL/PORT 等；host 用 host.docker.internal 或宿主 IP
     environment:
+      PORT: 18500
+      TZ: ${TZ:-Asia/Shanghai}
+      # 可留空：推荐首次打开 /setup 向导配置（自动建只读账号）；此处预设则跳过向导该步
+      DB_URL: ${DB_URL:-}
+      MQTT_URL: ${MQTT_URL:-}
       AHA_DATA_DIR: /data
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ahatesla-data:/data
     ports:
-      - "127.0.0.1:18500:18500"   # 仅本机；对外走 NPM HTTPS 反代
+      - "127.0.0.1:18500:18500"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:18500/api/system/health-lite || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     security_opt:
       - no-new-privileges:true
+    networks:
+      - default
+      - teslamate
+
+# 你的 TeslaMate compose 项目网络（external：不创建、只挂入）
+# teslamate_default = 官方 docker-compose.yml 默认项目名 teslamate + default 网络。
+# 服务名 DNS：官方栈里数据库服务名是 database（特斯拉官方 compose 亦有容器名 TeslaMateDB 的写法，
+# 两者都在同一网络内可解析；向导会自动探测，失败可手填）。
+networks:
+  teslamate:
+    name: teslamate_default
+    external: true
 
 volumes:
   ahatesla-data:

@@ -254,6 +254,8 @@ export const defaultHandlers = [
     HttpResponse.json({ ok: true, preview: '昨晚到家充电 41 度，谷电花费 12.3 元，较油车省下 28 元。' })),
   http.get('/api/system/status', () => HttpResponse.json(mockSystemStatus)),
   http.get('/api/system/events', () => HttpResponse.json(mockEvents)),
+  // m4a 轨道B：默认无可达候选（各用例按需覆盖为发现成功/失败）
+  http.post('/api/setup/probe-discovery', () => HttpResponse.json({ candidates: [] })),
 ]
 
 export const server = setupServer(...defaultHandlers)

@@ -27,6 +27,8 @@
   - readonly 步 = **元数据探测**：`SELECT has_table_privilege(current_user,'public.drives','INSERT,UPDATE,DELETE,TRUNCATE') OR has_schema_privilege(current_user,'public','CREATE')`，返回 true 即危险配置（ok:false，要求降级只读账号，AC-2.4）；**严禁 CREATE/INSERT 实写探测**；连接池每 Session 初始化强制 `SET default_transaction_read_only = on`
 - `POST /api/setup/datasource` {mode:"connect"|"fullstack", ...连接参数} → {ok}（连接信息 AES-GCM 加密存 SQLite）
 - `GET /api/setup/car-discovery`（管理员）→ {found, car:{id,name,model}|null}（前端 2s 轮询，AC-2.3 的 60 秒发现）
+- `POST /api/setup/probe-discovery`（管理员）→ {candidates:[{host, port, reachable}]}（m4a 轨道 B：容器服务名/网关 + `AHATESLA_PROBE_HOSTS` env 展开 + 已配 DB_URL 目标，800ms TCP 探测，只报可达性不猜库名）
+- `POST /api/setup/auto-ro`（管理员）{host, port=5432, database="teslamate", adminUser, adminPassword} → 成功 {ok:true, dsn:"postgres://ahatesla_ro:***@host:port/db", password}（一次性明文仅此返回）；失败 {ok:false, stage:"auth"|"permission"|"verify", error, fallbackSql?} —— adminPassword 仅内存使用绝不落盘/入日志；permission 失败附可复制执行的 fallbackSql；RO 建号幂等（角色存在只改密码）
 - `GET /api/settings`（管理员）→ {currency:{symbol:"¥",code:"CNY"}, distanceUnit:"km"|"mi", timezone, fuelBaseline:{consumptionL100:8.0, pricePerL:8.20}}
 - `PUT /api/settings`（管理员）→ {ok}（fuelBaseline 即 AC-7.4 油车基准可配置）
 
@@ -140,6 +142,7 @@
 | 节 | 端点组 | 状态 | 备注 |
 |---|---|---|---|
 | 1 | /api/setup/*（status/admin/test-connection/datasource/car-discovery） | ✅ 已实现 | 四级校验含 has_table_privilege 元数据探测（M1） |
+| 1 | /api/setup/probe-discovery · /api/setup/auto-ro | ✅ 已实现 | m4a 轨道 B 存量接入自动探测+代建只读账号 |
 | 1 | GET/PUT /api/settings | ✅ 已实现 | GA-36；fuelBaseline 油车基准可配置（M2） |
 | 2 | /api/auth/*（login/refresh/logout/me/change-password/sessions/revoke-all） | ✅ 已实现 | 双 Token AC-3.2 + 连续 5 败锁 15 分钟 AC-3.3（M2） |
 | 3 | GET /api/dashboard | ✅ 已实现 | car 增 state/stateSince/odometerKm/positionAt |

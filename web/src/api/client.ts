@@ -113,6 +113,11 @@ export const api = {
     post<{ ok: boolean }>('/api/setup/datasource', payload),
   setupCarDiscovery: () => get<CarDiscoveryResult>('/api/setup/car-discovery'),
   setupSelectCar: (carId: number) => post<{ ok: boolean; carId: number }>('/api/setup/select-car', { carId }),
+  // m4a 轨道B：自动发现可达库 + 一键建只读账号（凭据仅本次使用，服务端不落盘）
+  setupProbeDiscovery: () =>
+    post<{ candidates: { host: string; port: number; source: string }[] }>('/api/setup/probe-discovery', {}),
+  setupAutoRo: (payload: { host: string; port: number; database: string; user: string; password: string }) =>
+    post<{ ok: true; dsn: string } | { ok: false; stage: string; error: string; fallbackSql: string }>('/api/setup/auto-ro', payload),
 
   dashboard: () => get<DashboardData>('/api/dashboard'),
 

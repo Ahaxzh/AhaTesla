@@ -339,3 +339,202 @@ test("bootstrap 不再生成/打印初始密码（AC-1.4）", async () => {
   // 现有实例已注册管理员则保留哈希；关键断言：bootstrap 不主动设置密码哈希。
   assert.equal(typeof state.passwordHash, typeof state.passwordHash); // 状态对象可加载
 });
+
+// ---- m4a 轨道 B：probe-discovery / auto-ro（存量接入自动建只读账号） --------
+
+import {
+  probeCandidates,
+  buildRoUserSql,
+  generateRoPassword,
+  runAutoRo
+} from "../src/api/setup-routes.mjs";
+
+test("probeCandidates：DB_URL 目标置顶 + 默认候选 + env 展开去重", () => {
+  const cands = probeCandidates("nas.lan:5433, dup.example", "postgres://u:p@10.0.0.5:15432/teslamate");
+  assert.equal(cands[0].host, "10.0.0.5");
+  assert.equal(cands[0].port, 15432);
+  assert.ok(cands.some((c) => c.host === "database" && c.port === 5432));
+  assert.ok(cands.some((c) => c.host === "172.17.0.1" && c.port === 5432));
+  assert.ok(cands.some((c) => c.host === "nas.lan" && c.port === 5433));
+  assert.ok(cands.some((c) => c.host === "dup.example" && c.port === 5432));
+  const keys = cands.map((c) => `${c.host}:${c.port}`);
+  assert.equal(new Set(keys).size, keys.length, "候选去重");
+});
+
+test("probeCandidates：无 env 无 DB_URL 时仅默认清单（5 项）", () => {
+  assert.equal(probeCandidates("", null).length, 5);
+});
+
+test("POST /api/setup/probe-discovery：未登录 401；登录后逐候选 TCP 探测回报", async () => {
+  const seen = [];
+  const setup = createSetupRoutes({
+    state: baseState({ passwordHash: "x" }), db: createFakeDb(),
+    getSecret: () => SECRET, saveStateFn: () => {}, eventLog: createEventLog(),
+    tcpProbe: async (host, port, timeoutMs) => {
+      seen.push({ host, port, timeoutMs });
+      return host === "database";
+    },
+  });
+  const app = createApp();
+  const requireAuth = createJwtMiddleware({ getSecret: () => SECRET });
+  app.post("/api/setup/probe-discovery", requireAuth, (ctx) => setup.probeDiscovery(ctx));
+
+  const anon = await fetchApp(app, "POST", "/api/setup/probe-discovery", {});
+  assert.equal(anon.status, 401);
+
+  const res = await fetchApp(app, "POST", "/api/setup/probe-discovery", { cookie: adminCookie() });
+  assert.equal(res.status, 200);
+  const reachable = res.json.candidates.filter((c) => c.reachable);
+  assert.equal(reachable.length, 1);
+  assert.equal(reachable[0].host, "database");
+  assert.ok(seen.every((c) => c.timeoutMs === 800), "探测超时 800ms");
+});
+
+/** 记录开/关顺序的假池工厂：脚本匹配 SQL 关键词回放行。 */
+function recordingPoolFactory(tag, log, script) {
+  return async () => {
+    log.push(`${tag}:open`);
+    return {
+      async query(sql) {
+        const hit = script.find((s) => s.match.test(sql));
+        if (!hit) throw new Error(`unexpected sql [${tag}]: ${sql.slice(0, 60)}`);
+        log.push(`${tag}:query`);
+        return typeof hit.rows === "function" ? hit.rows() : hit.rows;
+      },
+      async close() {
+        log.push(`${tag}:close`);
+      },
+    };
+  };
+}
+
+const ADMIN_OK_SCRIPT = [
+  { match: /SELECT 1/, rows: [{}] },
+  { match: /DO \$\$/, rows: [] },
+];
+
+test("runAutoRo 成功：admin 池用完即关 → RO 回连只读验证 → 掩码 DSN + 一次性密码", async () => {
+  const log = [];
+  const result = await runAutoRo(
+    { host: "db.local", port: 5432, database: "teslamate", adminUser: "teslamate", adminPassword: "admin-secret" },
+    {
+      pgAdminPoolFactory: recordingPoolFactory("admin", log, ADMIN_OK_SCRIPT),
+      pgProbePoolFactory: recordingPoolFactory("ro", log, [
+        { match: /SELECT 1/, rows: [{}] },
+        { match: /has_table_privilege/, rows: [{ table_write: false, schema_create: false }] },
+      ]),
+      generatePassword: () => "abcdefghijklmnop",
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.dsn, "postgres://ahatesla_ro:***@db.local:5432/teslamate");
+  assert.equal(result.password, "abcdefghijklmnop");
+  assert.ok(log.indexOf("admin:close") < log.indexOf("ro:open"), "admin 池先关，再用 RO 账号回连验证");
+  assert.ok(log.filter((l) => l === "admin:query").length >= 2, "ping + 建号 SQL 都在 admin 池执行");
+});
+
+test("runAutoRo 管理员认证失败：stage=auth，无 fallbackSql，凭据不进响应", async () => {
+  const factory = async () => ({
+    async query() {
+      const e = new Error('password authentication failed for user "teslamate"');
+      e.code = "28P01";
+      throw e;
+    },
+    async close() {},
+  });
+  const result = await runAutoRo(
+    { host: "db", adminUser: "teslamate", adminPassword: "admin-secret" },
+    { pgAdminPoolFactory: factory },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, "auth");
+  assert.equal(result.fallbackSql, undefined);
+  assert.ok(!JSON.stringify(result).includes("admin-secret"));
+});
+
+test("runAutoRo SQL 权限不足：stage=permission + fallbackSql 内嵌已生成密码", async () => {
+  const factory = async () => ({
+    async query(sql) {
+      if (/SELECT 1/.test(sql)) return [{}];
+      const e = new Error("permission denied to alter role");
+      e.code = "42501";
+      throw e;
+    },
+    async close() {},
+  });
+  const result = await runAutoRo(
+    { host: "db", adminUser: "u", adminPassword: "p" },
+    { pgAdminPoolFactory: factory, generatePassword: () => "XYZpwd123456789A" },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, "permission");
+  assert.match(result.fallbackSql, /CREATE ROLE ahatesla_ro LOGIN PASSWORD 'XYZpwd123456789A'/);
+  assert.match(result.fallbackSql, /GRANT SELECT ON ALL TABLES IN SCHEMA public TO ahatesla_ro/);
+});
+
+test("runAutoRo RO 验证发现写权限残留：stage=verify", async () => {
+  const result = await runAutoRo(
+    { host: "db", adminUser: "u", adminPassword: "p" },
+    {
+      pgAdminPoolFactory: recordingPoolFactory("admin", [], ADMIN_OK_SCRIPT),
+      pgProbePoolFactory: recordingPoolFactory("ro", [], [
+        { match: /SELECT 1/, rows: [{}] },
+        { match: /has_table_privilege/, rows: [{ table_write: true, schema_create: false }] },
+      ]),
+      generatePassword: () => "aaaaaaaaaaaaaaaa",
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.stage, "verify");
+  assert.match(result.error, /写权限/);
+});
+
+test("buildRoUserSql：幂等（角色存在检查）+ 只授 SELECT + 库名消毒", () => {
+  const sql = buildRoUserSql("pw1234567890abcd");
+  assert.match(sql, /IF NOT EXISTS \(SELECT FROM pg_roles WHERE rolname = 'ahatesla_ro'\)/);
+  assert.match(sql, /ALTER ROLE ahatesla_ro LOGIN PASSWORD/);
+  assert.match(sql, /ALTER DEFAULT PRIVILEGES/);
+  assert.doesNotMatch(sql, /\b(INSERT|UPDATE|DELETE|TRUNCATE)\b/, "不授任何写权限");
+  const evil = buildRoUserSql("x", "teslamate; DROP TABLE cars; --");
+  // 注入语法（; --）全被剥离，恶意输入坍缩成单个无害标识符，无法截断语句
+  assert.ok(evil.includes("GRANT CONNECT ON DATABASE teslamateDROPTABLEcars TO ahatesla_ro"), "库名注入被消毒为纯标识符");
+});
+
+test("generateRoPassword：16 位且无易混淆字符", () => {
+  const pw = generateRoPassword();
+  assert.equal(pw.length, 16);
+  assert.match(pw, /^[ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789]{16}$/);
+});
+
+test("POST /api/setup/auto-ro 路由挂接：注入假池走通成功路径并记事件日志", async () => {
+  const events = [];
+  const eventLog = { log: (type, data) => events.push({ type, data }) };
+  const setup = createSetupRoutes({
+    state: baseState({ passwordHash: "x" }), db: createFakeDb(),
+    getSecret: () => SECRET, saveStateFn: () => {}, eventLog,
+    pgAdminPoolFactory: recordingPoolFactory("admin", [], ADMIN_OK_SCRIPT),
+    pgProbePoolFactory: recordingPoolFactory("ro", [], [
+      { match: /SELECT 1/, rows: [{}] },
+      { match: /has_table_privilege/, rows: [{ table_write: false, schema_create: false }] },
+    ]),
+  });
+  const app = createApp();
+  const requireAuth = createJwtMiddleware({ getSecret: () => SECRET });
+  app.post("/api/setup/auto-ro", requireAuth, (ctx) => setup.autoRo(ctx));
+
+  const anon = await fetchApp(app, "POST", "/api/setup/auto-ro", { body: {} });
+  assert.equal(anon.status, 401);
+
+  const res = await fetchApp(app, "POST", "/api/setup/auto-ro", {
+    cookie: adminCookie(),
+    body: { host: "db", adminUser: "teslamate", adminPassword: "one-shot" },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.ok, true);
+  assert.match(res.json.dsn, /postgres:\/\/ahatesla_ro:\*\*\*@db:5432\/teslamate/);
+  assert.equal(res.json.password.length, 16);
+  const evt = events.find((e) => e.type === "setup.auto_ro");
+  assert.ok(evt, "事件日志已记录");
+  assert.ok(!JSON.stringify(evt).includes("one-shot"), "日志不含管理凭据");
+  assert.equal(evt.data.host, "db");
+});

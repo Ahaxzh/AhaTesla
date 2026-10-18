@@ -87,7 +87,7 @@ export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null
 // 路由注册统一入口：buildApp 与 main() 重建路由共用，避免两份清单漂移。
 function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const auth = createAuthRoutes({ state, getSecret, eventLog });
-  const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog });
+  const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog, currentDbUrl: process.env.DB_URL });
   const trips = createTripsRoutes({ db, state });
   const charging = createChargingRoutes({ db, state, getStore });
   const pricing = createPricingRoutes({ db, state, getStore });
@@ -109,6 +109,9 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.post("/api/setup/datasource", requireAuth, (ctx) => setup.saveDatasource(ctx));
   app.get("/api/setup/car-discovery", requireAuth, (ctx) => setup.carDiscovery(ctx));
   app.post("/api/setup/select-car", requireAuth, (ctx) => setup.selectCar(ctx));
+  // m4a 轨道 B（存量接入）：候选地址探测 + 一次性凭据自动建只读账号。
+  app.post("/api/setup/probe-discovery", requireAuth, (ctx) => setup.probeDiscovery(ctx));
+  app.post("/api/setup/auto-ro", requireAuth, (ctx) => setup.autoRo(ctx));
 
   app.post("/api/auth/login", (ctx) => auth.login(ctx));
   app.post("/api/auth/refresh", (ctx) => auth.refresh(ctx));
