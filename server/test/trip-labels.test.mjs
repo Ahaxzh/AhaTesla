@@ -95,3 +95,25 @@ test("推送正文:路线行三态 — 双侧/单侧/无,消灭裸「起点/终�
   assert.doesNotMatch(bodies[2], /🚗/);       // 双无:整行省略
   assert.doesNotMatch(bodies.join(""), /起点|终点/); // 任何情况下不再出现裸兜底词
 });
+
+test("毒状态自愈:快照无活动时清残留 active_started_at,闲置结算恢复", async () => {
+  const { TripMonitor } = await import("../src/core/trip-monitor.mjs");
+  const events = [];
+  // 模拟真实事故现场:被僵尸行喂出的幽灵 driving 态(parked 在 3 小时前)
+  const monitor = new TripMonitor({
+    state: {
+      initialized: true, last_drive_id: 3259,
+      session: {
+        phase: "driving", segment_ids: [3259], started_at: "2026-10-18T01:06:27Z",
+        active_started_at: "2025-05-12T10:02:23Z", last_event_at: "2026-10-18T09:52:12Z",
+        parked_at: "2026-10-18T01:18:42Z", finalization_reason: null, finalize_at: null,
+      },
+    },
+    onEvent: (e) => events.push(e),
+    clock: () => "2026-10-18T04:30:00Z", // parked 后 3h12m
+  });
+  monitor.reconcile({ active: null, completed: [] }); // 修复后的快照:active=null
+  assert.equal(events.filter((e) => e.type === "trip_end").length, 1, "闲置超时应触发结算");
+  assert.equal(events[0].segment_ids[0], 3259);
+  assert.equal(monitor.state.session, null, "结算后 session 清空");
+});

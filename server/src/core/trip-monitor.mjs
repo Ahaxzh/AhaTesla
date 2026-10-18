@@ -185,6 +185,15 @@ export class TripMonitor {
     }
 
     if (active) this.reviveActiveDrive(active, at);
+    else if (this.state.session?.active_started_at) {
+      // 快照无活动行程时,残留的 active_started_at 只能是僵尸行/崩溃遗留
+      // (实测:被 2025 年 NULL-end 行喂出的幽灵"driving"让闲置结算永久失效)。
+      // 快照是"当前是否在开"的唯一事实源 → 清残留,让闲置超时路径恢复工作。
+      this.state.session.active_started_at = null;
+      if (this.state.session.phase === "driving" && this.state.session.parked_at) {
+        this.state.session.phase = "parked";
+      }
+    }
 
     for (const drive of completed) this.absorbCompletedDrive(drive, at);
 
