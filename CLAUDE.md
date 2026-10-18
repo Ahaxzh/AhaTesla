@@ -27,6 +27,11 @@ npx playwright test                    # e2e/ 全链路
 docker compose -f deploy/bridge-compose.yml up -d   # socat 桥接
 ```
 
+## 远程与提交纪律
+- 远程: `origin = https://github.com/Ahaxzh/AhaTesla`(分支 `main`)
+- **每批功能完成且门禁全绿后,必须 commit 并 push**(用户明令,2026-10-18 起)
+- push 前自查:VIN/GPS/Token/Secret 不得出现在任何提交(红线 2);server/data 与 .env 永不入库
+
 ## 安全红线（不可违反）
 1. 对 teslamate 库只读；禁止任何车辆控制命令
 2. VIN/GPS/Token/Secret 不进 Git、日志、错误信息
