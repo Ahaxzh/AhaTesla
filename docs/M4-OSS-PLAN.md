@@ -34,12 +34,12 @@
 
 ### m4b · 推送渠道 3 → 6
 
-- [ ] 企业微信机器人(webhook + markdown 卡片 + @指定成员)
-- [ ] ntfy(server URL + topic,支持自建实例)
-- [ ] Bark(iOS,device key,可选自建 server)
-- [ ] 全部走既有 Notifier 抽象;推送矩阵 5 事件 × 6 渠道;PushPage 六渠道平权卡片 + 各自测试按钮 + 密钥加密落盘
-- [ ] 契约先行:API_CONTRACT §channels 扩展
-- [ ] 单测:每渠道 dispatch 成功/失败隔离(参照 Telegram 用例);e2e:PushPage 6 卡片渲染
+- [x] 企业微信机器人(webhook + markdown 卡片 + @指定成员)
+[x] ntfy(server URL + topic,支持自建实例)
+[x] Bark(iOS,device key,可选自建 server)
+- [x] 全部走既有 Notifier 抽象;推送矩阵 5 事件 × 6 渠道;PushPage 六渠道平权卡片 + 各自测试按钮 + 密钥加密落盘
+- [x] 契约先行:API_CONTRACT §channels 扩展
+- [x] 单测:每渠道 dispatch 成功/失败隔离(参照 Telegram 用例);e2e:PushPage 6 卡片渲染
 
 ### m4c · 推送内容升级(富模板 + 每日早报 + BYO AI + iOS WebPush)⭐提前实施
 
