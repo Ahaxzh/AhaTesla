@@ -11,16 +11,16 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.90.16",
+    "@tanstack/react-query": "^5.104.3",
     "clsx": "^2.1.1",
     "leaflet": "^1.9.4",
-    "lucide-react": "^0.561.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "lucide-react": "^1.57.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "react-router-dom": "^7.11.0"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/leaflet": "^1.9.22",
@@ -28,13 +28,13 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.23",
-    "jsdom": "^27.4.0",
-    "msw": "^2.15.0",
+    "jsdom": "^30.1.2",
+    "msw": "^3.0.3",
     "postcss": "^8.5.6",
     "sharp": "^0.35.5",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
     "vite": "^7.3.0",
-    "vitest": "^4.0.18"
+    "vitest": "^5.0.4"
   }
 }
