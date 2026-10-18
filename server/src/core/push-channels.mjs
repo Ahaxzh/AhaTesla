@@ -8,9 +8,13 @@
 // 安全红线：botToken/appSecret/WebPush 私钥一律经 secret-box 加密落库或存
 // secret.key 文件；明文不进日志、不进 API 回传、不进错误信息。
 
+import { createRequire } from "node:module";
 import { getStore, clearChannelSecret } from "./state.mjs";
 import { encryptSecret, decryptSecret } from "./secret-box.mjs";
 import { createFeishuChannel } from "./feishu.mjs";
+
+// ESM 下加载 CJS 的 web-push(直接 require 在 type:module 里是 ReferenceError)
+const nodeRequire = createRequire(import.meta.url);
 
 // ---- 渠道配置读写（channel_secrets 表 + state.feishu 兼容层） ----------------
 
@@ -127,7 +131,7 @@ export function createWebPushChannel({
         // 零框架纪律的例外：Web Push 需要 RFC 8291 ECDH/AES128GCM 加密，
         // 手写成本高且易错，采用成熟 web-push 库（协议层，非框架）。
         wp = globalThis.__ahatesla_webpush
-          ?? (globalThis.__ahatesla_webpush = require("web-push"));
+          ?? (globalThis.__ahatesla_webpush = nodeRequire("web-push"));
       } catch (error) {
         logger(`web-push load failed: ${error.message}`);
         return false;

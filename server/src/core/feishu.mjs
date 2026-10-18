@@ -96,6 +96,13 @@ export function createFeishuChannel(state, { fetchImpl = globalThis.fetch, logge
 
   return {
     enabled,
+    // m4b 统一渠道接口:send({title, body, url}) — Notifier.dispatch 的调用契约。
+    // 卡片头放标题,正文 markdown;url 存在时附跳转链接。
+    async send({ title, body, url } = {}) {
+      if (!enabled()) return { sent: false, reason: "disabled" };
+      const content = [body, url ? `[打开 AhaTesla](${url})` : null].filter(Boolean).join("\n");
+      return this.sendCard(title || "AhaTesla", [markdown(content)]);
+    },
     async status() {
       const cfg = config();
       let connected = false;

@@ -117,3 +117,12 @@ test("毒状态自愈:快照无活动时清残留 active_started_at,闲置结算
   assert.equal(events[0].segment_ids[0], 3259);
   assert.equal(monitor.state.session, null, "结算后 session 清空");
 });
+
+test("飞书渠道具备统一 send 接口(m4b 回归防护)", async () => {
+  const { createFeishuChannel } = await import("../src/core/feishu.mjs");
+  const ch = createFeishuChannel({ feishu: {} }); // 未配置
+  assert.equal(typeof ch.send, "function", "dispatch 直接调 channel.send,m4b 曾漏配导致全线 feishu 静默失败");
+  const r = await ch.send({ title: "t", body: "b" });
+  assert.equal(r.sent, false);
+  assert.equal(r.reason, "disabled");
+});
