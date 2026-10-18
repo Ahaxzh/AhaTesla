@@ -36,6 +36,9 @@ function applyTheme(resolved: 'light' | 'dark') {
   document.documentElement.dataset.theme = resolved
   // colorScheme 让原生控件（滚动条/输入框/表单）跟随配色
   document.documentElement.style.colorScheme = resolved
+  // PWA 状态栏/标题栏颜色跟随(index.html 静态深色值在此被动态覆盖)
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) meta.setAttribute('content', resolved === 'light' ? '#F4F5F6' : '#08090A')
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {

@@ -8,6 +8,8 @@
 
 </div>
 
+[English](./README_EN.md)
+
 ---
 
 ## 功能
