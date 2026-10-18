@@ -215,7 +215,7 @@ export function createWebPushChannel({
 
 // ---- Notifier 门面：矩阵化 dispatch + SLA 埋点 -------------------------------
 
-export const PUSH_EVENTS = ["tripEnd", "chargingStart", "chargingDone", "weekly", "monthly"];
+export const PUSH_EVENTS = ["tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly"];
 export const PUSH_CHANNELS = ["webpush", "telegram", "feishu"];
 
 // state.pushRules v2：{matrix:{tripEnd:{webpush,telegram,feishu},…}, weeklyReportDay}
@@ -250,7 +250,7 @@ export function matrixFromRules(rules) {
   return out;
 }
 
-export function createNotifier({ state, eventLog, feishu = null, telegram = null, webpush = null, fetchImpl = globalThis.fetch } = {}) {
+export function createNotifier({ state, eventLog, feishu = null, telegram = null, webpush = null, ai = null, fetchImpl = globalThis.fetch } = {}) {
   // feishu 渠道复用既有实现（state.feishu 直连），其余走新配置层
   const feishuChannel = feishu || createFeishuChannel(state, { logger: (m) => logger?.("feishu.error", { message: m }) });
   const telegramChannel = telegram || createTelegramChannel({ fetchImpl, logger: (m) => logger?.("telegram.error", { message: m }) });
@@ -273,6 +273,7 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       case "trip_end": return `行程结束 · ${ts}`;
       case "charging_start": return `开始充电 · ${ts}`;
       case "charging_done": return `充电完成 · ${ts}`;
+      case "daily": return `昨日用车日报 · ${event.dateLabel || ts}`;
       case "weekly": return "每周用车周报";
       case "monthly": return "每月账本月报";
       default: return `AhaTesla 通知 · ${ts}`;
@@ -333,6 +334,53 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       if (event.locationName) bits.push(`📍 ${event.locationName}`);
       return bits.join("\n");
     }
+    if (event.type === "daily") {
+      // m4c-c1 昨日日报：核心一句话 → 行程/充电 → 对比 → 本月累计 → 异常提醒（~10 行）
+      const k = event.kpi || {};
+      const lines = [];
+      const core = [];
+      if (k.distanceKm != null) core.push(`${k.distanceKm} km`);
+      if (k.totalCost != null) core.push(`¥${k.totalCost}`);
+      if (k.saved > 0) core.push(`省 ¥${k.saved}`);
+      lines.push(`📈 昨日 ${core.join(" · ")}`);
+      if (k.driveCount > 0) {
+        const bits = [`🚗 ${k.driveCount} 次`];
+        if (k.energyKwh != null) bits.push(`${k.energyKwh} kWh`);
+        if (event.topRoute) bits.push(event.topRoute);
+        lines.push(bits.join(" · "));
+      }
+      const cs = event.chargeSummary;
+      if (cs && cs.count > 0) {
+        const bits = [`⚡ 充电 ${cs.kwh} kWh · ${cs.count} 次`];
+        if (cs.locations?.length) bits.push(cs.locations.join("/"));
+        if (cs.lastEndTime) bits.push(`至 ${cs.lastEndTime}`);
+        lines.push(bits.join(" · "));
+      }
+      const cmp = event.compare;
+      if (cmp && (cmp.kmDeltaPct != null || cmp.costDeltaPct != null)) {
+        const fmtDelta = (v) => (v == null ? "--" : `${v > 0 ? "+" : ""}${v}%`);
+        lines.push(`📊 较上周同日 里程 ${fmtDelta(cmp.kmDeltaPct)} · 电费 ${fmtDelta(cmp.costDeltaPct)}`);
+      }
+      if (cmp?.month && cmp.month.distanceKm > 0) {
+        lines.push(`📅 本月累计 ${cmp.month.distanceKm} km · ¥${cmp.month.totalCost}`);
+      }
+      // 异常提醒（有才出现）
+      const ins = event.insights || {};
+      if (ins.tireMinBar != null && ins.tireMinBar < 2.8) {
+        lines.push(`🛞 四轮最低胎压 ${ins.tireMinBar} bar（低于 2.8，建议补气）`);
+      }
+      if (ins.avgTempC != null && ins.avgTempC < 5 && ins.kwhPer100km != null && ins.kwhPer100km > 15) {
+        lines.push(`🌡 ${ins.avgTempC}°C 低温，能耗 ${ins.kwhPer100km} kWh/100km 偏高`);
+      }
+      if (ins.idlePct != null && ins.idlePct >= 25) {
+        lines.push(`🚦 怠速占比 ${ins.idlePct}%，拥堵较多`);
+      }
+      const pl = k.parkingLoss;
+      if (pl && pl.kwh > 0.5) {
+        lines.push(`🌙 驻车损耗 ${pl.kwh.toFixed(1)} kWh（¥${(pl.cost ?? 0).toFixed(2)}）`);
+      }
+      return lines.join("\n");
+    }
     if (event.type === "weekly" || event.type === "monthly") return event.summary || "";
     return "";
   }
@@ -344,6 +392,9 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
     return "/";
   }
 
+  /** AI 润色适用的事件（充电开始/结束数字极简，不消费 AI） */
+  const AI_KINDS = new Set(["trip_end", "daily", "weekly", "monthly"]);
+
   /**
    * 按矩阵并行投递一个事件（AC-12.2：单渠道失败隔离）。
    * 返回 {results: {channel: {sent, deliveryMs, reason}}}。
@@ -351,10 +402,15 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
   async function dispatch(event, { matrix } = {}) {
     const rules = matrix ? { matrix } : state.pushRules;
     const m = matrixFromRules(rules);
-    const ruleKey = { trip_end: "tripEnd", charging_start: "chargingStart", charging_done: "chargingDone", weekly: "weekly", monthly: "monthly" }[event.type] || event.type;
+    const ruleKey = { trip_end: "tripEnd", charging_start: "chargingStart", charging_done: "chargingDone", daily: "daily", weekly: "weekly", monthly: "monthly" }[event.type] || event.type;
     const targets = m[ruleKey] || {};
     const title = eventTitle(event);
-    const body = eventBody(event);
+    let body = eventBody(event);
+    // m4c-c3 BYO 模型：启用且生成成功 → 模板末尾追加一行；任何失败静默回退（模板完整）
+    if (ai && AI_KINDS.has(event.type) && body) {
+      const insight = await ai.enhanceInsight(event.type, event).catch(() => null);
+      if (insight) body = `${body}\n💡 ${insight}`;
+    }
     const url = eventUrl(event);
 
     const jobs = [];

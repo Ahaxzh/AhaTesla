@@ -87,14 +87,21 @@
 - `POST /api/channels/feishu/test` → {ok, message}
 
 ### 推送规则（矩阵化）
-- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu}, chargingStart:{...}, chargingDone:{...}, weekly:{...}, monthly:{...}}}
+- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}}
 - `PUT /api/push-rules` {matrix} → {ok}
-  - v1 为每事件单一 bool → v2 为 5 事件 × 3 渠道矩阵（P6 分组3）；weeklyReportDay 并入 settings
+  - v1 为每事件单一 bool → v2 为 6 事件 × 3 渠道矩阵（P6 分组3）；weeklyReportDay 并入 settings
+  - `daily`（m4c-c1）：昨日用车日报，每日 08:00 推送；昨日无行程且无充电自动跳过；不落报告归档表
 
 ### 报告（v2 新增）
 - `GET /api/reports` → {items:[{id, type:"weekly"|"monthly", periodLabel, distanceKm, totalCost, saved}]}
 - `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）
 - `POST /api/reports/generate` {type} → {ok}（手动触发，调试用）
+
+### AI 助手（m4c-c3，BYO 模型）
+- `GET /api/ai/config` → {enabled, baseUrl, model, hasKey, keyAlias}（绝不回明文 key；keyAlias 为 sha256 指纹前 4 位）
+- `PUT /api/ai/config` {enabled, baseUrl, model, apiKey?} → {ok}
+  - OpenAI 兼容端点；apiKey 省略 = 保持不变，空串 = 清除；AES-256-GCM 落库
+  - 默认关闭。启用后行程小结/日报/周报/月报正文末尾追加一行「💡 洞察」；超时(8s)/失败静默回退模板，推送永不因 AI 失败
 
 ## 7. 系统（v1 演进）
 
@@ -142,7 +149,7 @@
 | 5 | GET/PUT /api/pricing（defaultRate/locations TOU 双模）· /api/pricing/history | ✅ 已实现 | kv pricing:location-tou:<id>（M1 承接） |
 | 5 | POST /api/ledger/summary · /api/ledger/recalculate(+jobId) | ✅ 已实现 | 月度账本 + 7 天补录窗口 + 进度（M1） |
 | 6 | 渠道配置（webpush/telegram/feishu）+ /api/push/env | ✅ 已实现 | 三渠道平权 AC-10.1；Telegram/飞书密文 AES-GCM 落库（M2） |
-| 6 | GET/PUT /api/push-rules（5×3 矩阵） | ✅ 已实现 | B4 矩阵替换 v1 单 bool（M2） |
+| 6 | GET/PUT /api/push-rules（6×3 矩阵） | ✅ 已实现 | B4 矩阵替换 v1 单 bool（M2）；daily 事件 m4c 新增 |
 | 6 | /api/reports（列表/详情/generate） | ✅ 已实现 | 不可变快照 report_snapshots；周一/月初 08:00 定时（M2） |
 | 7 | /api/system/status（latencyMs/readonlyVerified）· /events（deliveryMs）· /health-lite | ✅ 已实现 | GA-31/32；health-lite 匿名供失联横幅轮询（M2） |
 | 7 | WebSocket /ws | ⏸ 未实现 | 契约标注"可选，前端轮询兜底"；轮询路径已全覆盖，按需后补 |

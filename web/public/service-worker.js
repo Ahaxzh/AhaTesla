@@ -1,5 +1,5 @@
 /* AhaTesla Service Worker — HTML network-first（发版即生效），带 hash 静态资源 cache-first，API network-first，离线兜底 */
-const VERSION = 'v3'
+const VERSION = 'v4'
 const SHELL_CACHE = `ahatesla-shell-${VERSION}`
 const SHELL_ASSETS = ['/manifest.json', '/favicon.svg']
 
@@ -68,5 +68,53 @@ self.addEventListener('fetch', (event) => {
         .catch(() => cached || caches.match('/index.html'))
       return cached || network
     }),
+  )
+})
+
+// ---- Web Push：展示通知(服务端 payload 形如 {title, body, url}) -----------------
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch (e) {
+    data = {}
+  }
+  const title = (data && data.title) || 'AhaTesla'
+  const body = (data && data.body) || ''
+  const url = (data && data.url) || '/'
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag: (data && data.tag) || 'ahatesla',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url },
+    }),
+  )
+})
+
+// ---- 通知点击：聚焦已开的窗口(顺带导航到目标页)，没有则新开 --------------------
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data && event.notification.data.url) || '/'
+  event.waitUntil(
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const client of clientList) {
+        if ('focus' in client) {
+          await client.focus()
+          // 已开窗口导航到通知目标页;跨源/失败不阻塞聚焦
+          if ('navigate' in client) {
+            try {
+              await client.navigate(url)
+            } catch (e) {
+              /* 当前页保留 */
+            }
+          }
+          return
+        }
+      }
+      await self.clients.openWindow(url)
+    })(),
   )
 })

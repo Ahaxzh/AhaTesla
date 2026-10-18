@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import SettingsPage from '@/pages/SettingsPage'
 import { renderWithProviders } from './test-utils'
@@ -22,22 +22,64 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
   })
 
-  it('v2.4 分区结构：外观/账本/电价/推送/系统/安全 六分区，导航与卡片一一对应', async () => {
+  it('v2.4 分区结构：外观/账本/电价/AI/推送/系统/安全 七分区，导航与卡片一一对应', async () => {
     renderWithProviders(<SettingsPage />)
-    // 六分区卡片齐备
+    // 七分区卡片齐备
     expect(await screen.findByTestId('settings-appearance')).toBeInTheDocument()
     expect(screen.getByTestId('settings-ledger')).toBeInTheDocument()
     expect(screen.getByTestId('settings-pricing')).toBeInTheDocument()
+    expect(screen.getByTestId('settings-ai')).toBeInTheDocument()
     expect(screen.getByTestId('settings-push-matrix')).toBeInTheDocument()
     expect(screen.getByTestId('settings-system')).toBeInTheDocument()
     expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
-    // 导航锚点与分区一一对应（桌面 aside + 移动横向 两份导航都要 6 项）
+    // 导航锚点与分区一一对应（桌面 aside + 移动横向 两份导航都要 7 项）
     const navs = screen.getAllByTestId('settings-nav')
     expect(navs).toHaveLength(2)
-    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(6)
+    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(7)
     // 去重回归：数据源健康小卡已并入系统分区，设置页不再出现
     expect(screen.queryByText('累计行程')).not.toBeInTheDocument()
     expect(screen.queryByTestId('resync-meta')).not.toBeInTheDocument()
+  })
+
+  it('推送矩阵：6 事件含每日早报行', async () => {
+    renderWithProviders(<SettingsPage />)
+    // 矩阵列表要等 pushRules 查询返回（此前是骨架屏）
+    const list = await screen.findByTestId('push-matrix-list')
+    // 6 行事件（tripEnd/chargingStart/chargingDone/daily/weekly/monthly）
+    expect(within(list).getAllByTestId(/^matrix-/).length).toBeGreaterThanOrEqual(6 * 3)
+    expect(within(list).getByText('每日早报')).toBeInTheDocument()
+    // msw 默认 daily: webpush=true → chip 按钮处于按下态
+    expect(screen.getByTestId('matrix-daily-webpush')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('matrix-daily-feishu')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('AI 助手分区：填写保存断言 PUT body，测试按钮成功 toast', async () => {
+    const user = userEvent.setup()
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/ai/config', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    renderWithProviders(<SettingsPage />)
+    await screen.findByTestId('settings-ai')
+    // 默认关闭、密钥输入框存在且为 password 型
+    expect(screen.getByTestId('ai-api-key')).toHaveAttribute('type', 'password')
+    await user.type(screen.getByTestId('ai-base-url'), 'https://api.openai.com/v1')
+    await user.type(screen.getByTestId('ai-model'), 'gpt-4o-mini')
+    await user.type(screen.getByTestId('ai-api-key'), 'sk-test-123')
+    await user.click(screen.getByTestId('ai-save'))
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({
+      enabled: false,
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini',
+      apiKey: 'sk-test-123',
+    })
+    // 测试连通：成功 toast 显示 preview 前 50 字
+    await user.click(screen.getByTestId('ai-test'))
+    expect(await screen.findByText(/连通正常/)).toBeInTheDocument()
   })
 
   it('外观分区：主题切换写 dataset，语言切换即时生效', async () => {

@@ -7,6 +7,7 @@ import {
   KeyRound,
   Palette,
   Settings as SettingsIcon,
+  Sparkles,
   Tag,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -15,6 +16,7 @@ import { useI18n, type Lang } from '@/i18n'
 import { api } from '@/api/client'
 import { useToast } from '@/components/Toast'
 import { PageHeader } from '@/components/PageHeader'
+import { Toggle } from '@/components/Toggle'
 import { PricingSection } from '@/components/settings/PricingSection'
 import { SystemSection } from '@/components/settings/SystemSection'
 import type { PushEventId, PushChannelId } from '@/types'
@@ -30,6 +32,7 @@ const EVENTS: { id: PushEventId; label: string; desc: string }[] = [
   { id: 'tripEnd', label: '行程结束小结', desc: '每次行程结束推送费用与路线概要' },
   { id: 'chargingStart', label: '充电开始提醒', desc: '插入充电枪开始充电时' },
   { id: 'chargingDone', label: '充电完成账单', desc: '充电结束推送电量与费用' },
+  { id: 'daily', label: '每日早报', desc: '每天 08:00 汇总昨日用车与充电' },
   { id: 'weekly', label: '每周周报', desc: '每周一 08:00 汇总上周' },
   { id: 'monthly', label: '每月月报', desc: '每月 1 日 08:00 汇总上月' },
 ]
@@ -56,6 +59,7 @@ function SettingsNav({ active }: { active: string }) {
     { id: 'appearance', label: t('settings.nav.appearance', '外观'), icon: Palette },
     { id: 'ledger', label: t('settings.nav.ledger', '账本参数'), icon: Calculator },
     { id: 'pricing', label: t('settings.nav.pricing', '电价'), icon: Tag },
+    { id: 'ai', label: t('settings.nav.ai', 'AI 助手'), icon: Sparkles },
     { id: 'push', label: t('settings.nav.push', '推送'), icon: BellRing },
     { id: 'system', label: t('settings.nav.system', '系统'), icon: Activity },
     { id: 'security', label: t('settings.nav.security', '账户安全'), icon: KeyRound },
@@ -91,7 +95,7 @@ export default function SettingsPage() {
   // 滚动监听高亮当前分区（IntersectionObserver 不可用时静默降级）
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
-    const ids = ['appearance', 'ledger', 'pricing', 'push', 'system', 'security']
+    const ids = ['appearance', 'ledger', 'pricing', 'ai', 'push', 'system', 'security']
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -193,6 +197,48 @@ export default function SettingsPage() {
     setMatrix(next)
     saveMatrix.mutate(next)
   }
+
+  // ---- AI 助手（BYO 模型，密钥只存服务端加密，回显只给别名） ----
+  const { data: aiCfg } = useQuery({ queryKey: ['ai-config'], queryFn: api.aiConfig })
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiBaseUrl, setAiBaseUrl] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [aiApiKey, setAiApiKey] = useState('')
+
+  useEffect(() => {
+    if (aiCfg) {
+      setAiEnabled(aiCfg.enabled)
+      setAiBaseUrl(aiCfg.baseUrl)
+      setAiModel(aiCfg.model)
+    }
+  }, [aiCfg])
+
+  const saveAi = useMutation({
+    mutationFn: () =>
+      api.saveAiConfig({
+        enabled: aiEnabled,
+        baseUrl: aiBaseUrl.trim(),
+        model: aiModel.trim(),
+        // 留空=不修改已有密钥；显式输入才随保存提交
+        ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
+      }),
+    onSuccess: () => {
+      toast('AI 配置已保存', 'success')
+      setAiApiKey('')
+      void queryClient.invalidateQueries({ queryKey: ['ai-config'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
+
+  const testAi = useMutation({
+    mutationFn: api.aiTest,
+    onSuccess: (r) => {
+      if (r.ok && r.preview) toast(`连通正常：${r.preview.slice(0, 50)}`, 'success')
+      else if (r.ok) toast('连通正常', 'success')
+      else toast(r.error ?? '测试失败', 'error')
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
 
   // ---- 修改密码 ----
   const [oldPassword, setOldPassword] = useState('')
@@ -409,12 +455,92 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* ===== 分区4：推送矩阵 ===== */}
+          {/* ===== 分区4：AI 助手（BYO 模型，可选） ===== */}
+          <section id="settings-ai" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-ai">
+            <h2 className="section-title">
+              <Sparkles className="h-4 w-4 text-tesla" /> {t('settings.nav.ai', 'AI 助手')}
+            </h2>
+            <p className="section-desc mt-1">
+              {t('settings.ai.desc', '接入 OpenAI 兼容模型润色推送文案；不接入也有完整模板，默认关闭')}
+            </p>
+
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
+              <Toggle checked={aiEnabled} onChange={setAiEnabled} label={t('settings.ai.enabled', '启用')} />
+              <span className={`text-[11px] ${aiEnabled ? 'text-emerald-400' : 'text-slate-500'}`}>
+                {aiEnabled ? 'AI 润色已开启' : '使用内置模板'}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.ai.baseUrl', '接口地址')}</label>
+                <input
+                  type="url"
+                  className="input-dark"
+                  placeholder="https://api.openai.com/v1"
+                  value={aiBaseUrl}
+                  onChange={(e) => setAiBaseUrl(e.target.value)}
+                  aria-label={t('settings.ai.baseUrl', '接口地址')}
+                  data-testid="ai-base-url"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.ai.model', '模型名')}</label>
+                <input
+                  type="text"
+                  className="input-dark"
+                  placeholder="gpt-4o-mini"
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  aria-label={t('settings.ai.model', '模型名')}
+                  data-testid="ai-model"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.ai.apiKey', 'API Key')}</label>
+                <input
+                  type="password"
+                  className="input-dark"
+                  autoComplete="off"
+                  placeholder={
+                    aiCfg?.hasKey
+                      ? t('settings.ai.apiKeySet', '已配置（{alias}）— 留空不修改').replace('{alias}', aiCfg.keyAlias ?? 'sk-…')
+                      : 'sk-…'
+                  }
+                  value={aiApiKey}
+                  onChange={(e) => setAiApiKey(e.target.value)}
+                  aria-label={t('settings.ai.apiKey', 'API Key')}
+                  data-testid="ai-api-key"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                className="btn-primary"
+                onClick={() => saveAi.mutate()}
+                disabled={saveAi.isPending}
+                data-testid="ai-save"
+              >
+                {saveAi.isPending ? t('settings.saving', '保存中…') : t('settings.ai.save', '保存')}
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => testAi.mutate()}
+                disabled={testAi.isPending}
+                data-testid="ai-test"
+              >
+                {testAi.isPending ? t('settings.ai.testing', '测试中…') : t('settings.ai.test', '测试连通')}
+              </button>
+            </div>
+          </section>
+
+          {/* ===== 分区5：推送矩阵 ===== */}
           <section id="settings-push" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-push-matrix">
             <h2 className="section-title">
               <BellRing className="h-4 w-4 text-tesla" /> {t('settings.nav.push', '推送')}
             </h2>
-            <p className="section-desc mt-1">{t('settings.push.desc', '5 类事件 × 3 渠道独立开关 · 渠道密钥在「推送」页配置')}</p>
+            <p className="section-desc mt-1">{t('settings.push.desc', '6 类事件 × 3 渠道独立开关 · 渠道密钥在「推送」页配置')}</p>
             {matrix ? (
               <div className="mt-4 divide-y divide-white/[0.05]" data-testid="push-matrix-list">
                 {EVENTS.map((ev) => {
@@ -465,7 +591,7 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {/* ===== 分区5：系统（服务状态/只读盾/事件日志 唯一入口） ===== */}
+          {/* ===== 分区6：系统（服务状态/只读盾/事件日志 唯一入口） ===== */}
           <section id="settings-system" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-system">
             <h2 className="section-title">
               <Activity className="h-4 w-4 text-tesla" /> {t('settings.nav.system', '系统')}
@@ -476,7 +602,7 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* ===== 分区6：账户安全 ===== */}
+          {/* ===== 分区7：账户安全 ===== */}
           <section id="settings-security" className="glass-card-flat scroll-mt-6 p-5" data-testid="change-password-card">
             <h2 className="section-title">
               <KeyRound className="h-4 w-4 text-tesla" /> {t('settings.nav.security', '账户安全')}

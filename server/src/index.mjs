@@ -40,6 +40,8 @@ import { createDashboardRoutes, createSystemRoutes } from "./api/dashboard-route
 import { createDashboardExtraRoutes, createSettingsRoutes, createHealthLiteRoutes } from "./api/dashboard-extra-routes.mjs";
 import { createSetupRoutes } from "./api/setup-routes.mjs";
 import { createPushRoutes } from "./api/push-routes.mjs";
+import { createAiRoutes } from "./api/ai-routes.mjs";
+import { createAiCopywriter } from "./core/ai-copywriter.mjs";
 import { computeTripViews as tripsComputeTripViews } from "./api/trips-routes.mjs";
 import { listDrivesSql, listChargingForStats } from "./core/teslamate-queries.mjs";
 import { enrichTripEndEvent, enrichChargingDoneEvent } from "./core/event-enrichment.mjs";
@@ -70,20 +72,20 @@ export async function bootstrap({ db, statePathEnv } = {}) {
   return state;
 }
 
-export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null, reportScheduler = null, buildDeps = null }) {
+export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const getSecret = () => loadSecretKey();
   const requireAuth = createJwtMiddleware({ getSecret });
   const feishu = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
 
   const app = createApp({ onError: (error) => eventLog.log("server.error", { message: error?.message }) });
 
-  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, notifier, reportScheduler, buildDeps });
+  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, notifier, reportScheduler, buildDeps, ai });
 
   return { app, feishu };
 }
 
 // 路由注册统一入口：buildApp 与 main() 重建路由共用，避免两份清单漂移。
-function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null }) {
+function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const auth = createAuthRoutes({ state, getSecret, eventLog });
   const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog });
   const trips = createTripsRoutes({ db, state });
@@ -97,6 +99,8 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   const healthLite = createHealthLiteRoutes({});
   const system = createSystemRoutes({ db, mqtt, eventLog, startedAt });
   const push = createPushRoutes({ state, notifier, eventLog, store: getStore(), reportScheduler, buildDeps });
+  // registerRoutes 也被测试直接调用：ai 未注入时兜底一个全局 store 实例
+  const aiRoutes = createAiRoutes({ ai: ai ?? createAiCopywriter({ eventLog }), eventLog });
 
   // /api/setup/*（契约 §1）：status 匿名；admin 仅 uninitialized；其余需管理员登录。
   app.get("/api/setup/status", (ctx) => setup.status(ctx));
@@ -136,6 +140,10 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
   app.put("/api/channels/telegram", requireAuth, (ctx) => push.updateTelegram(ctx));
   app.post("/api/channels/telegram/test", requireAuth, (ctx) => push.testTelegram(ctx));
+  // BYO 模型（契约 §AI，m4c-c3）
+  app.get("/api/ai/config", requireAuth, (ctx) => aiRoutes.get(ctx));
+  app.put("/api/ai/config", requireAuth, (ctx) => aiRoutes.put(ctx));
+  app.post("/api/ai/test", requireAuth, (ctx) => aiRoutes.test(ctx));
   app.post("/api/push/webpush/subscribe", requireAuth, (ctx) => push.webpushSubscribe(ctx));
   app.post("/api/push/webpush/unsubscribe", requireAuth, (ctx) => push.webpushUnsubscribe(ctx));
   app.post("/api/push/webpush/test", requireAuth, (ctx) => push.webpushTest(ctx));
@@ -278,14 +286,16 @@ async function main() {
     }
   });
 
-  // ---- Notifier（三渠道抽象，GA-08）+ 报告调度器（GA-11） --------------------
+  // ---- Notifier（三渠道抽象，GA-08）+ AI 润色（m4c-c3）+ 报告调度器（GA-11） ----
   const feishuChannel = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
+  const ai = createAiCopywriter({ store, eventLog });
   const notifier = createNotifier({
     state,
     eventLog,
     feishu: feishuChannel,
     telegram: createTelegramChannel({ logger: (m) => eventLog.log("telegram.error", { message: m }) }),
-    webpush: createWebPushChannel({ logger: (m) => eventLog.log("webpush.error", { message: m }) })
+    webpush: createWebPushChannel({ logger: (m) => eventLog.log("webpush.error", { message: m }) }),
+    ai
   });
   // 报告构建依赖（computeTripViews/listDrivesSql/listChargingForStats 已静态导入）
   const reportBuildDeps = () => ({
@@ -304,7 +314,7 @@ async function main() {
     logger: (msg) => log("report:", msg)
   });
 
-  const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps });
+  const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
 
   async function dispatchPush(rawEvent) {
     // 事件富化（v2.2）：从 teslamate 只读库补全天气/胎压/速度/怠速等维度
@@ -360,7 +370,7 @@ async function main() {
   if (mqttBridge) {
     const requireAuth2 = createJwtMiddleware({ getSecret: () => loadSecretKey() });
     app.routes.length = 0;
-    registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu, notifier, reportScheduler, buildDeps: reportBuildDeps });
+    registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
     log(`mqtt enabled (optional enhancement): ${MQTT_URL}`);
   } else if (MQTT_URL) {
     log(`mqtt configured but unavailable — degraded to polling baseline: ${MQTT_URL}`);

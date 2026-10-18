@@ -8,15 +8,22 @@
 //
 // deliveryMs 埋点：报告生成时刻 → 各渠道送达时刻差，写事件日志（GA-12）。
 import { isoFromTeslaMate, round, finiteNumber } from "./util.mjs";
+import { saveState } from "./state.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function periodRange(now, kind, tz = "Asia/Shanghai") {
-  // 周报：上一周（周一 00:00 ~ 周日 24:00）；月报：上一自然月。
+  // 周报：上一周（周一 00:00 ~ 周日 24:00）；月报：上一自然月；日报：昨日 0~24 点。
   const locale = safeLocale(tz);
+  if (kind === "daily") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 1);
+    return { start, end: new Date(start.getTime() + DAY_MS), label: fmtLabel(start, "daily", locale) };
+  }
   if (kind === "weekly") {
     const day = now.getDay() === 0 ? 7 : now.getDay(); // 周一=1…周日=7
-    const thisMonday = new Date(now); 
+    const thisMonday = new Date(now);
     thisMonday.setHours(0, 0, 0, 0);
     thisMonday.setDate(thisMonday.getDate() - (day - 1));
     return {
@@ -39,6 +46,9 @@ function safeLocale(tz) {
 
 function fmtLabel(start, kind, tz) {
   const fmt = (d, opts) => new Intl.DateTimeFormat("zh-CN", { timeZone: tz, ...opts }).format(d);
+  if (kind === "daily") {
+    return `${fmt(start, { month: "2-digit", day: "2-digit" })} 日报`;
+  }
   if (kind === "weekly") {
     const y = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric" }).format(start);
     const w = isoWeek(start);
@@ -143,7 +153,14 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
              SELECT p.tpms_pressure_rr::float8 AS tpms FROM positions p
              WHERE p.drive_id = ANY($1::int[]) AND p.tpms_pressure_rr IS NOT NULL
              ORDER BY p.id DESC LIMIT 500
-           ) v) AS tire_rr
+           ) v) AS tire_rr,
+          (SELECT LEAST(min(v.a), min(v.b), min(v.c), min(v.d))::float8 FROM (
+             SELECT p.tpms_pressure_fl::float8 AS a, p.tpms_pressure_fr::float8 AS b,
+                    p.tpms_pressure_rl::float8 AS c, p.tpms_pressure_rr::float8 AS d
+             FROM positions p
+             WHERE p.drive_id = ANY($1::int[]) AND p.tpms_pressure_fl IS NOT NULL
+             ORDER BY p.id DESC LIMIT 2000
+           ) v) AS tire_min
         FROM drives d WHERE d.id = ANY($1::int[])
       `, [driveIds]);
       const row = r[0] ?? {};
@@ -160,11 +177,32 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
           powerMaxKw: finiteNumber(row.power_max_kw) != null ? round(row.power_max_kw, 0) : null,
           tireFlBar: finiteNumber(row.tire_fl) != null ? round(row.tire_fl, 1) : null,
           tireRrBar: finiteNumber(row.tire_rr) != null ? round(row.tire_rr, 1) : null,
+          tireMinBar: finiteNumber(row.tire_min) != null ? round(row.tire_min, 2) : null,
           kwhPer100km: distanceKm > 2 ? round(energyKwh / distanceKm * 100, 1) : null,
         };
       }
     }
   } catch { /* 洞察维度失败不影响报告本体 */ }
+
+  // ---- 日报专属：上周同日对比 + 本月累计 + 充电摘要（m4c-c1） ----
+  let compare = null;
+  let chargeSummary = null;
+  if (kind === "daily") {
+    compare = await windowStats(deps, new Date(start.getTime() - 7 * DAY_MS), new Date(end.getTime() - 7 * DAY_MS))
+      .then((lastWeek) => {
+        const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+        return windowStats(deps, monthStart, end).then((month) => {
+          const pct = (cur, prev) => (prev > 0 ? round((cur - prev) / prev * 100, 0) : null);
+          return {
+            lastWeek: { distanceKm: lastWeek.distanceKm, totalCost: lastWeek.totalCost },
+            kmDeltaPct: pct(distanceKm, lastWeek.distanceKm),
+            costDeltaPct: pct(totalCost, lastWeek.totalCost),
+            month: { distanceKm: month.distanceKm, totalCost: month.totalCost },
+          };
+        });
+      }).catch(() => null);
+    chargeSummary = summarizeCharging(inWindow);
+  }
 
   return {
     kind,
@@ -186,9 +224,40 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
     },
     topRoutes,
     insights,
+    ...(compare ? { compare } : {}),
+    ...(chargeSummary ? { chargeSummary } : {}),
     baselineNote: `对比基准：${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L`,
     closing: buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss })
   };
+}
+
+/** 窗口内行程里程/电费聚合（日报对比段复用账本口径的 computeTripViews） */
+async function windowStats(deps, start, end) {
+  const { sql, params } = deps.listDrivesSql({ from: start.toISOString(), to: end.toISOString() });
+  const rows = await deps.db.query(sql, [...params, 200, 0]);
+  const views = await deps.computeTripViews(deps.db, rows, {
+    defaultRate: deps.state.pricing.defaultRateCnyPerKwh,
+    history: deps.state.pricing.history
+  });
+  return {
+    distanceKm: round(views.reduce((s, v) => s + (v.distanceKm ?? 0), 0), 1),
+    totalCost: round(views.reduce((s, v) => s + (v.costCny ?? 0), 0), 2)
+  };
+}
+
+/** 日报充电摘要：次数 / kWh / 地点去重 / 末次结束时段（北京时间，"几点到家充"） */
+function summarizeCharging(rows) {
+  if (!rows.length) return null;
+  const kwh = round(rows.reduce((s, r) => s + (finiteNumber(r.charge_energy_added) ?? 0), 0), 1);
+  const names = [...new Set(rows.map((r) => r.geofence_name || r.address_name).filter(Boolean))];
+  const lastIso = isoFromTeslaMate(rows.at(-1).end_at ?? rows.at(-1).end_date);
+  let lastEndTime = null;
+  if (lastIso) {
+    lastEndTime = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hour12: false
+    }).format(new Date(lastIso));
+  }
+  return { count: rows.length, kwh, locations: names.slice(0, 2), lastEndTime };
 }
 
 /** v2.2 结语：核心数字 + 洞察要点（温度/胎压/拥堵/能耗） */
@@ -216,7 +285,7 @@ function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parki
 
 // ---- 定时调度 ----------------------------------------------------------------
 
-/** 计算下一次触发时刻（每周一 08:00 / 每月 1 日 08:00，实例时区）。 */
+/** 计算下一次触发时刻（日报每日 08:00 / 周报每周一 08:00 / 月报每月 1 日 08:00，实例时区）。 */
 export function nextReportRun(kind, now = new Date(), tz = "Asia/Shanghai") {
   tz = safeLocale(tz);
   const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -225,7 +294,13 @@ export function nextReportRun(kind, now = new Date(), tz = "Asia/Shanghai") {
   });
   const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
   const h = Number(parts.hour === "24" ? "0" : parts.hour);
-  // 简化：目标日判定基于本地日期。周报 → 下一个周一；月报 → 下月 1 日。
+  // 简化：目标日判定基于本地日期。日报 → 明/今日 08:00；周报 → 下一个周一；月报 → 下月 1 日。
+  if (kind === "daily") {
+    const at = new Date(now);
+    at.setHours(8, 0, 5, 0);
+    if (at <= now) at.setDate(at.getDate() + 1);
+    return at;
+  }
   if (kind === "weekly") {
     const day = now.getDay() === 0 ? 7 : now.getDay();
     let daysAhead = (8 - day) % 7; // 下一个周一
@@ -237,6 +312,22 @@ export function nextReportRun(kind, now = new Date(), tz = "Asia/Shanghai") {
   const at = new Date(now.getFullYear(), now.getMonth() + 1, 1, 8, 0, 5, 0);
   if (at <= now) at.setMonth(at.getMonth() + 1);
   return at;
+}
+
+/** 日报 → 推送事件（扁平字段，push-channels.eventBody 消费；dateLabel = 昨日 M-DD） */
+function dailyEvent(report) {
+  const d = new Date(report.periodStart);
+  const pad = (n) => String(n).padStart(2, "0");
+  return {
+    type: "daily",
+    dateLabel: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    summary: report.closing,
+    kpi: report.kpi,
+    compare: report.compare ?? null,
+    chargeSummary: report.chargeSummary ?? null,
+    insights: report.insights ?? null,
+    topRoute: report.topRoutes?.[0]?.route ?? null
+  };
 }
 
 /** 报告调度器：到点生成 + 归档 + 经 notifier 投递。 */
@@ -251,6 +342,30 @@ export function startReportScheduler({
     const t0 = Date.now();
     try {
       const report = await buildReport({ kind, now: new Date(), tz, deps: buildDeps() });
+
+      // ---- 日报（m4c-c1）：不落归档表；昨日无行程且无充电 → 静默跳过；跨重启按日期去重 ----
+      if (kind === "daily") {
+        if (!(report.kpi.driveCount > 0 || report.kpi.chargeKwh > 0)) {
+          eventLog?.log("report.daily.skipped", { periodLabel: report.periodLabel });
+          logger(`report daily ${report.periodLabel} empty, skip`);
+          return null;
+        }
+        const dayKey = report.periodStart.slice(0, 10);
+        if (state.dailyLastRun === dayKey) {
+          logger(`report daily ${dayKey} already sent, skip`);
+          return null;
+        }
+        state.dailyLastRun = dayKey;
+        try { saveState(state); } catch { /* 状态持久化失败不阻断推送 */ }
+        const dispatchResult = await notifier.dispatch(
+          dailyEvent(report),
+          { matrix: matrixForReport(state, kind) }
+        );
+        const deliveryMs = Date.now() - t0;
+        eventLog?.log("report.daily", { periodLabel: report.periodLabel, deliveryMs, results: dispatchResult.results });
+        return { id: null, report, deliveryMs };
+      }
+
       const id = store.addReportSnapshot({
         kind,
         periodStart: report.periodStart,
@@ -283,8 +398,7 @@ export function startReportScheduler({
   }
 
   function matrixForReport(state, kind) {
-    const key = kind === "weekly" ? "weekly" : "monthly";
-    // weekly→weekly / monthly→monthly 直接复用矩阵
+    const key = kind; // weekly/monthly/daily → 同名矩阵键直接复用
     const notifier = state.pushRules;
     return notifier?.matrix ? { matrix: notifier.matrix } : undefined;
   }
@@ -300,6 +414,7 @@ export function startReportScheduler({
     timers.push(t);
   }
 
+  schedule("daily");
   schedule("weekly");
   schedule("monthly");
   return {

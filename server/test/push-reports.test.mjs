@@ -371,3 +371,158 @@ test("heatmap 路由：90 天按本地日期聚合（P2 模块4）", async () =>
   const yday = r.daysData.find((d) => d.date === r.daysData.at(-2).date);
   assert.equal(yday.distanceKm, 50);
 });
+
+// ---- m4c-c1 · 每日早报 ------------------------------------------------------------
+
+test("nextReportRun daily：07:59 → 今日 08:00；08:01 → 明日 08:00；月末跨日", () => {
+  const before = nextReportRun("daily", new Date("2026-10-16T07:59:00"));
+  assert.equal(before.getDate(), 16);
+  assert.equal(before.getHours(), 8);
+  const after = nextReportRun("daily", new Date("2026-10-16T08:01:00"));
+  assert.equal(after.getDate(), 17);
+  assert.equal(after.getHours(), 8);
+  // 月末 10-31 08:01 → 11-01
+  const monthEnd = nextReportRun("daily", new Date("2026-10-31T08:01:00"));
+  assert.equal(monthEnd.getMonth(), 10);
+  assert.equal(monthEnd.getDate(), 1);
+});
+
+test("buildReport daily：昨日窗口聚合 + 上周同日对比 + 本月累计 + 充电摘要 + 最低胎压", async () => {
+  useMemoryStore();
+  const now = new Date("2026-10-15T10:00:00"); // 日报窗口 = 10-14 00:00 ~ 10-15 00:00（本地）
+  const mk = (h, m = 0) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, h, m);
+  const dayStart = mk(0), dayEnd = mk(24);
+  const lwStart = new Date(dayStart.getTime() - 7 * 86400000), lwEnd = new Date(dayEnd.getTime() - 7 * 86400000);
+  const moStart = new Date(dayStart.getFullYear(), dayStart.getMonth(), 1);
+  const driveRows = {
+    [dayStart.toISOString()]: [
+      { id: 1, distance_km: 20, duration_min: 40, cost: 3.0 },
+      { id: 2, distance_km: 22.5, duration_min: 35, cost: 3.32 }
+    ],
+    [lwStart.toISOString()]: [{ id: 11, distance_km: 50, duration_min: 80, cost: 8.0 }],
+    [moStart.toISOString()]: [{ id: 21, distance_km: 100, duration_min: 160, cost: 20.0 }]
+  };
+  const db = makeFakeDb([
+    { match: (sql) => sql.includes("FROM drives d WHERE"), rows: [{ avg_temp: 3.5, min_temp: 1, max_temp: 8, idle_ratio: 0.28, avg_speed: 30, max_speed: 90, power_max: 60, tire_fl: 2.9, tire_rr: 2.7, tire_min: 2.62 }] },
+    { match: (sql) => sql.includes("charging_processes"), rows: [{ id: 9, end_date: "2026-10-14T15:30:00", charge_energy_added: 41.2, geofence_name: "家庭充电桩" }] },
+    { match: (sql) => sql.includes("FROM drives"), rows: (_sql, params) => driveRows[params[0]] ?? [] },
+    { match: (sql) => sql.includes("FROM geofences"), rows: [] }
+  ]);
+  const deps = {
+    db,
+    state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost, routeKey: "家 → 公司" })),
+    listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
+    listChargingForStats: async (_db, { sinceIso }) => (sinceIso <= "2026-10-14T15:30:00.000Z"
+      ? [{ id: 9, end_date: "2026-10-14T15:30:00", charge_energy_added: 41.2, geofence_name: "家庭充电桩" }]
+      : [])
+  };
+  const report = await buildReport({ kind: "daily", now, deps });
+  assert.equal(report.kpi.distanceKm, 42.5);
+  assert.equal(report.kpi.driveCount, 2);
+  assert.equal(report.kpi.totalCost, 6.32);
+  assert.equal(report.kpi.chargeKwh, 41.2);
+  assert.match(report.periodLabel, /日报/);
+  // 对比段：上周同日 50km/¥8 → 里程 -15% 电费 -21%；本月 100km/¥20
+  assert.equal(report.compare.kmDeltaPct, -15);
+  assert.equal(report.compare.costDeltaPct, -21);
+  assert.equal(report.compare.month.distanceKm, 100);
+  assert.equal(report.compare.month.totalCost, 20);
+  // 充电摘要：1 次 41.2 kWh 家庭充电桩，naive 15:30Z → 北京 23:30
+  assert.equal(report.chargeSummary.count, 1);
+  assert.equal(report.chargeSummary.kwh, 41.2);
+  assert.deepEqual(report.chargeSummary.locations, ["家庭充电桩"]);
+  assert.equal(report.chargeSummary.lastEndTime, "23:30");
+  // 洞察：最低胎压 2.62 + 低温
+  assert.equal(report.insights.tireMinBar, 2.62);
+  assert.equal(report.insights.avgTempC, 3.5);
+});
+
+test("report 调度器 daily：空日跳过 + 有数据投递 + 跨重启去重 + 不落归档", async () => {
+  useMemoryStore();
+  const store = openStore({ file: ":memory:" });
+  const events = [];
+  const eventLog = { log(type, extra) { events.push({ type, extra }); } };
+  const emptyDeps = () => ({
+    db: makeFakeDb([{ match: () => true, rows: [] }]),
+    state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] } },
+    computeTripViews: async () => [],
+    listDrivesSql: () => ({ sql: "SELECT 1", params: [] }),
+    listChargingForStats: async () => []
+  });
+  const pushes = [];
+  const notifier = { dispatch: async (event) => { pushes.push(event); return { results: { feishu: { sent: true } } }; } };
+  const state = {};
+  const scheduler = startReportScheduler({ store, buildDeps: emptyDeps, notifier, eventLog, state, setTimeoutImpl: () => 0 });
+  scheduler.stop();
+
+  // 昨日无行程无充电 → 跳过 + daily.skipped 事件
+  const empty = await scheduler.runKind("daily");
+  assert.equal(empty, null);
+  assert.ok(events.some((e) => e.type === "report.daily.skipped"));
+
+  // 有数据 → 投递扁平字段 + 不写归档 + 记 dailyLastRun
+  const richDeps = () => ({
+    db: makeFakeDb([
+      { match: (sql) => sql.includes("FROM drives d WHERE"), rows: [{ avg_temp: 20, idle_ratio: 0.05, tire_min: 3.0 }] },
+      { match: (sql) => sql.includes("charging_processes"), rows: [{ id: 9, end_date: "2026-10-14T15:30:00", charge_energy_added: 10, geofence_name: "家" }] },
+      { match: (sql) => sql.includes("FROM drives"), rows: [{ id: 1, distance_km: 30, duration_min: 50, cost: 2 }] },
+      { match: (sql) => sql.includes("FROM geofences"), rows: [] }
+    ]),
+    state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost, routeKey: "家 → 公司" })),
+    listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
+    listChargingForStats: async () => []
+  });
+  const scheduler2 = startReportScheduler({ store, buildDeps: richDeps, notifier, eventLog, state, setTimeoutImpl: () => 0 });
+  scheduler2.stop();
+  const sent = await scheduler2.runKind("daily");
+  assert.ok(sent && sent.id === null); // 日报不落归档表
+  assert.ok(pushes[0].kpi && pushes[0].dateLabel && pushes[0].type === "daily");
+  assert.equal(store.listReportSnapshots("daily", 10).length, 0);
+  const dayKey = pushes[0] && sent.report.periodStart.slice(0, 10);
+  assert.equal(state.dailyLastRun, dayKey);
+  // 同日再触发（跨重启场景）→ 去重
+  const dup = await scheduler2.runKind("daily");
+  assert.equal(dup, null);
+  assert.equal(pushes.length, 1);
+});
+
+test("matrix + Notifier daily：六事件矩阵往返 + 日报标题正文渲染（核心行/对比/异常）", async () => {
+  useMemoryStore();
+  // defaultMatrix 含 daily 默认关（feishu on 对齐其他事件）
+  const dm = defaultMatrix();
+  assert.ok(dm.daily);
+  assert.deepEqual(dm.daily, { webpush: false, telegram: false, feishu: true });
+  // v2 矩阵往返保留 daily
+  const rt = matrixFromRules({ matrix: { daily: { webpush: true, telegram: false, feishu: false } } });
+  assert.deepEqual(rt.daily, { webpush: true, telegram: false, feishu: false });
+
+  const sent = [];
+  const feishu = { id: "feishu", enabled: () => true, status: async () => ({}), send: async (msg) => { sent.push(msg); return { sent: true }; } };
+  const state = { pushRules: { matrix: { daily: { webpush: false, telegram: false, feishu: true } } } };
+  const notifier = createNotifier({ state, feishu, telegram: null });
+  await notifier.dispatch({
+    type: "daily",
+    dateLabel: "10-14",
+    kpi: { distanceKm: 42.5, totalCost: 6.32, saved: 21.5, driveCount: 2, energyKwh: 4, chargeKwh: 41.2, parkingLoss: { kwh: 0.9, cost: 0.45 } },
+    compare: { kmDeltaPct: -15, costDeltaPct: -21, month: { distanceKm: 100, totalCost: 20 } },
+    chargeSummary: { count: 1, kwh: 41.2, locations: ["家庭充电桩"], lastEndTime: "23:30" },
+    insights: { tireMinBar: 2.62, avgTempC: 3.5, kwhPer100km: 15.4, idlePct: 28 },
+    topRoute: "家 → 公司"
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].title, "昨日用车日报 · 10-14");
+  const body = sent[0].body;
+  assert.match(body, /📈 昨日 42\.5 km · ¥6\.32 · 省 ¥21\.5/);
+  assert.match(body, /🚗 2 次 · 4 kWh · 家 → 公司/);
+  assert.match(body, /⚡ 充电 41\.2 kWh · 1 次 · 家庭充电桩 · 至 23:30/);
+  assert.match(body, /📊 较上周同日 里程 -15% · 电费 -21%/);
+  assert.match(body, /📅 本月累计 100 km · ¥20/);
+  assert.match(body, /🛞 四轮最低胎压 2\.62 bar/);
+  assert.match(body, /🌡 3\.5°C 低温，能耗 15\.4 kWh\/100km 偏高/);
+  assert.match(body, /🚦 怠速占比 28%/);
+  assert.match(body, /🌙 驻车损耗 0\.9 kWh/);
+  // 正文行数约束（~10 行内）
+  assert.ok(body.split("\n").length <= 10, `body lines = ${body.split("\n").length}`);
+});

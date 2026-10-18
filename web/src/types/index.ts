@@ -251,7 +251,7 @@ export interface LedgerSummary {
 }
 
 export type PushChannelId = 'webpush' | 'telegram' | 'feishu'
-export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'weekly' | 'monthly'
+export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly'
 
 export interface PushMatrix {
   [event: string]: { [channel: string]: boolean }
@@ -260,6 +260,15 @@ export interface PushMatrix {
 export interface PushRulesV2 {
   matrix: PushMatrix
   weeklyReportDay: number
+}
+
+/** BYO 模型配置（GET /api/ai/config 回显；apiKey 永不回传明文，只给别名） */
+export interface AiConfig {
+  enabled: boolean
+  baseUrl: string
+  model: string
+  hasKey: boolean
+  keyAlias: string | null
 }
 
 export interface ChannelStatus {

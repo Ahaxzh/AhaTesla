@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell, BellRing, CheckCircle2, Link2, Lock, Send, Smartphone, XCircle } from 'lucide-react'
+import { Bell, BellRing, CheckCircle2, Link2, Lock, RefreshCw, Send, Smartphone, XCircle } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { useToast } from '@/components/Toast'
@@ -15,37 +15,91 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return output
 }
 
-/** Web Push（US-11）：HTTPS 前置检测（AC-11.0 置灰）+ 订阅 + 测试 */
+/** PWA 环境探测:iOS Safari 判定(含 iPadOS 13+ 伪装 Mac 触点暴露)+ 是否已从主屏幕独立打开 */
+function detectPwaEnv(): { isIOS: boolean; isStandalone: boolean } {
+  if (typeof navigator === 'undefined') return { isIOS: false, isStandalone: false }
+  const ua = navigator.userAgent || ''
+  const maxTouchPoints = (navigator as Navigator & { maxTouchPoints?: number }).maxTouchPoints ?? 0
+  const isIOS = /iphone|ipad|ipod/i.test(ua) || (/macintosh/i.test(ua) && maxTouchPoints > 1)
+  const standaloneByDisplayMode =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(display-mode: standalone)').matches
+  const standaloneByNavigator = (navigator as Navigator & { standalone?: boolean }).standalone === true
+  return { isIOS, isStandalone: standaloneByDisplayMode || standaloneByNavigator }
+}
+
+/** Web Push（US-11）：HTTPS 前置检测（AC-11.0 置灰）+ iOS 安装引导 + 订阅 + 自愈重订 + 测试 */
 function WebPushCard({ https }: { https: boolean }) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const { data: channels } = useQuery({ queryKey: ['channels'], queryFn: api.channelStatus })
   const webpush = channels?.webpush
 
+  // iOS PWA 推送要求 ≥16.4 且从主屏幕打开;权限被拒后需到系统设置恢复
+  const [pwaEnv] = useState(detectPwaEnv)
+  const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
+  )
+
+  /** 订阅本设备并上报(手动开启与静默自愈共用) */
+  const subscribeDevice = async () => {
+    // 1) 确保 VAPID 密钥存在（后端生成，私钥加密落库）
+    const vapid = await api.webpushInitVapid()
+    // 2) 浏览器订阅
+    const reg = await navigator.serviceWorker.ready
+    const key = urlBase64ToUint8Array(vapid.publicKey)
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: key.buffer as ArrayBuffer,
+    })
+    const json = sub.toJSON()
+    // 3) 上报订阅
+    return api.webpushSubscribe({
+      endpoint: String(json.endpoint),
+      keys: { p256dh: String(json.keys?.p256dh ?? ''), auth: String(json.keys?.auth ?? '') },
+    })
+  }
+
   const enablePush = useMutation({
-    mutationFn: async () => {
-      // 1) 确保 VAPID 密钥存在（后端生成，私钥加密落库）
-      const vapid = await api.webpushInitVapid()
-      // 2) 浏览器订阅
-      const reg = await navigator.serviceWorker.ready
-      const key = urlBase64ToUint8Array(vapid.publicKey)
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: key.buffer as ArrayBuffer,
-      })
-      const json = sub.toJSON()
-      // 3) 上报订阅
-      return api.webpushSubscribe({
-        endpoint: String(json.endpoint),
-        keys: { p256dh: String(json.keys?.p256dh ?? ''), auth: String(json.keys?.auth ?? '') },
-      })
-    },
+    mutationFn: subscribeDevice,
     onSuccess: () => {
       toast('Web Push 已开启，本设备将收到通知', 'success')
       void queryClient.invalidateQueries({ queryKey: ['channels'] })
     },
     onError: (err) => toast(err.message, 'error'),
   })
+
+  // 静默自愈:权限已授予但本地订阅缺失/过期(浏览器会淘汰旧订阅)时自动重订,不打扰用户
+  const resubscribe = useMutation({
+    mutationFn: subscribeDevice,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['channels'] })
+    },
+    onError: () => {
+      /* 静默:自愈失败留待用户手动开启时兜底 */
+    },
+  })
+
+  useEffect(() => {
+    if (!https || permission !== 'granted') return
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready
+        const sub = await reg.pushManager.getSubscription()
+        const expired = sub?.expirationTime != null && sub.expirationTime < Date.now()
+        if (!cancelled && (!sub || expired)) resubscribe.mutate()
+      } catch (e) {
+        /* 静默 */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [https, permission])
 
   const test = useMutation({
     mutationFn: api.webpushTest,
@@ -55,6 +109,9 @@ function WebPushCard({ https }: { https: boolean }) {
 
   // AC-11.0：仅按 HTTPS 判定置灰（订阅失败由 mutation 错误提示兜底）
   const disabled = !https
+  // iOS 未安装到主屏幕时无法授权通知(订阅按钮禁用,给安装引导)
+  const iosNeedsInstall = pwaEnv.isIOS && !pwaEnv.isStandalone
+  const permissionDenied = permission === 'denied'
   const subscriberCount = webpush?.subscriberCount ?? 0
 
   return (
@@ -88,6 +145,46 @@ function WebPushCard({ https }: { https: boolean }) {
         <div className="flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3.5 text-xs leading-5 text-amber-400" data-testid="webpush-https-warning">
           <Lock className="mt-0.5 h-4 w-4 shrink-0" />
           当前为非 HTTPS 环境，Web Push 不可用。建议配置反代启用 HTTPS，或优先绑定 Telegram / 飞书。
+        </div>
+      ) : iosNeedsInstall ? (
+        /* iOS Safari 未安装到主屏幕:16.4+ 才支持 PWA 推送,且必须从主屏打开才能授权 */
+        <div data-testid="webpush-ios-install-guide" className="space-y-3">
+          <div className="rounded-xl border border-sky-400/20 bg-sky-400/[0.06] p-3.5 text-xs leading-6 text-slate-300">
+            <div className="mb-1 font-medium text-sky-400">📱 先把 AhaTesla 安装到主屏幕（iOS 16.4+）</div>
+            <ol className="list-decimal space-y-0.5 pl-5">
+              <li>点 Safari 底部「分享」按钮</li>
+              <li>选「添加到主屏幕」</li>
+              <li>从主屏幕图标打开 AhaTesla，再回到这里开启通知</li>
+            </ol>
+          </div>
+          <button className="btn-primary w-full" disabled data-testid="webpush-enable">
+            <Bell className="h-4 w-4" />
+            安装到主屏幕后可开启
+          </button>
+        </div>
+      ) : permissionDenied ? (
+        /* 权限曾被拒绝:浏览器页面内无法再弹窗,必须去系统/站点设置恢复 */
+        <div className="space-y-3" data-testid="webpush-permission-denied">
+          <div className="flex items-start gap-2.5 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3.5 text-xs leading-6 text-amber-400">
+            <Bell className="mt-0.5 h-4 w-4 shrink-0" />
+            {pwaEnv.isIOS ? (
+              <span>
+                通知权限已被拒绝。请到 <b>系统设置 → 通知 → AhaTesla</b> 打开「允许通知」，然后回到这里重新检测。
+              </span>
+            ) : (
+              <span>
+                通知权限已被拒绝。请在浏览器地址栏左侧的站点设置中把通知改为「允许」，然后回到这里重新检测。
+              </span>
+            )}
+          </div>
+          <button
+            className="btn-ghost w-full"
+            onClick={() => setPermission(typeof Notification !== 'undefined' ? Notification.permission : 'unsupported')}
+            data-testid="webpush-permission-recheck"
+          >
+            <RefreshCw className="h-4 w-4" />
+            我已开启，重新检测
+          </button>
         </div>
       ) : (
         <div className="flex gap-2.5">

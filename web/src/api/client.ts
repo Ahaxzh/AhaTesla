@@ -16,6 +16,7 @@ import type {
   PricingHistoryEntry,
   PushRules,
   PushRulesV2,
+  AiConfig,
   RecalcJob,
   ReportDetail,
   ReportListItem,
@@ -169,6 +170,11 @@ export const api = {
   testTelegram: () => post<{ ok: boolean }>('/api/channels/telegram/test'),
   pushRulesV2: () => get<PushRulesV2>('/api/push-rules'),
   setPushRulesV2: (payload: PushRulesV2) => put<PushRulesV2>('/api/push-rules', payload),
+  // ---- m4c：BYO 模型（OpenAI 兼容，密钥服务端加密，回显只给别名） ----
+  aiConfig: () => get<AiConfig>('/api/ai/config'),
+  saveAiConfig: (payload: { enabled: boolean; baseUrl: string; model: string; apiKey?: string }) =>
+    put<{ ok: boolean }>('/api/ai/config', payload),
+  aiTest: () => post<{ ok: boolean; preview?: string; error?: string }>('/api/ai/test'),
   reports: () => get<{ items: ReportListItem[] }>('/api/reports'),
   reportDetail: (id: number | string) => get<ReportDetail>(`/api/reports/${id}`),
   generateReport: (type: 'weekly' | 'monthly') => post<{ ok: boolean; id: number }>('/api/reports/generate', { type }),

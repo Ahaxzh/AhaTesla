@@ -93,16 +93,26 @@ export const mockChannelStatus = {
   feishu: { enabled: true, connected: true, appAlias: 'cli_test', lastEventAt: '2026-10-12T10:00:00+08:00' },
 }
 
-// v2 推送矩阵（B4：5 事件 × 3 渠道）
+// v2 推送矩阵（m4c：6 事件 × 3 渠道）
 export const mockPushMatrix = {
   matrix: {
     tripEnd: { webpush: true, telegram: false, feishu: true },
     chargingStart: { webpush: false, telegram: false, feishu: false },
     chargingDone: { webpush: true, telegram: false, feishu: true },
+    daily: { webpush: true, telegram: false, feishu: false },
     weekly: { webpush: false, telegram: false, feishu: true },
     monthly: { webpush: false, telegram: false, feishu: true },
   },
   weeklyReportDay: 1,
+}
+
+// m4c：BYO 模型配置（GET 回显不含明文密钥）
+export const mockAiConfig = {
+  enabled: false,
+  baseUrl: '',
+  model: '',
+  hasKey: false,
+  keyAlias: null,
 }
 
 export const mockTimeline = {
@@ -235,6 +245,13 @@ export const defaultHandlers = [
   http.post('/api/channels/feishu/test', () => HttpResponse.json({ ok: true, message: '测试卡片已发送' })),
   http.get('/api/push-rules', () => HttpResponse.json(mockPushMatrix)),
   http.put('/api/push-rules', async ({ request }) => HttpResponse.json(await request.json())),
+  http.get('/api/ai/config', () => HttpResponse.json(mockAiConfig)),
+  http.put('/api/ai/config', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+    return HttpResponse.json({ ok: true, ...body })
+  }),
+  http.post('/api/ai/test', () =>
+    HttpResponse.json({ ok: true, preview: '昨晚到家充电 41 度，谷电花费 12.3 元，较油车省下 28 元。' })),
   http.get('/api/system/status', () => HttpResponse.json(mockSystemStatus)),
   http.get('/api/system/events', () => HttpResponse.json(mockEvents)),
 ]
