@@ -8,7 +8,7 @@
 //
 // deliveryMs 埋点：报告生成时刻 → 各渠道送达时刻差，写事件日志（GA-12）。
 import { isoFromTeslaMate, round, finiteNumber } from "./util.mjs";
-import { saveState } from "./state.mjs";
+import { saveState, getStore } from "./state.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -187,6 +187,7 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
   // ---- 日报专属：上周同日对比 + 本月累计 + 充电摘要（m4c-c1） ----
   let compare = null;
   let chargeSummary = null;
+  let plugHint = null;
   if (kind === "daily") {
     compare = await windowStats(deps, new Date(start.getTime() - 7 * DAY_MS), new Date(end.getTime() - 7 * DAY_MS))
       .then((lastWeek) => {
@@ -202,6 +203,26 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
         });
       }).catch(() => null);
     chargeSummary = summarizeCharging(inWindow);
+    // P1-e 今夜插枪提醒：配了 TOU 谷段且昨日无充电 → 提示谷价窗口
+    if (!chargeSummary || chargeSummary.count === 0) {
+      plugHint = await cheapestTouHint(deps).catch(() => null);
+    }
+  }
+
+  // ---- 月报专属：年度累计（P1-f YTD） ----
+  let ytd = null;
+  if (kind === "monthly") {
+    try {
+      const yearStart = new Date(start.getFullYear(), 0, 1);
+      const w = await windowStats(deps, yearStart, end);
+      if (w.distanceKm > 0 || w.totalCost > 0) {
+        ytd = {
+          distanceKm: w.distanceKm,
+          totalCost: w.totalCost,
+          saved: round(w.distanceKm * perKm - w.totalCost, 2)
+        };
+      }
+    } catch { /* YTD 失败不影响月报本体 */ }
   }
 
   return {
@@ -226,9 +247,34 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
     insights,
     ...(compare ? { compare } : {}),
     ...(chargeSummary ? { chargeSummary } : {}),
+    ...(plugHint ? { plugHint } : {}),
+    ...(ytd ? { ytd } : {}),
     baselineNote: `对比基准：${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L`,
-    closing: buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss })
+    closing: buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss, kind, ytd })
   };
+}
+
+/** P1-e：找最便宜的 TOU 谷段提示（geofences + kv pricing:location-tou:<id>），无则 null */
+async function cheapestTouHint(deps) {
+  const { db } = deps;
+  if (!db) return null;
+  const geofences = await db.query("SELECT g.id, g.name FROM geofences g ORDER BY g.name ASC").catch(() => []);
+  let best = null;
+  try {
+    const store = getStore();
+    for (const g of geofences) {
+      const raw = store.kvGet?.(`pricing:location-tou:${g.id}`);
+      if (!raw) continue;
+      const tou = JSON.parse(raw);
+      if (tou?.offPeakStart && finiteNumber(tou.offPeakRate) != null) {
+        if (!best || tou.offPeakRate < best.offPeakRate) {
+          best = { offPeakStart: tou.offPeakStart, offPeakRate: finiteNumber(tou.offPeakRate) };
+        }
+      }
+    }
+  } catch { return null; }
+  if (!best) return null;
+  return `今晚 ${best.offPeakStart} 后插枪充电享谷价 ¥${Number(best.offPeakRate).toFixed(2)}/kWh`;
 }
 
 /** 窗口内行程里程/电费聚合（日报对比段复用账本口径的 computeTripViews） */
@@ -260,12 +306,15 @@ function summarizeCharging(rows) {
   return { count: rows.length, kwh, locations: names.slice(0, 2), lastEndTime };
 }
 
-/** v2.2 结语：核心数字 + 洞察要点（温度/胎压/拥堵/能耗） */
-function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss }) {
+/** v2.2 结语：核心数字 + 洞察要点（温度/胎压/拥堵/能耗）；月报附年度累计（P1-f） */
+function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss, kind, ytd }) {
   if (!(distanceKm > 0)) return "本期无行程记录";
   const lines = [
     `本期行驶 ${distanceKm} km · 电费 ¥${totalCost.toFixed(2)} · 较油车${saved >= 0 ? "省" : "多花"} ¥${Math.abs(saved).toFixed(2)}（每公里 ¥${(totalCost / Math.max(distanceKm, 0.1)).toFixed(2)}）`
   ];
+  if (kind === "monthly" && ytd) {
+    lines.push(`📈 年度至今 ${ytd.distanceKm} km · 电费 ¥${ytd.totalCost.toFixed(2)} · 较油车${ytd.saved >= 0 ? "省" : "多花"} ¥${Math.abs(ytd.saved).toFixed(2)}`);
+  }
   if (insights) {
     const bits = [];
     if (insights.kwhPer100km != null) bits.push(`平均能耗 ${insights.kwhPer100km} kWh/100km`);
@@ -315,7 +364,7 @@ export function nextReportRun(kind, now = new Date(), tz = "Asia/Shanghai") {
 }
 
 /** 日报 → 推送事件（扁平字段，push-channels.eventBody 消费；dateLabel = 昨日 M-DD） */
-function dailyEvent(report) {
+function dailyEvent(report, quietTrips = []) {
   const d = new Date(report.periodStart);
   const pad = (n) => String(n).padStart(2, "0");
   return {
@@ -326,7 +375,9 @@ function dailyEvent(report) {
     compare: report.compare ?? null,
     chargeSummary: report.chargeSummary ?? null,
     insights: report.insights ?? null,
-    topRoute: report.topRoutes?.[0]?.route ?? null
+    topRoute: report.topRoutes?.[0]?.route ?? null,
+    plugHint: report.plugHint ?? null,
+    quietTrips
   };
 }
 
@@ -356,11 +407,18 @@ export function startReportScheduler({
           return null;
         }
         state.dailyLastRun = dayKey;
+        // P1-a 静音消费：backlog 里的昨夜行程并入早报「昨夜」段，投递后清空
+        const quietTrips = Array.isArray(state.pushRules?.quietBacklog) ? state.pushRules.quietBacklog.slice() : [];
         try { saveState(state); } catch { /* 状态持久化失败不阻断推送 */ }
         const dispatchResult = await notifier.dispatch(
-          dailyEvent(report),
+          dailyEvent(report, quietTrips),
           { matrix: matrixForReport(state, kind) }
         );
+        if (quietTrips.length) {
+          state.pushRules.quietBacklog = [];
+          try { saveState(state); } catch { /* 同上 */ }
+          eventLog?.log("report.daily.quiet_merged", { count: quietTrips.length });
+        }
         const deliveryMs = Date.now() - t0;
         eventLog?.log("report.daily", { periodLabel: report.periodLabel, deliveryMs, results: dispatchResult.results });
         return { id: null, report, deliveryMs };

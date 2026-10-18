@@ -14,6 +14,28 @@
 
 import { getGeofences } from "./teslamate-queries.mjs";
 import { getAddresses } from "./teslamate-queries.mjs";
+import { listChargingForStats } from "./teslamate-queries.mjs";
+import { batchesFromChargingSessions, allocateDriveCosts, driveEnergyKwh, priceChargingSession } from "./pricing-ledger.mjs";
+import { getStore } from "./state.mjs";
+
+/** TOU 分时窗口表（与 ledger-routes 同源 kv pricing:location-tou:<id>），供计价复用 */
+function touOptionsFor(sessions) {
+  try {
+    const ids = [...new Set((sessions || []).map((s) => Number(s.geofence_id)).filter(Number.isFinite))];
+    if (!ids.length) return {};
+    const store = getStore();
+    const map = new Map();
+    for (const id of ids) {
+      const raw = store.kvGet?.(`pricing:location-tou:${id}`);
+      if (raw) {
+        try { map.set(id, JSON.parse(raw)); } catch { /* 坏数据忽略 */ }
+      }
+    }
+    return map.size ? { touByGeofenceId: map } : {};
+  } catch {
+    return {};
+  }
+}
 
 function finite(v) {
   const n = Number(v);
@@ -26,24 +48,30 @@ function round(v, digits = 1) {
   return Math.round(v * f) / f;
 }
 
-/** 行程事件富化：查各 drive 段的聚合指标 + 端点信息 */
-export async function enrichTripEndEvent(db, event) {
+/** 行程事件富化：查各 drive 段的聚合指标 + 端点信息。
+ *  opts（P1-b）：{defaultRate, defaultRateHistory} 提供时附加 FIFO 计价批次明细。 */
+export async function enrichTripEndEvent(db, event, opts = {}) {
   const ids = (event.segment_ids ?? []).map(Number).filter(Number.isInteger);
   if (!ids.length) return event;
 
   // 单查询拿全部维度（drives 聚合 + 端点坐标/地址/围栏 + positions 速度/温度/胎压）
   const rows = await db.query(`
     SELECT d.id,
+           d.start_date,
            d.distance::float8 AS distance_km,
            d.duration_min,
            d.outside_temp_avg::float8 AS temp_avg,
            d.power_max::float8 AS power_max_kw,
            d.start_address_id, d.end_address_id,
            d.start_geofence_id, d.end_geofence_id,
+           c.efficiency,
+           greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
+           greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
            sp.start_lat, sp.start_lng, ep.end_lat, ep.end_lng,
            agg.avg_speed, agg.max_speed, agg.idle_ratio, agg.min_temp,
            tp.fl, tp.fr, tp.rl, tp.rr
     FROM drives d
+    JOIN cars c ON c.id = d.car_id
     LEFT JOIN LATERAL (
       SELECT p.latitude::float8 AS start_lat, p.longitude::float8 AS start_lng
       FROM positions p WHERE p.drive_id = d.id ORDER BY p.date ASC, p.id ASC LIMIT 1
@@ -149,6 +177,39 @@ export async function enrichTripEndEvent(db, event) {
     || await nearestAddr(last.end_lat, last.end_lng)
     || null;
 
+  // P1-b 计价批次明细：FIFO 切片聚合到充电地点粒度（行程结算时点批次可能未全结算,
+  // 取当前已可用部分;任何失败静默省略字段——渲染端数据可得才显示）
+  let fifoBatches = null;
+  if (opts.defaultRate != null) {
+    try {
+      const sessions = await listChargingForStats(db, {});
+      const batches = batchesFromChargingSessions(sessions, touOptionsFor(sessions));
+      if (batches.length) {
+        const { allocations } = allocateDriveCosts({
+          drives: rows.map((r) => ({ id: r.id, start_at: r.start_date, estimated_kwh: driveEnergyKwh(r) })),
+          batches,
+          defaultRate: opts.defaultRate,
+          defaultRateHistory: opts.defaultRateHistory || []
+        });
+        const nameByCp = new Map(sessions.map((s) => [Number(s.id), s.geofence_name || null]));
+        const merged = new Map();
+        for (const alloc of allocations) {
+          for (const slice of alloc.slices || []) {
+            if (slice.source === "unpriced") continue;
+            const key = slice.source === "batch" ? `cp-${slice.batch_id}` : "default";
+            const label = slice.source === "batch"
+              ? (nameByCp.get(Number(String(slice.batch_id).replace(/^cp-/, ""))) || "充电批次")
+              : "默认电价";
+            const cur = merged.get(key) || { source: label, kwh: 0, price: slice.unit_price_cny_per_kwh };
+            cur.kwh = round(cur.kwh + slice.energy_kwh, 2);
+            merged.set(key, cur);
+          }
+        }
+        fifoBatches = [...merged.values()];
+      }
+    } catch { /* 批次不可得 → 不加字段 */ }
+  }
+
   return {
     ...event,
     distanceKm: round(totalKm, 1),
@@ -163,17 +224,20 @@ export async function enrichTripEndEvent(db, event) {
     tirePressure: tpRow ? { fl: tpRow.fl, fr: tpRow.fr, rl: tpRow.rl, rr: tpRow.rr } : null,
     startLabel,
     endLabel,
+    ...(fifoBatches && fifoBatches.length ? { fifoBatches } : {}),
   };
 }
 
-/** 充电完成事件富化：补温度/时段电价 */
+/** 充电完成事件富化：补温度/电量 + P1-d 同站近 5 次均价对比与提前中止标记 */
 export async function enrichChargingDoneEvent(db, event) {
   const id = Number(event.charging_process_id);
   if (!Number.isInteger(id)) return event;
   try {
     const rows = await db.query(`
-      SELECT c.end_battery_level, c.charge_energy_added::float8 AS added,
+      SELECT c.end_battery_level, cp.charge_energy_added::float8 AS added,
+             cp.geofence_id, cp.start_date, cp.end_date, cp.cost,
              g.name AS geofence_name,
+             g.cost_per_unit AS geofence_cost_per_unit, g.session_fee AS geofence_session_fee,
              (SELECT p.outside_temp::float8 FROM positions p
               WHERE p.date >= cp.start_date AND p.date <= cp.end_date
                 AND p.outside_temp IS NOT NULL ORDER BY p.id DESC LIMIT 1) AS temp_c
@@ -184,12 +248,77 @@ export async function enrichChargingDoneEvent(db, event) {
     `, [id]);
     const r = rows[0];
     if (!r) return event;
-    return {
+    const out = {
       ...event,
       locationName: r.geofence_name ?? event.locationName ?? null,
       tempC: finite(r.temp_c),
       endBattery: finite(r.end_battery_level),
     };
+    if (out.endBattery != null && out.endBattery < 80) out.endedEarly = true;
+
+    // P1-d 同站近 5 次有效均价对比（不含本次；分层计价:实付 > 围栏价/TOU > 默认价）
+    if (r.geofence_id != null) {
+      try {
+        const sessions = await listChargingForStats(db, {});
+        const opts = touOptionsFor(sessions);
+        const priceOf = (s) => priceChargingSession(s, null, opts)?.pricePerUnit ?? null;
+        const thisPrice = priceOf({ ...r, charge_energy_added: r.added });
+        const past = sessions
+          .filter((s) => Number(s.geofence_id) === Number(r.geofence_id) && Number(s.id) !== id)
+          .slice(-5)
+          .map(priceOf)
+          .filter((v) => v != null && v > 0);
+        if (thisPrice != null && thisPrice > 0 && past.length >= 2) {
+          const avg = past.reduce((s, v) => s + v, 0) / past.length;
+          out.priceCmpPct = round((thisPrice - avg) / avg * 100, 0);
+        }
+      } catch { /* 对比不可得 → 省略 */ }
+    }
+    return out;
+  } catch {
+    return event;
+  }
+}
+
+/** 充电开始事件富化（P1-c）：当前电量 + 同站近 5 次外推的预估时长/费用 */
+export async function enrichChargingStartEvent(db, event) {
+  const id = Number(event.charging_process_id);
+  if (!Number.isInteger(id)) return event;
+  try {
+    const rows = await db.query(`
+      SELECT cp.geofence_id, g.name AS location_name, g.cost_per_unit
+      FROM charging_processes cp
+      LEFT JOIN geofences g ON g.id = cp.geofence_id
+      WHERE cp.id = $1
+    `, [id]);
+    const r = rows[0];
+    if (!r) return event;
+    const out = { ...event };
+    if (r.location_name) out.locationName = r.location_name;
+
+    // 电量：最新有效 position 读数（充电刚开始即起点电量）
+    const p = await db.queryOne(
+      `SELECT p.battery_level::float8 AS bl FROM positions p WHERE p.battery_level IS NOT NULL ORDER BY p.id DESC LIMIT 1`
+    ).catch(() => null);
+    if (p && finite(p.bl) != null) out.batteryPct = Math.round(finite(p.bl));
+
+    // 同站近 5 次已结算会话外推：≥2 次才给预估（平均时长；固定单价 → 预估费用）
+    if (r.geofence_id != null) {
+      const past = await db.query(`
+        SELECT cp.charge_energy_added::float8 AS kwh, cp.duration_min::float8 AS dur
+        FROM charging_processes cp
+        WHERE cp.geofence_id = $1 AND cp.end_date IS NOT NULL AND cp.id <> $2
+        ORDER BY cp.start_date DESC LIMIT 5
+      `, [r.geofence_id, id]);
+      if (past.length >= 2) {
+        const avg = (f) => past.reduce((s, x) => s + (f(x) ?? 0), 0) / past.length;
+        const dur = Math.round(avg((x) => finite(x.dur)));
+        const kwh = avg((x) => finite(x.kwh));
+        const rate = finite(r.cost_per_unit);
+        out.estimate = `预计 ${dur} 分钟${rate != null && rate > 0 ? ` · ¥${Math.round(kwh * rate)}` : ""}`;
+      }
+    }
+    return out;
   } catch {
     return event;
   }

@@ -95,9 +95,11 @@
 - `POST /api/channels/bark/test` → {ok}
 
 ### 推送规则（矩阵化）
-- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu,wecom,ntfy,bark}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}}
-- `PUT /api/push-rules` {matrix} → {ok}
+- `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu,wecom,ntfy,bark}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}, quietHours:{enabled,start,end}}
+- `PUT /api/push-rules` {matrix, quietHours?} → {ok}
   - v1 为每事件单一 bool → v2 为 6 事件 × 6 渠道矩阵（P6 分组3 + m4b 三新渠道）；新渠道默认全关（用户显式开）；weeklyReportDay 并入 settings
+  - quietHours（P1，PUSH-DESIGN）：{enabled:boolean, start:'HH:MM', end:'HH:MM'}（北京时间，start>end 跨午夜；start==end 等效关闭）。仅约束 trip_end：命中时段不即时投递，摘要并入次日早报「🌙 昨夜静默行程」段。charging/日报/告警不受影响。默认 {enabled:false,start:'23:00',end:'07:00'}
+  - 正文富化（P1，字段由富化层注入、数据可得才显示）：trip_end 计价批次行 `🔋 计价批次`（fifoBatches>1）；charging_start 当前电量/预估行；charging_done 近 5 次同站均价对比行与 ⚠ 提前中止标题；daily 插枪提醒行（TOU 谷价）与昨夜静默段；monthly 年度累计行
   - `daily`（m4c-c1）：昨日用车日报，每日 08:00 推送；昨日无行程且无充电自动跳过；不落报告归档表
 
 ### 报告（v2 新增）

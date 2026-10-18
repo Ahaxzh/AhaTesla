@@ -9,12 +9,46 @@
 // secret.key 文件；明文不进日志、不进 API 回传、不进错误信息。
 
 import { createRequire } from "node:module";
-import { getStore, clearChannelSecret } from "./state.mjs";
+import { getStore, clearChannelSecret, saveState } from "./state.mjs";
 import { encryptSecret, decryptSecret } from "./secret-box.mjs";
 import { createFeishuChannel } from "./feishu.mjs";
 
 // ESM 下加载 CJS 的 web-push(直接 require 在 type:module 里是 ReferenceError)
 const nodeRequire = createRequire(import.meta.url);
+
+// ---- 静音时段（PUSH-DESIGN P1-a） ---------------------------------------------
+// 仅约束 trip_end（内容型）；charging/日报/告警不受影响。窗口按北京时间墙钟,
+// start>end 视为跨午夜（如 23:00→07:00）。
+
+const HM_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+export function inQuietHours(quietHours, now = new Date()) {
+  const qh = quietHours && quietHours.enabled ? quietHours : null;
+  if (!qh || !HM_RE.test(String(qh.start)) || !HM_RE.test(String(qh.end))) return false;
+  if (qh.start === qh.end) return false;
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hour12: false
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
+  const cur = Number(parts.hour === "24" ? "0" : parts.hour) * 60 + Number(parts.minute);
+  const [sh, sm] = qh.start.split(":").map(Number);
+  const [eh, em] = qh.end.split(":").map(Number);
+  const s = sh * 60 + sm;
+  const e = eh * 60 + em;
+  return s < e ? (cur >= s && cur < e) : (cur >= s || cur < e); // 跨午夜取并集
+}
+
+/** 静音摘取：只留早报「昨夜」段需要的紧凑字段 */
+function quietDigest(event) {
+  return {
+    at: event.ended_at || event.at || new Date().toISOString(),
+    startLabel: event.startLabel ?? null,
+    endLabel: event.endLabel ?? null,
+    distanceKm: event.distanceKm ?? null,
+    durationMin: event.durationMin ?? null,
+    costCny: event.costCny ?? null
+  };
+}
 
 // ---- 渠道配置读写（channel_secrets 表 + state.feishu 兼容层） ----------------
 
@@ -454,7 +488,7 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
     switch (event.type) {
       case "trip_end": return `行程结束 · ${ts}`;
       case "charging_start": return `开始充电 · ${ts}`;
-      case "charging_done": return `充电完成 · ${ts}`;
+      case "charging_done": return `${event.endedEarly ? "⚠ 充电提前中止" : "充电完成"} · ${ts}`;
       case "daily": return `昨日用车日报 · ${event.dateLabel || ts}`;
       case "weekly": return "每周用车周报";
       case "monthly": return "每月账本月报";
@@ -505,6 +539,13 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       }
       if (insights.length) lines.push(insights.join(" · "));
 
+      // P1-b 费用口径行：多批次 FIFO 计价时透明化来源（前 2 批，其余省略）
+      const fb = Array.isArray(event.fifoBatches) ? event.fifoBatches.filter((b) => b && b.kwh > 0) : [];
+      if (fb.length > 1) {
+        const head = fb.slice(0, 2).map((b) => `${b.source} ${b.kwh}kWh@¥${b.price}`).join(" · ");
+        lines.push(`🔋 计价批次 ${head}${fb.length > 2 ? " …" : ""}`);
+      }
+
       return lines.length ? lines.join("\n") : `行程已结束（${event.segment_ids?.length ?? 0} 段）`;
     }
     if (event.type === "charging_done") {
@@ -515,12 +556,20 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       if (parts.length) lines.push(`⚡ ${parts.join(" · ")}`);
       if (event.endBattery != null) lines.push(`🔋 已充至 ${Math.round(event.endBattery)}%`);
       if (event.locationName) lines.push(`📍 ${event.locationName}`);
+      if (event.priceCmpPct != null) {
+        // P1-d 与本站近 5 次平均单价对比（数据可得才出现）
+        const v = Math.round(event.priceCmpPct);
+        if (v !== 0) lines.push(`📊 较本站近 5 次均价 ${v > 0 ? "高" : "低"} ${Math.abs(v)}%`);
+      }
       if (event.tempC != null) lines.push(`🌡 充电时气温 ${event.tempC}°C`);
       return lines.length ? lines.join("\n") : `充电会话 #${event.charging_process_id ?? "-"} 已结束`;
     }
     if (event.type === "charging_start") {
+      // P1-c 富化：电量/预估由富化层注入（数据可得才显示，不硬造）
       const bits = [`🔌 充电开始`];
+      if (event.batteryPct != null) bits.push(`🔋 当前 ${Math.round(event.batteryPct)}%`);
       if (event.locationName) bits.push(`📍 ${event.locationName}`);
+      if (event.estimate) bits.push(`⏱ ${event.estimate}`);
       return bits.join("\n");
     }
     if (event.type === "daily") {
@@ -568,6 +617,24 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       if (pl && pl.kwh > 0.5) {
         lines.push(`🌙 驻车损耗 ${pl.kwh.toFixed(1)} kWh（¥${(pl.cost ?? 0).toFixed(2)}）`);
       }
+      // P1-e 今夜插枪提醒：TOU 用户且昨日无充电（report-engine 注入 plugHint）
+      if (event.plugHint) lines.push(`🔌 ${event.plugHint}`);
+      // P1-a 昨夜静音行程合并段（最多 3 条逐条，更多聚合计数）
+      const qt = Array.isArray(event.quietTrips) ? event.quietTrips : [];
+      if (qt.length) {
+        const hm = (iso) => {
+          try {
+            return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+          } catch { return ""; }
+        };
+        const item = (t) => {
+          const route = t.startLabel && t.endLabel ? `${t.startLabel}→${t.endLabel}` : t.endLabel ? `→${t.endLabel}` : "";
+          const nums = [t.distanceKm != null ? `${t.distanceKm}km` : null, t.costCny != null ? `¥${t.costCny}` : null].filter(Boolean).join(" ");
+          return [hm(t.at), route, nums].filter(Boolean).join(" ");
+        };
+        const shown = qt.slice(0, 3).map(item).filter(Boolean).join("；");
+        lines.push(`🌙 昨夜静默行程 ${shown}${qt.length > 3 ? ` 等 ${qt.length} 段` : ""}`);
+      }
       return lines.join("\n");
     }
     if (event.type === "weekly" || event.type === "monthly") return event.summary || "";
@@ -589,6 +656,17 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
    * 返回 {results: {channel: {sent, deliveryMs, reason}}}。
    */
   async function dispatch(event, { matrix } = {}) {
+    // P1-a 静音时段：trip_end 命中 → 摘要入 backlog，次日早报合并呈现（不丢弃）
+    if (event.type === "trip_end" && inQuietHours(state.pushRules?.quietHours)) {
+      const rules = state.pushRules;
+      const backlog = Array.isArray(rules.quietBacklog) ? rules.quietBacklog : [];
+      backlog.push(quietDigest(event));
+      while (backlog.length > 10) backlog.shift(); // 上限 10，最旧的先丢
+      rules.quietBacklog = backlog;
+      try { saveState(state); } catch { /* 持久化失败不阻断（内存 backlog 仍会被早报消费） */ }
+      eventLog?.log?.("push.quiet_deferred", { eventKey: event.eventKey ?? null, backlog: backlog.length });
+      return { results: {}, deferred: true };
+    }
     const rules = matrix ? { matrix } : state.pushRules;
     const m = matrixFromRules(rules);
     const ruleKey = { trip_end: "tripEnd", charging_start: "chargingStart", charging_done: "chargingDone", daily: "daily", weekly: "weekly", monthly: "monthly" }[event.type] || event.type;

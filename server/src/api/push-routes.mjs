@@ -190,7 +190,7 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
     // ---- 推送矩阵（B4） ------------------------------------------------------
     async getPushRules(ctx) {
       const matrix = notifier.matrix();
-      return { matrix, weeklyReportDay: state.pushRules.weeklyReportDay ?? 1 };
+      return { matrix, weeklyReportDay: state.pushRules.weeklyReportDay ?? 1, quietHours: state.pushRules.quietHours ?? { enabled: false, start: "23:00", end: "07:00" } };
     },
 
     async putPushRules(ctx) {
@@ -219,8 +219,27 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
         }
         state.pushRules.weeklyReportDay = day;
       }
+      if (body.quietHours !== undefined) {
+        // P1-a 静音时段：{enabled,start:'HH:MM',end:'HH:MM'}，start==end 视为关闭
+        const qh = body.quietHours;
+        if (typeof qh !== "object" || qh === null) {
+          throw new HttpError(400, "bad_request", "quietHours must be an object");
+        }
+        const hm = (v) => /^([01]?\d|2[0-3]):([0-5]\d)$/.test(String(v ?? ""));
+        if (qh.enabled !== undefined && typeof qh.enabled !== "boolean") {
+          throw new HttpError(400, "bad_request", "quietHours.enabled must be boolean");
+        }
+        if (!hm(qh.start) || !hm(qh.end)) {
+          throw new HttpError(400, "bad_request", "quietHours.start/end must be HH:MM");
+        }
+        state.pushRules.quietHours = {
+          enabled: qh.enabled === true,
+          start: String(qh.start),
+          end: String(qh.end)
+        };
+      }
       saveState(state);
-      return { matrix: notifier.matrix(), weeklyReportDay: state.pushRules.weeklyReportDay };
+      return { matrix: notifier.matrix(), weeklyReportDay: state.pushRules.weeklyReportDay, quietHours: state.pushRules.quietHours };
     },
 
     // ---- 报告（GA-11/18） -----------------------------------------------------

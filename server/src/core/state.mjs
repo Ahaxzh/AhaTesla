@@ -33,7 +33,11 @@ export const DEFAULT_STATE = {
     chargingDone: true,
     weeklyReport: true,
     weeklyReportDay: 1,
-    monthlyReport: true
+    monthlyReport: true,
+    // P1 静音时段（PUSH-DESIGN §trip_end）：命中时段的 trip_end 不即时投递，
+    // 摘要进 quietBacklog（上限 10），次日早报「昨夜」段合并呈现后清空。
+    quietHours: { enabled: false, start: "23:00", end: "07:00" },
+    quietBacklog: []
   },
   feishu: {
     enabled: false,
