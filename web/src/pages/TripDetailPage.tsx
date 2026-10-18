@@ -19,10 +19,12 @@ import { RouteMap } from '@/components/RouteMap'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
+import { useI18n } from '@/i18n'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice } from '@/utils/format'
 
 /** 能效达成率标签（P3 模块1）：≥100% 绿 / <85% 橙 */
 function EfficiencyBadge({ ratio }: { ratio: number | null | undefined }) {
+  const { t } = useI18n()
   if (ratio == null) return null
   const pct = Math.round(ratio * 100)
   const good = ratio >= 1
@@ -35,12 +37,17 @@ function EfficiencyBadge({ ratio }: { ratio: number | null | undefined }) {
       data-testid="efficiency-badge"
     >
       <Zap className="h-3 w-3" />
-      {good ? `超预期续航（${pct}%）` : warn ? `激进驾驶/低温损耗（${pct}%）` : `能效达成 ${pct}%`}
+      {good
+        ? t('tripDetail.eff.good', '超预期续航（{pct}%）').replace('{pct}', String(pct))
+        : warn
+          ? t('tripDetail.eff.warn', '激进驾驶/低温损耗（{pct}%）').replace('{pct}', String(pct))
+          : t('tripDetail.eff.normal', '能效达成 {pct}%').replace('{pct}', String(pct))}
     </span>
   )
 }
 
 export default function TripDetailPage() {
+  const { t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const { data: trip, isLoading, isError, refetch } = useQuery({
     queryKey: ['trip', id],
@@ -52,11 +59,11 @@ export default function TripDetailPage() {
   return (
     <div>
       <div className="mb-5 flex items-center gap-3">
-        <Link to="/trips" className="btn-ghost !px-3" aria-label="返回行程列表">
+        <Link to="/trips" className="btn-ghost !px-3" aria-label={t('tripDetail.back', '返回行程列表')}>
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div>
-          <h1 className="page-title">行程详情</h1>
+          <h1 className="page-title">{t('tripDetail.title', '行程详情')}</h1>
           {trip && <p className="mt-0.5 text-xs text-slate-400">{fmtDateTime(trip.startAt)}</p>}
         </div>
       </div>
@@ -65,9 +72,9 @@ export default function TripDetailPage() {
         <div className="glass-card-flat" data-testid="trip-error">
           <EmptyState
             icon={AlertTriangle}
-            title="行程详情加载失败"
-            description="数据源暂时不可用，请稍后重试"
-            action={{ label: '重试', onClick: () => void refetch() }}
+            title={t('tripDetail.error.title', '行程详情加载失败')}
+            description={t('tripDetail.error.desc', '数据源暂时不可用，请稍后重试')}
+            action={{ label: t('charging.modal.retry', '重试'), onClick: () => void refetch() }}
           />
         </div>
       ) : isLoading || !trip ? (
@@ -79,16 +86,16 @@ export default function TripDetailPage() {
         <div className="space-y-4">
           {/* 模块1：基础概览 + 能效达成率 */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard icon={RouteIcon} label="里程" value={`${fmtKm(trip.distanceKm)} km`} />
-            <StatCard icon={Clock} label="时长" value={fmtDuration(trip.durationMin)} />
-            <StatCard icon={Zap} label="能耗" value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
-            <StatCard icon={Coins} label="电费" value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
+            <StatCard icon={RouteIcon} label={t('tripDetail.kpi.distance', '里程')} value={`${fmtKm(trip.distanceKm)} km`} />
+            <StatCard icon={Clock} label={t('tripDetail.kpi.duration', '时长')} value={fmtDuration(trip.durationMin)} />
+            <StatCard icon={Zap} label={t('tripDetail.kpi.energy', '能耗')} value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
+            <StatCard icon={Coins} label={t('tripDetail.kpi.cost', '电费')} value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <EfficiencyBadge ratio={trip.efficiency?.ratio} />
             {/* 口径标注（AC-6.3） */}
             <span className="text-[11px] text-slate-400" data-testid="energy-formula-note">
-              耗电口径：基于起止表显续航差 × 车辆效率系数
+              {t('tripDetail.energyNote', '耗电口径：基于起止表显续航差 × 车辆效率系数')}
             </span>
           </div>
 
@@ -101,21 +108,21 @@ export default function TripDetailPage() {
               <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Thermometer className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-xs text-slate-400">平均室外温度</div>
+                  <div className="text-xs text-slate-400">{t('tripDetail.env.avgTemp', '平均室外温度')}</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.avgTempC != null ? `${trip.environment.avgTempC.toFixed(1)}°C` : '--'}</div>
                 </div>
               </div>
               <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Wind className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-xs text-slate-400">空调耗电估算</div>
+                  <div className="text-xs text-slate-400">{t('tripDetail.env.ac', '空调耗电估算')}</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.acEstimateKwh != null ? fmtKwh(trip.environment.acEstimateKwh) : '--'}</div>
                 </div>
               </div>
               <div className="glass-card-flat flex items-center gap-3 p-4">
                 <GaugeIcon className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-xs text-slate-400">均速 / 最高</div>
+                  <div className="text-xs text-slate-400">{t('tripDetail.env.speed', '均速 / 最高')}</div>
                   <div className="num mt-0.5 text-sm text-slate-200">
                     {trip.environment.avgSpeedKmh?.toFixed(0) ?? '--'} / {trip.environment.maxSpeedKmh?.toFixed(0) ?? '--'} km/h
                   </div>
@@ -124,7 +131,7 @@ export default function TripDetailPage() {
               <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Layers className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-xs text-slate-400">GPS 采样点</div>
+                  <div className="text-xs text-slate-400">{t('tripDetail.env.gps', 'GPS 采样点')}</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
                 </div>
               </div>
@@ -135,23 +142,23 @@ export default function TripDetailPage() {
           {trip.fifo && (
             <section className="glass-card-flat p-5" data-testid="fifo-card">
               <h2 className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-200">
-                <Coins className="h-4 w-4 text-tesla" /> FIFO 电费分摊明细
+                <Coins className="h-4 w-4 text-tesla" /> {t('tripDetail.fifo.title', 'FIFO 电费分摊明细')}
               </h2>
               <p className="mb-4 text-[11px] text-slate-500">
-                批次单价已含充电损耗折算（实付总额 ÷ 电池净吸收电量）；总耗电量基于电池包净释放能量
+                {t('tripDetail.fifo.desc', '批次单价已含充电损耗折算（实付总额 ÷ 电池净吸收电量）；总耗电量基于电池包净释放能量')}
               </p>
 
               {trip.fifo.batches.length === 0 ? (
-                <p className="py-3 text-center text-xs text-slate-500">无可分摊批次</p>
+                <p className="py-3 text-center text-xs text-slate-500">{t('tripDetail.fifo.empty', '无可分摊批次')}</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-white/[0.06] text-left text-[11px] text-slate-500">
-                        <th className="py-2 pr-3 font-medium">批次（充电来源）</th>
-                        <th className="py-2 px-3 text-right font-medium">电量 kWh</th>
-                        <th className="py-2 px-3 text-right font-medium">单价</th>
-                        <th className="py-2 pl-3 text-right font-medium">金额</th>
+                        <th className="py-2 pr-3 font-medium">{t('tripDetail.fifo.batch', '批次（充电来源）')}</th>
+                        <th className="py-2 px-3 text-right font-medium">{t('tripDetail.fifo.kwh', '电量 kWh')}</th>
+                        <th className="py-2 px-3 text-right font-medium">{t('tripDetail.fifo.price', '单价')}</th>
+                        <th className="py-2 pl-3 text-right font-medium">{t('tripDetail.fifo.amount', '金额')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]" data-testid="fifo-batch-rows">
@@ -171,9 +178,9 @@ export default function TripDetailPage() {
               {trip.fifo.blendedPrice != null && (
                 <div className="num mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3 text-sm">
                   <span className="text-slate-400">
-                    本次总电费 <span className="ml-1 text-base font-semibold text-tesla">{fmtCny(trip.fifo.totalCost)}</span>
+                    {t('tripDetail.fifo.total', '本次总电费')} <span className="ml-1 text-base font-semibold text-tesla">{fmtCny(trip.fifo.totalCost)}</span>
                   </span>
-                  <span className="text-slate-500">综合单价 ¥{fmtPrice(trip.fifo.blendedPrice)}/kWh</span>
+                  <span className="text-slate-500">{t('tripDetail.fifo.blended', '综合单价 ¥{v}/kWh').replace('{v}', fmtPrice(trip.fifo.blendedPrice))}</span>
                 </div>
               )}
               {trip.fifo.exhaustedNote && (
@@ -188,15 +195,15 @@ export default function TripDetailPage() {
                   <div className="flex items-center justify-between text-sm">
                     <span className="flex items-center gap-1.5 text-slate-300">
                       <TrendingDown className="h-4 w-4 text-emerald-400" />
-                      油车对比
+                      {t('tripDetail.fuel.title', '油车对比')}
                     </span>
                     <span className="num font-medium text-emerald-400">
-                      净节省 {fmtCny(trip.fuelComparison.saved)}
+                      {t('tripDetail.fuel.saved', '净节省')} {fmtCny(trip.fuelComparison.saved)}
                       {trip.fuelComparison.savedPct != null && `（↓${trip.fuelComparison.savedPct}%）`}
                     </span>
                   </div>
                   <p className="num mt-2 text-[11px] text-slate-500">
-                    {trip.fuelComparison.baseline} → 对比油费 {fmtCny(trip.fuelComparison.fuelCost)}
+                    {trip.fuelComparison.baseline} → {t('tripDetail.fuel.cost', '对比油费')} {fmtCny(trip.fuelComparison.fuelCost)}
                   </p>
                 </div>
               )}
@@ -208,20 +215,20 @@ export default function TripDetailPage() {
             <div className="flex gap-3">
               <span className="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 border-emerald-400" aria-hidden />
               <div className="min-w-0">
-                <div className="text-[11px] text-slate-400">起点 · {fmtDateTime(trip.startAt)}</div>
+                <div className="text-[11px] text-slate-400">{t('tripDetail.start', '起点')} · {fmtDateTime(trip.startAt)}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-200">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                  <span className="break-all">{trip.startAddress || '起点（未命名位置）'}</span>
+                  <span className="break-all">{trip.startAddress || t('tripDetail.unnamedStart', '起点（未命名位置）')}</span>
                 </div>
               </div>
             </div>
             <div className="flex gap-3">
               <span className="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 border-tesla bg-tesla/40" aria-hidden />
               <div className="min-w-0">
-                <div className="text-[11px] text-slate-400">终点 · {fmtDateTime(trip.endAt)}</div>
+                <div className="text-[11px] text-slate-400">{t('tripDetail.end', '终点')} · {fmtDateTime(trip.endAt)}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-200">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-tesla" />
-                  <span className="break-all">{trip.endAddress || '终点（未命名位置）'}</span>
+                  <span className="break-all">{trip.endAddress || t('tripDetail.unnamedEnd', '终点（未命名位置）')}</span>
                 </div>
               </div>
             </div>

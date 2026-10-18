@@ -7,6 +7,7 @@ import { listDrivesSql, monthStartIso } from "../core/teslamate-queries.mjs";
 import { computeTripViews } from "./trips-routes.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
+import { isDemo } from "../core/demo-data.mjs";
 
 export const VERSION = "0.1.0";
 export const FUEL_REFERENCE = Object.freeze({
@@ -168,6 +169,7 @@ export function createSystemRoutes({ db, mqtt, eventLog, startedAt = () => Date.
       }
       return {
         teslamate,
+        ...(isDemo() ? { demo: true } : {}), // m4d：演示模式标记（前端可显示 Demo 徽标）
         uptime: Math.round((Date.now() - (typeof startedAt === "function" ? startedAt() : startedAt)) / 1000),
         version: VERSION
       };

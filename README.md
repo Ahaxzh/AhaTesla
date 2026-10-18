@@ -76,6 +76,17 @@ docker compose -f deploy/connect-compose.yml up -d --build
 
 任意 HTTPS 反代（如 NPM）指向 18500 → Safari 打开 → 分享 → 添加到主屏幕 → 推送页开启 Web Push（iOS ≥ 16.4）。反代配置见 [`deploy/NPM-SETUP.md`](deploy/NPM-SETUP.md)。
 
+### 先看看效果：Demo 模式（无需 Tesla、无需数据库）
+
+```bash
+AHATESLA_DEMO=1 PORT=18590 node server/src/index.mjs
+# 打开 http://127.0.0.1:18590 → /setup 注册管理员 → 仪表盘即有 90 天合成数据
+```
+
+- 行程/充电/账本/热力图/报表全部可浏览（数据为固定种子的合成数据，坐标刻意低精度）
+- 轨迹图为空态（Demo 不合成百万行轨迹点）；推送渠道与 AI 助手可**真实配置**体验
+- API 契约不变；`/api/system/status` 返回 `demo: true` 标记
+
 ## 架构
 
 ```

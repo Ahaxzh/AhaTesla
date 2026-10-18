@@ -6,11 +6,13 @@ import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { useToast } from '@/components/Toast'
+import { useI18n } from '@/i18n'
 import { fmtCny, fmtDateTime, fmtKm } from '@/utils/format'
 
 /** P5 报告页（/reports）：周报/月报卡片瀑布流 + 手动生成（调试） */
 export default function ReportsPage() {
   const { toast } = useToast()
+  const { t } = useI18n()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<'all' | 'weekly' | 'monthly'>('all')
   const { data, isLoading } = useQuery({ queryKey: ['reports'], queryFn: api.reports })
@@ -18,7 +20,7 @@ export default function ReportsPage() {
   const generate = useMutation({
     mutationFn: (type: 'weekly' | 'monthly') => api.generateReport(type),
     onSuccess: () => {
-      toast('报告已生成', 'success')
+      toast(t('rep.toast.generated', '报告已生成'), 'success')
       void queryClient.invalidateQueries({ queryKey: ['reports'] })
     },
     onError: (err) => toast(err.message, 'error'),
@@ -28,15 +30,15 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <PageHeader icon={FileBarChart} title="报告" subtitle="周报与月报归档（推送失败不丢报告本体）" />
+      <PageHeader icon={FileBarChart} title={t('rep.title', '报告')} subtitle={t('rep.subtitle', '周报与月报归档（推送失败不丢报告本体）')} />
 
       {/* 顶部：筛选 + 手动生成 */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1.5 rounded-xl bg-white/[0.04] p-1" role="tablist" data-testid="report-tabs">
           {([
-            ['all', '全部'],
-            ['weekly', '周报'],
-            ['monthly', '月报'],
+            ['all', t('rep.tab.all', '全部')],
+            ['weekly', t('rep.tab.weekly', '周报')],
+            ['monthly', t('rep.tab.monthly', '月报')],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -59,7 +61,7 @@ export default function ReportsPage() {
             data-testid="generate-weekly"
           >
             <Play className="h-3.5 w-3.5" />
-            生成本周周报
+            {t('rep.gen.weekly', '生成本周周报')}
           </button>
           <button
             className="btn-ghost !px-3 !py-1.5 text-xs"
@@ -68,7 +70,7 @@ export default function ReportsPage() {
             data-testid="generate-monthly"
           >
             <Play className="h-3.5 w-3.5" />
-            生成本月月报
+            {t('rep.gen.monthly', '生成本月月报')}
           </button>
         </div>
       </div>
@@ -83,8 +85,8 @@ export default function ReportsPage() {
         <div className="glass-card-flat">
           <EmptyState
             icon={FileText}
-            title="暂无报告"
-            description="每周一上午自动生成周报，每月 1 日生成月报；也可手动生成"
+            title={t('rep.empty.title', '暂无报告')}
+            description={t('rep.empty.desc', '每周一上午自动生成周报，每月 1 日生成月报；也可手动生成')}
           />
         </div>
       ) : (
@@ -102,18 +104,18 @@ export default function ReportsPage() {
                       r.type === 'weekly' ? 'bg-sky-400/10 text-sky-400' : 'bg-violet-400/10 text-violet-400'
                     }`}
                   >
-                    {r.type === 'weekly' ? '周报' : '月报'}
+                    {r.type === 'weekly' ? t('rep.badge.weekly', '周报') : t('rep.badge.monthly', '月报')}
                   </span>
                   <span className="num text-[10px] text-slate-400">{fmtDateTime(r.createdAt)}</span>
                 </div>
                 <div className="truncate text-sm font-medium text-slate-100">{r.periodLabel}</div>
                 <div className="num mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
-                  <span>里程 {fmtKm(r.distanceKm)} km</span>
-                  <span>电费 {fmtCny(r.totalCost)}</span>
+                  <span>{t('rep.kpi.km', '里程')} {fmtKm(r.distanceKm)} km</span>
+                  <span>{t('rep.kpi.cost', '电费')} {fmtCny(r.totalCost)}</span>
                   {r.saved != null && (
                     <span className="flex items-center gap-0.5 text-emerald-400">
                       <TrendingDown className="h-3 w-3" />
-                      省 {fmtCny(Math.abs(r.saved))}
+                      {t('rep.saved', '省')} {fmtCny(Math.abs(r.saved))}
                     </span>
                   )}
                 </div>

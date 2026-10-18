@@ -8,24 +8,26 @@ import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { useToast } from '@/components/Toast'
+import { useI18n } from '@/i18n'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice } from '@/utils/format'
 import type { ChargeDetail } from '@/types'
 
 const PAGE_SIZE = 20
 
-/** 费用来源三态标记（P4 视图A） */
+/** 费用来源三态标记（P4 视图A）— labelKey/labelZh 由调用点 t() 双语 */
 const COST_SOURCE_TAG = {
-  manual: { label: '已录入', cls: 'bg-emerald-400/15 text-emerald-400 border border-emerald-400/30' },
-  geofence: { label: '规则计价', cls: 'bg-sky-400/10 text-sky-400 border border-sky-400/25' },
-  default: { label: '默认估算', cls: 'bg-white/[0.05] text-slate-400 border border-white/[0.08]' },
-  unknown: { label: '未计价', cls: 'bg-white/[0.05] text-slate-400 border border-white/[0.08]' },
+  manual: { labelKey: 'charging.tag.manual', labelZh: '已录入', cls: 'bg-emerald-400/15 text-emerald-400 border border-emerald-400/30' },
+  geofence: { labelKey: 'charging.tag.geofence', labelZh: '规则计价', cls: 'bg-sky-400/10 text-sky-400 border border-sky-400/25' },
+  default: { labelKey: 'charging.tag.default', labelZh: '默认估算', cls: 'bg-white/[0.05] text-slate-400 border border-white/[0.08]' },
+  unknown: { labelKey: 'charging.tag.unknown', labelZh: '未计价', cls: 'bg-white/[0.05] text-slate-400 border border-white/[0.08]' },
 } as const
 
 /** 功率曲线（SVG，SoC 横轴 × kW 纵轴，峰值打点） */
 function PowerCurve({ detail }: { detail: ChargeDetail }) {
+  const { t } = useI18n()
   const pts = detail.powerCurve
   if (pts.length < 2) {
-    return <p className="py-6 text-center text-xs text-slate-500">该会话无功率采样数据</p>
+    return <p className="py-6 text-center text-xs text-slate-500">{t('charging.modal.noCurve', '该会话无功率采样数据')}</p>
   }
   const W = 560
   const H = 180
@@ -66,6 +68,7 @@ function PowerCurve({ detail }: { detail: ChargeDetail }) {
 }
 
 export default function ChargingPage() {
+  const { t } = useI18n()
   const [page, setPage] = useState(1)
   const [month, setMonth] = useState('')
   const [detailId, setDetailId] = useState<number | null>(null)
@@ -97,7 +100,7 @@ export default function ChargingPage() {
   const saveCost = useMutation({
     mutationFn: () => api.putChargeCost(detailId!, Number(costInput)),
     onSuccess: () => {
-      toast('实付电费已录入，账本将在后台重算', 'success')
+      toast(t('charging.toast.saved', '实付电费已录入，账本将在后台重算'), 'success')
       setCostInput('')
       void queryClient.invalidateQueries({ queryKey: ['charging'] })
       void queryClient.invalidateQueries({ queryKey: ['charging-detail', detailId] })
@@ -119,11 +122,11 @@ export default function ChargingPage() {
 
   return (
     <div>
-      <PageHeader icon={BatteryCharging} title="充电" subtitle="充电账本与站点统计" />
+      <PageHeader icon={BatteryCharging} title={t('charging.title', '充电')} subtitle={t('charging.subtitle', '充电账本与站点统计')} />
 
       {/* 月份筛选（P4 DatePicker 简化为原生 month input） */}
       <div className="mb-4 flex items-center gap-3">
-        <label htmlFor="charge-month" className="text-xs text-slate-400">月份筛选</label>
+        <label htmlFor="charge-month" className="text-xs text-slate-400">{t('charging.monthFilter', '月份筛选')}</label>
         <input
           id="charge-month"
           type="month"
@@ -134,7 +137,7 @@ export default function ChargingPage() {
         />
         {month && (
           <button className="btn-ghost !py-2 text-xs" onClick={() => setMonth('')} data-testid="month-clear">
-            清除
+            {t('charging.clear', '清除')}
           </button>
         )}
       </div>
@@ -142,9 +145,9 @@ export default function ChargingPage() {
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3" data-testid="charge-stats">
         {stats ? (
           <>
-            <StatCard icon={Zap} label="本月充电量" value={fmtKwh(stats.totalKWh)} />
-            <StatCard icon={Coins} label="本月电费" value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
-            <StatCard icon={BatteryCharging} label="平均单价" value={`¥${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
+            <StatCard icon={Zap} label={t('charging.stat.kwh', '本月充电量')} value={fmtKwh(stats.totalKWh)} />
+            <StatCard icon={Coins} label={t('charging.stat.cost', '本月电费')} value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
+            <StatCard icon={BatteryCharging} label={t('charging.stat.price', '平均单价')} value={`¥${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
           </>
         ) : (
           <div className="glass-card-flat col-span-2 space-y-3 p-4 sm:col-span-3">
@@ -156,9 +159,9 @@ export default function ChargingPage() {
 
       {/* 按地点统计条形图（纯 CSS） */}
       <section className="glass-card-flat mb-4 p-5" data-testid="location-chart">
-        <h2 className="mb-4 text-sm font-medium text-slate-200">按地点统计（本月）</h2>
+        <h2 className="mb-4 text-sm font-medium text-slate-200">{t('charging.chart.title', '按地点统计（本月）')}</h2>
         {byLocation.length === 0 ? (
-          <EmptyState icon={MapPin} title="暂无地点数据" description="充电后按地点聚合的统计会显示在这里" />
+          <EmptyState icon={MapPin} title={t('charging.chart.empty.title', '暂无地点数据')} description={t('charging.chart.empty.desc', '充电后按地点聚合的统计会显示在这里')} />
         ) : (
           <div className="space-y-3.5">
             {byLocation.map((loc) => (
@@ -166,7 +169,7 @@ export default function ChargingPage() {
                 <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
                   <span className="truncate font-medium text-slate-200">{loc.name}</span>
                   <span className="num shrink-0 text-slate-400">
-                    {fmtKwh(loc.kwh)} · ¥{fmtPrice(loc.pricePerUnit)}/kWh · {loc.count} 次
+                    {fmtKwh(loc.kwh)} · ¥{fmtPrice(loc.pricePerUnit)}/kWh · {loc.count} {t('charging.chart.countUnit', '次')}
                   </span>
                 </div>
                 <div className="h-2.5 overflow-hidden rounded-full bg-white/[0.05]" role="presentation">
@@ -189,7 +192,7 @@ export default function ChargingPage() {
         <SkeletonList rows={6} />
       ) : !data || data.items.length === 0 ? (
         <div className="glass-card-flat">
-          <EmptyState icon={BatteryCharging} title="暂无充电记录" description="TeslaMate 记录到充电会话后会自动同步" />
+          <EmptyState icon={BatteryCharging} title={t('charging.list.empty.title', '暂无充电记录')} description={t('charging.list.empty.desc', 'TeslaMate 记录到充电会话后会自动同步')} />
         </div>
       ) : (
         <div>
@@ -209,7 +212,7 @@ export default function ChargingPage() {
                     </button>
                     <div className="flex shrink-0 items-center gap-2">
                       <span className={`rounded-full px-2 py-0.5 text-[11px] ${tag.cls}`} data-testid={`cost-source-${c.id}`}>
-                        {tag.label}
+                        {t(tag.labelKey, tag.labelZh)}
                       </span>
                       <span className="num text-sm font-semibold text-tesla">{fmtCny(c.costCny)}</span>
                     </div>
@@ -219,7 +222,7 @@ export default function ChargingPage() {
                     <span>{fmtDuration(c.durationMin)}</span>
                     <span>{fmtKwh(c.energyAddedKWh)}</span>
                     <span>¥{fmtPrice(c.pricePerUnit)}/kWh</span>
-                    <span>峰值 {c.powerMaxKw.toFixed(1)} kW</span>
+                    <span>{t('charging.peakPrefix', '峰值')} {c.powerMaxKw.toFixed(1)} kW</span>
                   </div>
                   <div className="mt-2.5 flex items-center gap-2">
                     <span className="num text-[11px] text-slate-400">{c.startBattery}%</span>
@@ -252,9 +255,9 @@ export default function ChargingPage() {
             {detailError ? (
               <EmptyState
                 icon={AlertTriangle}
-                title="详情加载失败"
-                description="数据源暂时不可用，请稍后重试"
-                action={{ label: '重试', onClick: () => void refetchDetail() }}
+                title={t('charging.modal.error.title', '详情加载失败')}
+                description={t('charging.modal.error.desc', '数据源暂时不可用，请稍后重试')}
+                action={{ label: t('charging.modal.retry', '重试'), onClick: () => void refetchDetail() }}
               />
             ) : detail ? (
               <>
@@ -265,52 +268,52 @@ export default function ChargingPage() {
                       {fmtDateTime(detail.startAt)} · {fmtDuration(detail.durationMin)}
                     </p>
                   </div>
-                  <button onClick={() => setDetailId(null)} aria-label="关闭" autoFocus className="btn-ghost !p-2" data-testid="charge-detail-close">
+                  <button onClick={() => setDetailId(null)} aria-label={t('charging.modal.close', '关闭')} autoFocus className="btn-ghost !p-2" data-testid="charge-detail-close">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
 
                 <div className="num mb-4 grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-xl bg-white/[0.04] p-3">
-                    <div className="text-[11px] text-slate-400">充入</div>
+                    <div className="text-[11px] text-slate-400">{t('charging.modal.energy', '充入')}</div>
                     <div className="mt-1 text-sm font-semibold text-white">{fmtKwh(detail.energyAddedKWh)}</div>
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
-                    <div className="text-[11px] text-slate-400">费用</div>
+                    <div className="text-[11px] text-slate-400">{t('charging.modal.cost', '费用')}</div>
                     <div className="mt-1 text-sm font-semibold text-tesla">{fmtCny(detail.costCny)}</div>
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
-                    <div className="text-[11px] text-slate-400">单价</div>
+                    <div className="text-[11px] text-slate-400">{t('charging.modal.price', '单价')}</div>
                     <div className="mt-1 text-sm font-semibold text-white">¥{fmtPrice(detail.pricePerUnit)}</div>
                   </div>
                 </div>
 
                 {/* 功率曲线 */}
                 <section className="mb-4">
-                  <h3 className="mb-2 text-xs font-medium text-slate-300">充电功率曲线</h3>
+                  <h3 className="mb-2 text-xs font-medium text-slate-300">{t('charging.modal.curve', '充电功率曲线')}</h3>
                   <PowerCurve detail={detail} />
                 </section>
 
                 {/* 桩端效率（数据未上报时隐藏） */}
                 {detail.efficiency && (
                   <section className="mb-4 rounded-xl bg-white/[0.03] p-4" data-testid="efficiency-card">
-                    <h3 className="mb-2 text-xs font-medium text-slate-300">充电损耗与真实效率</h3>
+                    <h3 className="mb-2 text-xs font-medium text-slate-300">{t('charging.eff.title', '充电损耗与真实效率')}</h3>
                     <div className="num grid grid-cols-3 gap-2 text-center text-xs">
                       <div>
-                        <div className="text-slate-500">桩端注入</div>
+                        <div className="text-slate-500">{t('charging.eff.meter', '桩端注入')}</div>
                         <div className="mt-1 text-slate-200">{detail.efficiency.meterKwh} kWh</div>
                       </div>
                       <div>
-                        <div className="text-slate-500">电池净吸收</div>
+                        <div className="text-slate-500">{t('charging.eff.battery', '电池净吸收')}</div>
                         <div className="mt-1 text-slate-200">{detail.efficiency.batteryKwh} kWh</div>
                       </div>
                       <div>
-                        <div className="text-slate-500">真实效率</div>
+                        <div className="text-slate-500">{t('charging.eff.ratio', '真实效率')}</div>
                         <div className="mt-1 font-semibold text-emerald-400">{(detail.efficiency.ratio * 100).toFixed(1)}%</div>
                       </div>
                     </div>
                     <p className="num mt-2 text-[11px] text-amber-400/80">
-                      耗散 {detail.efficiency.lossKwh} kWh（线损与电池散热）——「充进车的电」与「付钱买的电」的差额
+                      {t('charging.eff.loss', '耗散 {kwh} kWh（线损与电池散热）——「充进车的电」与「付钱买的电」的差额').replace('{kwh}', String(detail.efficiency.lossKwh))}
                     </p>
                   </section>
                 )}
@@ -318,11 +321,11 @@ export default function ChargingPage() {
                 {/* 录入实付电费（AC-7.6/7.1 第①层） */}
                 <section className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] p-4" data-testid="cost-override">
                   <h3 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-emerald-400">
-                    <Pencil className="h-3.5 w-3.5" /> 录入实付电费
+                    <Pencil className="h-3.5 w-3.5" /> {t('charging.override.title', '录入实付电费')}
                   </h3>
                   <p className="mb-2.5 text-[11px] text-slate-500">
-                    以发票/账单为准，保存后账本将按实际金额重算（最近 7 天内生效）
-                    {detail.overrideCost != null && <span className="ml-1 text-emerald-400">当前已录入 ¥{detail.overrideCost.toFixed(2)}</span>}
+                    {t('charging.override.desc', '以发票/账单为准，保存后账本将按实际金额重算（最近 7 天内生效）')}
+                    {detail.overrideCost != null && <span className="ml-1 text-emerald-400">{t('charging.override.current', '当前已录入 ¥{v}').replace('{v}', detail.overrideCost.toFixed(2))}</span>}
                   </p>
                   <div className="flex gap-2">
                     <input
@@ -331,7 +334,7 @@ export default function ChargingPage() {
                       min="0"
                       inputMode="decimal"
                       className="input-dark num flex-1"
-                      placeholder={detail.overrideCost != null ? String(detail.overrideCost) : '实付金额'}
+                      placeholder={detail.overrideCost != null ? String(detail.overrideCost) : t('charging.override.placeholder', '实付金额')}
                       value={costInput}
                       onChange={(e) => setCostInput(e.target.value)}
                       data-testid="cost-override-input"
@@ -342,7 +345,7 @@ export default function ChargingPage() {
                       disabled={saveCost.isPending || !costInput}
                       data-testid="cost-override-save"
                     >
-                      保存
+                      {t('charging.override.save', '保存')}
                     </button>
                   </div>
                 </section>

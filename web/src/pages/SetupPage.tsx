@@ -7,6 +7,7 @@ import { api } from '@/api/client'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/components/Toast'
 import { LogoMark } from '@/components/Logo'
+import { useI18n } from '@/i18n'
 import type { CarDiscoveryResult, DiscoveredCar, SetupCheckStep, SetupState } from '@/types'
 
 /**
@@ -16,11 +17,12 @@ import type { CarDiscoveryResult, DiscoveredCar, SetupCheckStep, SetupState } fr
  * 每一步皆可跳过；完成后 /setup 路由锁定（后端 403）。
  */
 
-const CHECK_LABELS: Record<string, string> = {
-  reachability: '网络可达',
-  auth: '数据库认证',
-  readonly: '只读安全校验',
-  cars: '车辆数据检索',
+/** 四级校验标签 — key 交给调用点 t() 双语 */
+const CHECK_LABELS: Record<string, { key: string; zh: string }> = {
+  reachability: { key: 'setup.check.reachability', zh: '网络可达' },
+  auth: { key: 'setup.check.auth', zh: '数据库认证' },
+  readonly: { key: 'setup.check.readonly', zh: '只读安全校验' },
+  cars: { key: 'setup.check.cars', zh: '车辆数据检索' },
 }
 
 const POLL_INTERVAL_MS = 2_000
@@ -30,6 +32,7 @@ type Mode = 'connect' | 'fullstack'
 
 export default function SetupPage() {
   const navigate = useNavigate()
+  const { t } = useI18n()
   const { refresh } = useAuth()
   const [step, setStep] = useState(1)
   const [setupState, setSetupState] = useState<SetupState | null>(null)
@@ -56,7 +59,7 @@ export default function SetupPage() {
       <div className="mb-6 flex flex-col items-center gap-2">
         <LogoMark size={44} />
         <div className="text-xl font-semibold tracking-tight text-white">
-          Aha<span className="text-tesla">Tesla</span> 初始化向导
+          Aha<span className="text-tesla">Tesla</span> {t('setup.wizard', '初始化向导')}
         </div>
       </div>
 
@@ -79,7 +82,8 @@ export default function SetupPage() {
 }
 
 function SetupProgress({ current }: { current: number }) {
-  const labels = ['管理员', '数据源', '账本', '通知']
+  const { t } = useI18n()
+  const labels = [t('setup.step.admin', '管理员'), t('setup.step.datasource', '数据源'), t('setup.step.ledger', '账本'), t('setup.step.notify', '通知')]
   return (
     <ol className="flex w-full max-w-md items-center gap-2 px-1" data-testid="setup-progress">
       {labels.map((label, i) => {
@@ -108,6 +112,7 @@ function SetupProgress({ current }: { current: number }) {
 // ---- Step 1 创建管理员（首位注册即管理员，AC-1.4/3.1）----
 
 function Step1Admin({ onDone }: { onDone: () => void }) {
+  const { t } = useI18n()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -134,11 +139,11 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
   return (
     <form onSubmit={onSubmit} className="glass-card space-y-4 p-6" data-testid="setup-admin-form" noValidate>
       <div>
-        <h2 className="text-lg font-semibold text-white">创建管理员账号</h2>
-        <p className="mt-1 text-xs text-slate-500">首位注册的用户自动成为管理员，注册完成后此入口自动关闭。</p>
+        <h2 className="text-lg font-semibold text-white">{t('setup.s1.title', '创建管理员账号')}</h2>
+        <p className="mt-1 text-xs text-slate-500">{t('setup.s1.desc', '首位注册的用户自动成为管理员，注册完成后此入口自动关闭。')}</p>
       </div>
       <div>
-        <label htmlFor="setup-username" className="mb-1.5 block text-xs font-medium text-slate-400">用户名</label>
+        <label htmlFor="setup-username" className="mb-1.5 block text-xs font-medium text-slate-400">{t('setup.s1.username', '用户名')}</label>
         <input
           id="setup-username"
           className="input-dark"
@@ -150,7 +155,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
         />
       </div>
       <div>
-        <label htmlFor="setup-password" className="mb-1.5 block text-xs font-medium text-slate-400">密码（≥8 位）</label>
+        <label htmlFor="setup-password" className="mb-1.5 block text-xs font-medium text-slate-400">{t('setup.s1.password', '密码（≥8 位）')}</label>
         <input
           id="setup-password"
           className="input-dark"
@@ -162,7 +167,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
         />
       </div>
       <div>
-        <label htmlFor="setup-confirm" className="mb-1.5 block text-xs font-medium text-slate-400">确认密码</label>
+        <label htmlFor="setup-confirm" className="mb-1.5 block text-xs font-medium text-slate-400">{t('setup.s1.confirm', '确认密码')}</label>
         <input
           id="setup-confirm"
           className="input-dark"
@@ -184,7 +189,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
         disabled={submitting}
         data-testid="setup-admin-submit"
       >
-        {submitting ? '创建中…' : '创建管理员并继续'}
+        {submitting ? t('setup.s1.creating', '创建中…') : t('setup.s1.submit', '创建管理员并继续')}
       </button>
     </form>
   )
@@ -193,6 +198,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
 // ---- Step 2 数据源接入（双模分支 + 四级校验 + 车辆发现）----
 
 function Step2Datasource({ onDone }: { onDone: () => void }) {
+  const { t } = useI18n()
   const { toast } = useToast()
   const [mode, setMode] = useState<Mode>('connect')
   const [host, setHost] = useState('')
@@ -379,8 +385,8 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
   return (
     <div className="glass-card space-y-5 p-6" data-testid="setup-datasource">
       <div>
-        <h2 className="text-lg font-semibold text-white">接入数据源</h2>
-        <p className="mt-1 text-xs text-slate-500">已有 TeslaMate？填数据库直连。新用户？用全栈部署。</p>
+        <h2 className="text-lg font-semibold text-white">{t('setup.s2.title', '接入数据源')}</h2>
+        <p className="mt-1 text-xs text-slate-500">{t('setup.s2.desc', '已有 TeslaMate？填数据库直连。新用户？用全栈部署。')}</p>
       </div>
 
       <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="接入模式">
@@ -392,7 +398,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           onClick={() => setMode('connect')}
           data-testid="setup-mode-connect"
         >
-          A · 我已有 TeslaMate
+          {t('setup.mode.a', 'A · 我已有 TeslaMate')}
         </button>
         <button
           type="button"
@@ -402,7 +408,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           onClick={() => setMode('fullstack')}
           data-testid="setup-mode-fullstack"
         >
-          B · 新用户全栈部署
+          {t('setup.mode.b', 'B · 新用户全栈部署')}
         </button>
       </div>
 
@@ -412,7 +418,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           {probing && <div className="skeleton h-14" data-testid="probe-skeleton" />}
           {!probing && candidates && candidates.length > 0 && (
             <div className="space-y-1.5" data-testid="probe-candidates">
-              <p className="text-xs font-medium text-slate-400">发现可达的 TeslaMate 数据库</p>
+              <p className="text-xs font-medium text-slate-400">{t('setup.discover.title', '发现可达的 TeslaMate 数据库')}</p>
               {candidates.map((c) => (
                 <button
                   key={`${c.host}:${c.port}`}
@@ -432,9 +438,9 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
 
           {/* b. 一键建只读账号：管理凭据仅本次使用，不落盘 */}
           <div className="space-y-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5" data-testid="auto-ro-panel">
-            <div className="text-xs font-medium text-slate-300">一键创建只读账号（推荐）</div>
+            <div className="text-xs font-medium text-slate-300">{t('setup.autoRo.title', '一键创建只读账号（推荐）')}</div>
             <p className="text-[11px] leading-relaxed text-slate-500">
-              用 TeslaMate 管理员凭据自动创建只读账号并填入下方表单；凭据仅本次使用，不落盘。
+              {t('setup.autoRo.desc', '用 TeslaMate 管理员凭据自动创建只读账号并填入下方表单；凭据仅本次使用，不落盘。')}
             </p>
             <details className="text-[11px] text-slate-500">
               <summary className="cursor-pointer select-none">密码在哪找？</summary>
@@ -442,11 +448,11 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
             </details>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label htmlFor="auto-ro-user" className="mb-1.5 block text-xs font-medium text-slate-400">TeslaMate 管理用户名</label>
+                <label htmlFor="auto-ro-user" className="mb-1.5 block text-xs font-medium text-slate-400">{t('setup.autoRo.user', 'TeslaMate 管理用户名')}</label>
                 <input id="auto-ro-user" data-testid="auto-ro-user" className="input-dark" value={adminUser} onChange={(e) => setAdminUser(e.target.value)} placeholder="teslamate" autoComplete="off" />
               </div>
               <div>
-                <label htmlFor="auto-ro-pwd" className="mb-1.5 block text-xs font-medium text-slate-400">管理密码</label>
+                <label htmlFor="auto-ro-pwd" className="mb-1.5 block text-xs font-medium text-slate-400">{t('setup.autoRo.pwd', '管理密码')}</label>
                 <input id="auto-ro-pwd" data-testid="auto-ro-pwd" className="input-dark" type="password" value={adminPwd} onChange={(e) => setAdminPwd(e.target.value)} placeholder="••••••" autoComplete="off" />
               </div>
             </div>
@@ -457,7 +463,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
               disabled={roBusy || !adminUser.trim() || !adminPwd || !host.trim()}
               onClick={onAutoRo}
             >
-              {roBusy ? '创建中…' : roDone ? '已创建 ✓' : '自动创建只读账号'}
+              {roBusy ? t('setup.autoRo.creating', '创建中…') : roDone ? t('setup.autoRo.done', '已创建 ✓') : t('setup.autoRo.button', '自动创建只读账号')}
             </button>
             {roFail && (
               <div className="space-y-2" data-testid="auto-ro-fail">
@@ -470,11 +476,11 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
                 <div className="flex gap-2">
                   {roFail.fallbackSql && (
                     <button type="button" data-testid="auto-ro-copy" className="btn-mini" onClick={copySql}>
-                      <Copy className="h-3.5 w-3.5" /> 复制 SQL
+                      <Copy className="h-3.5 w-3.5" /> {t('setup.autoRo.copySql', '复制 SQL')}
                     </button>
                   )}
                   <button type="button" data-testid="auto-ro-done" className="btn-mini" onClick={() => { setRoFail(null); setRoDone(true) }}>
-                    我已手工执行
+                    {t('setup.autoRo.doneBtn', '我已手工执行')}
                   </button>
                 </div>
               </div>
@@ -484,13 +490,13 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           {/* c. 连接表单（最终确认层，四级校验入口） */}
           <div className="grid grid-cols-[1fr_88px] gap-3">
             <Field id="setup-host" label="PostgreSQL Host" value={host} onChange={setHost} placeholder="127.0.0.1" />
-            <Field id="setup-port" label="端口" value={port} onChange={setPort} placeholder="5432" />
+            <Field id="setup-port" label={t('setup.field.port', '端口')} value={port} onChange={setPort} placeholder="5432" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field id="setup-db" label="库名" value={database} onChange={setDatabase} placeholder="teslamate" />
-            <Field id="setup-user" label="用户名（只读账号）" value={user} onChange={setUser} placeholder="ahatesla_ro" />
+            <Field id="setup-db" label={t('setup.field.db', '库名')} value={database} onChange={setDatabase} placeholder="teslamate" />
+            <Field id="setup-user" label={t('setup.field.user', '用户名（只读账号）')} value={user} onChange={setUser} placeholder="ahatesla_ro" />
           </div>
-          <Field id="setup-pwd" label="密码" type="password" value={password} onChange={setPassword} placeholder="只读账号密码" />
+          <Field id="setup-pwd" label={t('setup.field.pwd', '密码')} type="password" value={password} onChange={setPassword} placeholder="只读账号密码" />
 
           <button
             type="button"
@@ -499,7 +505,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
             onClick={onTest}
             data-testid="setup-test-connection"
           >
-            {checking ? '测试中…' : '测试并验证'}
+            {checking ? t('setup.checking', '测试中…') : t('setup.testConn', '测试并验证')}
           </button>
 
           {steps && (
@@ -512,7 +518,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
                     <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                   )}
                   <span>
-                    <span className="text-slate-200">{CHECK_LABELS[s.name] ?? s.name}</span>
+                    <span className="text-slate-200">{(CHECK_LABELS[s.name] && t(CHECK_LABELS[s.name].key, CHECK_LABELS[s.name].zh)) ?? s.name}</span>
                     {s.detail && <span className="block text-xs text-slate-500">{s.detail}</span>}
                   </span>
                 </li>
@@ -521,7 +527,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           )}
           {verified && (
             <p className="flex items-center gap-1.5 text-sm text-emerald-400" data-testid="setup-verified">
-              <ShieldCheck className="h-4 w-4" /> 校验通过，可保存接入
+              <ShieldCheck className="h-4 w-4" /> {t('setup.verified', '校验通过，可保存接入')}
             </p>
           )}
 
@@ -558,9 +564,9 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
         <div className="space-y-3" data-testid="setup-fullstack-panel">
           {/* m4a 轨道A：Tesla 登录引导（授权只在 TeslaMate，AhaTesla 不碰 Tesla 密码） */}
           <div className="space-y-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3.5" data-testid="tesla-login-guide">
-            <div className="text-xs font-medium text-slate-300">在 TeslaMate 中登录你的 Tesla 账号</div>
+            <div className="text-xs font-medium text-slate-300">{t('setup.tesla.title', '在 TeslaMate 中登录你的 Tesla 账号')}</div>
             <p className="text-[11px] leading-relaxed text-slate-500">
-              登录后 TeslaMate 开始同步车辆数据，本页会自动检测到车辆并继续，无需其他操作。
+              {t('setup.tesla.desc', '登录后 TeslaMate 开始同步车辆数据，本页会自动检测到车辆并继续，无需其他操作。')}
             </p>
             <span data-testid="setup-teslamate-link">
               <a
@@ -570,7 +576,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
                 className="inline-flex items-center gap-1.5 text-sm text-tesla hover:underline"
                 data-testid="tesla-login-link"
               >
-                打开 TeslaMate 登录页 <ExternalLink className="h-3.5 w-3.5" />
+                {t('setup.tesla.link', '打开 TeslaMate 登录页')} <ExternalLink className="h-3.5 w-3.5" />
               </a>
             </span>
             <p className="num text-[11px] text-slate-500">{teslamateUrl}</p>
@@ -586,7 +592,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           {saved && !discovery?.found && (
             <p className="flex items-center gap-2 text-sm text-slate-400" data-testid="setup-discovery-polling">
               <CircleDashed className="h-4 w-4 animate-spin text-tesla" />
-              正在等待车辆出现（TeslaMate 完成授权后自动发现）…
+              {t('setup.tesla.waiting', '正在等待车辆出现（TeslaMate 完成授权后自动发现）…')}
             </p>
           )}
         </div>
@@ -598,7 +604,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
         <div className="space-y-2" data-testid="setup-car-found">
           {multiCar ? (
             <>
-              <p className="text-sm text-slate-300">发现 {discovery.cars.length} 辆车，请选择主绑定车辆：</p>
+              <p className="text-sm text-slate-300">{t('setup.tesla.foundPrefix', '发现')} {discovery.cars.length} {t('setup.tesla.foundSuffix', '辆车，请选择主绑定车辆：')}</p>
               <div className="space-y-2" role="radiogroup" aria-label="车辆选择器" data-testid="setup-car-selector">
                 {discovery.cars.map((car) => (
                   <CarOption
@@ -626,7 +632,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           onClick={onSave}
           data-testid="setup-save-datasource"
         >
-          {saved ? '已保存' : '保存数据源'}
+          {saved ? t('setup.saved', '已保存') : t('setup.save', '保存数据源')}
         </button>
         <button
           type="button"
@@ -635,7 +641,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           onClick={onDone}
           data-testid="setup-next"
         >
-          下一步
+          {t('setup.next', '下一步')}
         </button>
       </div>
     </div>
@@ -691,22 +697,23 @@ function Field({
 // ---- Step 3 账本初始化（可跳过；电价/油车基准属既有设置页能力，此处只做预填提示）----
 
 function Step3Ledger({ onDone, onSkip }: { onDone: () => void; onSkip: () => void }) {
+  const { t } = useI18n()
   return (
     <div className="glass-card space-y-4 p-6" data-testid="setup-ledger">
       <div>
-        <h2 className="text-lg font-semibold text-white">账本初始化</h2>
-        <p className="mt-1 text-xs text-slate-500">可跳过——稍后在「电价」与「系统设置」中随时补配。</p>
+        <h2 className="text-lg font-semibold text-white">{t('setup.s3.title', '账本初始化')}</h2>
+        <p className="mt-1 text-xs text-slate-500">{t('setup.s3.desc', '可跳过——稍后在「电价」与「系统设置」中随时补配。')}</p>
       </div>
       <ul className="space-y-2 text-sm text-slate-300">
-        <li>· 默认电价：0.60 元/kWh（可在电价页修改）</li>
-        <li>· 油车对比基准：8.0 L/100km @ 8.20 元/L</li>
+        <li>· {t('setup.s3.defaultRate', '默认电价：0.60 元/kWh（可在电价页修改）')}</li>
+        <li>· {t('setup.s3.fuelBaseline', '油车对比基准：8.0 L/100km @ 8.20 元/L')}</li>
       </ul>
       <div className="flex gap-2">
         <button type="button" className="btn-ghost flex-1" onClick={onSkip} data-testid="setup-skip-ledger">
-          跳过
+          {t('setup.skip', '跳过')}
         </button>
         <button type="button" className="btn-primary flex-1" onClick={onDone} data-testid="setup-ledger-next">
-          好，继续
+          {t('setup.continue', '好，继续')}
         </button>
       </div>
     </div>
@@ -716,27 +723,28 @@ function Step3Ledger({ onDone, onSkip }: { onDone: () => void; onSkip: () => voi
 // ---- Step 4 通知渠道（可跳过；HTTPS 检测 AC-11.0）----
 
 function Step4Notify({ https, onDone, onSkip }: { https: boolean; onDone: () => void; onSkip: () => void }) {
+  const { t } = useI18n()
   return (
     <div className="glass-card space-y-4 p-6" data-testid="setup-notify">
       <div>
-        <h2 className="text-lg font-semibold text-white">通知渠道</h2>
-        <p className="mt-1 text-xs text-slate-500">可跳过——稍后在「推送」页配置 Web Push / Telegram / 飞书。</p>
+        <h2 className="text-lg font-semibold text-white">{t('setup.s4.title', '通知渠道')}</h2>
+        <p className="mt-1 text-xs text-slate-500">{t('setup.s4.desc', '可跳过——稍后在「推送」页配置 Web Push / Telegram / 飞书。')}</p>
       </div>
       {https ? (
         <button type="button" className="btn-primary w-full" onClick={onDone} data-testid="setup-enable-webpush">
-          一键开启 Web Push
+          {t('setup.s4.webpush', '一键开启 Web Push')}
         </button>
       ) : (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300" data-testid="setup-http-warning">
-          当前为非 HTTPS 环境，Web Push 不可用。建议配置反向代理启用 HTTPS，或优先绑定 Telegram / 飞书（AC-11.0）。
+          {t('push.webpush.https', '当前为非 HTTPS 环境，Web Push 不可用。建议配置反代启用 HTTPS，或优先绑定 Telegram / 飞书。')}
         </p>
       )}
       <div className="flex gap-2">
         <button type="button" className="btn-ghost flex-1" onClick={onSkip} data-testid="setup-skip-notify">
-          跳过
+          {t('setup.skip', '跳过')}
         </button>
         <button type="button" className="btn-primary flex-1" onClick={onDone} data-testid="setup-finish">
-          完成向导
+          {t('setup.finish', '完成向导')}
         </button>
       </div>
     </div>

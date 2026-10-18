@@ -19,6 +19,7 @@ import { loadSecretKey, dataDir } from "./core/secret-box.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 import { createDb } from "./core/db.mjs";
+import { isDemo, createDemoDb } from "./core/demo-data.mjs";
 import { loadState, saveState, getStore } from "./core/state.mjs";
 import { createEventLog } from "./core/events.mjs";
 import { createFeishuChannel } from "./core/feishu.mjs";
@@ -249,7 +250,9 @@ async function main() {
   const state = await bootstrap();
   // §7.1 事件日志落 SQLite（进程重启可回看）；getStore 顺带完成 JSON→SQLite 一次性迁移。
   const eventLog = createEventLog({ store: getStore() });
-  const db = createDb(DB_URL);
+  // AHATESLA_DEMO=1：不连 TeslaMate 库，全部查询由确定性种子数据应答（m4d 演示模式）
+  const db = isDemo() ? createDemoDb() : createDb(DB_URL);
+  if (isDemo()) log("DEMO MODE — AHATESLA_DEMO=1：数据为合成演示数据，未连接任何 TeslaMate 库");
 
   // 实例设置（GA-36）：货币/单位/时区/油车基准 —— kv 持久化，启动时恢复进 state
   {

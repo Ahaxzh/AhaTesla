@@ -7,11 +7,13 @@ import { PageHeader } from '@/components/PageHeader'
 import { Pagination } from '@/components/Pagination'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
+import { useI18n } from '@/i18n'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
 
 const PAGE_SIZE = 20
 
 export default function TripsPage() {
+  const { t } = useI18n()
   const [page, setPage] = useState(1)
   const today = useMemo(() => new Date(), [])
   const [from, setFrom] = useState('')
@@ -43,12 +45,16 @@ export default function TripsPage() {
 
   return (
     <div>
-      <PageHeader icon={Route} title="行程" subtitle={data ? `共 ${data.total} 条记录` : '行车记录'} />
+      <PageHeader
+        icon={Route}
+        title={t('trips.title', '行程')}
+        subtitle={data ? `${t('trips.subtitle.totalPrefix', '共')} ${data.total} ${t('trips.subtitle.totalSuffix', '条记录')}` : t('trips.subtitle.loading', '行车记录')}
+      />
 
       {/* 日期筛选 */}
       <div className="glass-card-flat mb-4 flex flex-wrap items-end gap-3 p-4" data-testid="trip-filter">
         <div>
-          <label htmlFor="filter-from" className="mb-1 block text-[11px] text-slate-400">开始日期</label>
+          <label htmlFor="filter-from" className="mb-1 block text-[11px] text-slate-400">{t('trips.filter.from', '开始日期')}</label>
           <input
             id="filter-from"
             type="date"
@@ -59,7 +65,7 @@ export default function TripsPage() {
           />
         </div>
         <div>
-          <label htmlFor="filter-to" className="mb-1 block text-[11px] text-slate-400">结束日期</label>
+          <label htmlFor="filter-to" className="mb-1 block text-[11px] text-slate-400">{t('trips.filter.to', '结束日期')}</label>
           <input
             id="filter-to"
             type="date"
@@ -76,7 +82,7 @@ export default function TripsPage() {
             onClick={() => applyFilter('', '')}
             data-testid="filter-clear"
           >
-            清除筛选
+            {t('trips.filter.clear', '清除筛选')}
           </button>
         )}
       </div>
@@ -87,8 +93,8 @@ export default function TripsPage() {
         <div className="glass-card-flat">
           <EmptyState
             icon={Route}
-            title="没有符合条件的行程"
-            description="调整日期范围，或等 TeslaMate 记录到新行程后刷新"
+            title={t('trips.empty.title', '没有符合条件的行程')}
+            description={t('trips.empty.desc', '调整日期范围，或等 TeslaMate 记录到新行程后刷新')}
           />
         </div>
       ) : (

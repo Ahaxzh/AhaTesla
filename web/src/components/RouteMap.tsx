@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { useI18n } from '@/i18n'
 
 /** 速度→颜色映射（km/h）：0 蓝 → 40 青 → 70 绿 → 100 黄 → 130+ 红 */
 function speedColor(kmh: number | null | undefined): string {
@@ -79,6 +80,7 @@ export function RouteMap({
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const layerRef = useRef<L.LayerGroup | null>(null)
+  const { t } = useI18n()
   const [hover, setHover] = useState<{ speed: number | null } | null>(null)
   const [satellite, setSatellite] = useState(false)
   const tileRef = useRef<L.TileLayer | null>(null)
@@ -235,46 +237,46 @@ export function RouteMap({
         <div
           className="absolute right-2 top-2 z-[1000] flex overflow-hidden rounded-xl border border-white/15 bg-[rgba(11,15,20,0.85)] text-[11px] font-medium"
           role="group"
-          aria-label="底图图层"
+          aria-label={t('tripDetail.map.layers', '底图图层')}
         >
           <button
             aria-pressed={!satellite}
             className={`px-3 py-1.5 transition ${!satellite ? 'bg-tesla text-white' : 'text-slate-300 hover:bg-white/[0.08]'}`}
             onClick={() => setSatellite(false)}
           >
-            标准
+            {t('tripDetail.map.standard', '标准')}
           </button>
           <button
             aria-pressed={satellite}
             className={`px-3 py-1.5 transition ${satellite ? 'bg-tesla text-white' : 'text-slate-300 hover:bg-white/[0.08]'}`}
             onClick={() => setSatellite(true)}
           >
-            卫星
+            {t('tripDetail.map.satellite', '卫星')}
           </button>
         </div>
       </div>
       {!showSpeedLegend && (
         <div className="border-t border-white/[0.06] px-3 py-1.5 text-right text-[10px] text-slate-500">
-          底图©高德
+          {t('tripDetail.map.attribution', '底图©高德')}
         </div>
       )}
       {showSpeedLegend && (
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-white/[0.06] px-3 py-2 text-[11px] text-slate-400" data-testid="route-speed-legend">
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-400" /> 起点
+            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-emerald-400" /> {t('tripDetail.start', '起点')}
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-tesla bg-tesla/40" /> 终点
+            <span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-tesla bg-tesla/40" /> {t('tripDetail.end', '终点')}
           </span>
           <span className="flex items-center gap-2">
-            <span>慢</span>
+            <span>{t('tripDetail.map.slow', '慢')}</span>
             <span
               className="inline-block h-2 w-28 rounded-full"
               style={{ background: 'linear-gradient(to right, rgb(56,130,246), rgb(34,211,238), rgb(52,211,153), rgb(250,204,21), rgb(239,68,68))' }}
             />
-            <span>快{maxSpeed != null ? `（最高 ${Math.round(maxSpeed)} km/h）` : ''}</span>
+            <span>{t('tripDetail.map.fast', '快')}{maxSpeed != null ? t('tripDetail.map.max', '（最高 {v} km/h）').replace('{v}', String(Math.round(maxSpeed))) : ''}</span>
           </span>
-          <span className="text-slate-500">悬停轨迹看速度 · 拖拽缩放 · 底图©高德</span>
+          <span className="text-slate-500">{t('tripDetail.map.hint', '悬停轨迹看速度 · 拖拽缩放 · 底图©高德')}</span>
         </div>
       )}
     </div>
