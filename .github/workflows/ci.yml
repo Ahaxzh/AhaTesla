@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test server
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test & build web
+        working-directory: web
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm test
+          npm run build
+
+# e2e(Playwright)依赖真实 TeslaMate 数据库与隔离实例,不在 CI 运行;
+# 本地跑法见 README「开发与测试」: bash scripts/run-e2e.sh
