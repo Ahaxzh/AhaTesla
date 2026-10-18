@@ -19,15 +19,15 @@
 没有"一条命令能装",其余都不存在。**两条轨道同等一等公民**:一体化(拉新用户,零 TeslaMate 前置)与存量接入(已有 TeslaMate 数据的用户,数据零迁移)。
 
 **轨道 A · 一体化(无 TeslaMate 用户)**
-- [ ] fullstack-compose 强化:必需 env 精简到 TZ 级;TeslaMate/Postgres/AhaTesla 健康检查 + depends_order;RO 只读账号创建纳入 entrypoint 幂等执行(SQL 已有)
-- [ ] Setup 向导模式 B 升级"零 TeslaMate 感知":新增「Tesla 登录」步骤 = 内嵌引导卡 + deep link 跳捆绑 TeslaMate + 复用现有车辆发现轮询,车出现自动前进到车辆确认
-- [ ] 验收:空目录 compose up → 向导全程不出 AhaTesla 之外界面 → 车辆出现 → 仪表盘有数据;setup.spec 模式B 用例扩展
+- [x] fullstack-compose 强化:必需 env 精简到 TZ 级;TeslaMate/Postgres/AhaTesla 健康检查 + depends_order;RO 只读账号创建纳入 entrypoint 幂等执行(SQL 已有)
+- [x] Setup 向导模式 B 升级"零 TeslaMate 感知":新增「Tesla 登录」步骤 = 内嵌引导卡 + deep link 跳捆绑 TeslaMate + 复用现有车辆发现轮询,车出现自动前进到车辆确认
+- [x] 验收:空目录 compose up → 向导全程不出 AhaTesla 之外界面 → 车辆出现 → 仪表盘有数据;setup.spec 模式B 用例扩展
 
 **轨道 B · 存量接入(已有 TeslaMate 用户)**
-- [ ] connect-compose 一条命令化:自动挂入用户 teslamate_default 网络(bridge 机制已有);把 README 里"手工 psql 建只读账号"吞进 entrypoint——用户提供一次 teslamate 库管理密码(或复制粘贴一条 SQL),幂等自动建 RO 账号并回填 DSN
-- [ ] 向导模式 A 打磨:DSN 粘贴 → 四级校验(已有)→ 车辆确认(已有);新增「当前账号权限探测」——检测到非只读账号时自动引导降权/替换为 RO 账号(对齐 GA-02 只读红线)
-- [ ] README 双轨并列,存量用户从 clone 到看到自己的数据 ≤ 5 分钟 / ≤ 3 步
-- [ ] 验收:对存量 TeslaMate 实例(本机 15432 桥即真实验证环境)跑通轨道 B 全程
+- [x] connect-compose 一条命令化:自动挂入用户 teslamate_default 网络(bridge 机制已有);把 README 里"手工 psql 建只读账号"吞进 entrypoint——用户提供一次 teslamate 库管理密码(或复制粘贴一条 SQL),幂等自动建 RO 账号并回填 DSN
+- [x] 向导模式 A 打磨:DSN 粘贴 → 四级校验(已有)→ 车辆确认(已有);新增「当前账号权限探测」——检测到非只读账号时自动引导降权/替换为 RO 账号(对齐 GA-02 只读红线)
+- [x] README 双轨并列,存量用户从 clone 到看到自己的数据 ≤ 5 分钟 / ≤ 3 步
+- [x] 验收:对存量 TeslaMate 实例(本机 15432 桥即真实验证环境)跑通轨道 B 全程
 
 **通用**
 - [ ] 契约先行:/api/setup 流程若有变化先改 API_CONTRACT §1
