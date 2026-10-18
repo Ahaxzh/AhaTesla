@@ -143,15 +143,20 @@ test("dispatch：企微失败不阻塞 ntfy 投递（失败隔离，AC-12.2）",
   assert.equal(results.ntfy.sent, true);
 });
 
-test("矩阵 6×6：默认新渠道全关；PUT 归一化布尔；PUSH_CHANNELS/常量一致", () => {
+test("矩阵 9×6：内容事件新渠道全关、告警事件即时渠道全开；PUT 归一化布尔；常量一致(P2)", () => {
   useMemoryStore();
   assert.equal(PUSH_CHANNELS.length, 6);
-  assert.equal(PUSH_EVENTS.length, 6);
+  assert.equal(PUSH_EVENTS.length, 9);
+  const ALARMS = new Set(["outage", "chargeInterrupt", "tirePressure"]);
   const dm = defaultMatrix();
   for (const ev of PUSH_EVENTS) {
     assert.deepEqual(Object.keys(dm[ev]).sort(), [...PUSH_CHANNELS].sort(), `${ev} 行应含六渠道`);
-    assert.equal(dm[ev].feishu, true, "存量语义：飞书默认开");
-    assert.equal(dm[ev].wecom, false, "m4b 语义：新渠道默认关");
+    assert.equal(dm[ev].feishu, true, "全事件飞书默认开");
+    assert.equal(dm[ev].wecom, false, "m4b 语义：wecom 默认关");
+    if (ALARMS.has(ev)) {
+      assert.equal(dm[ev].webpush, true, `${ev} 告警默认即时渠道开`);
+      assert.equal(dm[ev].telegram, true);
+    }
   }
   // 缺失渠道补 false，多余键剥离（matrixFromRules 只保留六渠道）
   const rt = matrixFromRules({ matrix: { daily: { wecom: true, ntfy: 1, hack: true } } });

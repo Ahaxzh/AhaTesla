@@ -27,7 +27,8 @@ import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
 import { startMqttBridge } from "./core/mqtt-bridge.mjs";
 import { createNotifier, createTelegramChannel, createWebPushChannel, createWecomChannel, createNtfyChannel, createBarkChannel } from "./core/push-channels.mjs";
 import { startReportScheduler } from "./core/report-engine.mjs";
-import { recordProbe } from "./core/health.mjs";
+import { recordProbe, createOutageWatcher } from "./core/health.mjs";
+import { checkTirePressure } from "./core/alerts.mjs";
 import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
 import { createApp, parseCookies } from "./api/http-kit.mjs";
 import { createJwtMiddleware } from "./api/jwt.mjs";
@@ -353,6 +354,24 @@ async function main() {
     const deliveryMs = Date.now() - t0;
     eventLog.log("push.dispatch", { type: event.type, results, deliveryMs });
     if (anySent && event.eventKey) monitor.acknowledge(event.eventKey);
+
+    // P2 告警派生:充电结束且明显提前(富化层 endBattery<80 置 endedEarly)→
+    // 独立更醒目的 chargeInterrupt 告警(charging_done 照常已发,两者并存)。
+    // charging_done 本身每会话恰一次(monitor 去重) → 派生事件天然每会话一次。
+    if (event.type === "charging_done" && event.endedEarly) {
+      try {
+        const alarm = await notifier.dispatch({
+          type: "chargeInterrupt",
+          charging_process_id: event.charging_process_id,
+          endBattery: event.endBattery,
+          energyKwh: event.energyKwh,
+          locationName: event.locationName
+        });
+        eventLog.log("push.dispatch", { type: "chargeInterrupt", derived: true, results: alarm.results, deliveryMs: Date.now() - t0 });
+      } catch (error) {
+        eventLog.log("push.error", { message: `chargeInterrupt: ${error.message}` });
+      }
+    }
   }
 
   const staticHandler = createStaticHandler(join(__dirname, "..", "..", "web", "dist"));
@@ -373,11 +392,37 @@ async function main() {
     rawHandler(req, res);
   });
 
+  // P2 告警:数据断联/恢复(边沿各一次,共用 outage 矩阵行)
+  const outageWatcher = createOutageWatcher({
+    thresholdMs: 10 * 60_000,
+    onOutage: (ms) => dispatchPush({ type: "outage", outageMs: ms }).catch(() => {}),
+    onRecovered: (ms) => dispatchPush({ type: "outage_recovered", outageMs: ms }).catch(() => {})
+  });
+
+  // P2 告警:胎压巡检(随监控循环同频,越限且距上次告警 ≥24h 才推)
+  if (!state.alerts) state.alerts = {};
+  async function patrolTirePressure() {
+    const now = Date.now();
+    if (state.alerts.lastTireAlertAt && now - state.alerts.lastTireAlertAt < 24 * 3600_000) return;
+    const r = await checkTirePressure(db);
+    if (!r) return;
+    state.alerts.lastTireAlertAt = now;
+    try { saveState(state); } catch { /* 节流窗内存生效即可 */ }
+    await dispatchPush({
+      type: "tirePressure", tirePressure: r, minBar: r.min, suggest: r.suggest
+    }).catch(() => {});
+  }
+
   const loop = startTripMonitorLoop({
     monitor,
     db,
     // 探活结果喂给健康状态机（GA-32 失联横幅数据源）；失败由 loop 内部 logger 兜底
-    onPollResult: (ok) => { recordProbe(ok); },
+    // P2:同一帧喂断联观察者(≥10min 边沿推送)与胎压巡检(24h 节流)
+    onPollResult: (ok) => {
+      const result = recordProbe(ok);
+      outageWatcher.observe(result);
+      void patrolTirePressure();
+    },
     logger: (message) => eventLog.log("monitor.error", { message })
   });
   // GA-39：周期 + 事件驱动节流持久化 monitor 状态（水线游标/sent_keys/pending_events）

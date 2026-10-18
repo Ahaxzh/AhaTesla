@@ -420,14 +420,23 @@ export function createBarkChannel({ fetchImpl = globalThis.fetch, logger = () =>
 
 // ---- Notifier 门面：矩阵化 dispatch + SLA 埋点 -------------------------------
 
-export const PUSH_EVENTS = ["tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly"];
+export const PUSH_EVENTS = [
+  "tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly",
+  // P2 告警事件群(不受 quietHours 静音约束;默认 webpush/telegram/feishu 全开)
+  "outage", "chargeInterrupt", "tirePressure"
+];
 export const PUSH_CHANNELS = ["webpush", "telegram", "feishu", "wecom", "ntfy", "bark"];
+
+// 告警事件默认矩阵:主要即时渠道全开(用户显式关)
+const ALARM_EVENTS = new Set(["outage", "chargeInterrupt", "tirePressure"]);
 
 // state.pushRules v2：{matrix:{tripEnd:{webpush,…,bark},…}, weeklyReportDay}；新渠道默认关（用户显式开）
 export function defaultMatrix() {
   const m = {};
   for (const ev of PUSH_EVENTS) {
-    m[ev] = { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false };
+    m[ev] = ALARM_EVENTS.has(ev)
+      ? { webpush: true, telegram: true, feishu: true, wecom: false, ntfy: false, bark: false }
+      : { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false };
   }
   return m;
 }
@@ -450,10 +459,14 @@ export function matrixFromRules(rules) {
     }
     return m;
   }
-  // 只保留已知六渠道键并归一布尔（未知渠道键剔除，防止脏数据进矩阵）
+  // 只保留已知六渠道键并归一布尔（未知渠道键剔除，防止脏数据进矩阵）。
+  // 矩阵里没有的事件键(如升级后新增的告警事件)回退该事件默认值,
+  // 而不是全关 —— 告警类默认即时渠道全开,P2 设计语义。
   const out = {};
+  const defaults = defaultMatrix();
   for (const ev of PUSH_EVENTS) {
-    const row = rules.matrix[ev] || {};
+    const row = Object.prototype.hasOwnProperty.call(rules.matrix, ev) ? rules.matrix[ev] : null;
+    if (!row) { out[ev] = { ...defaults[ev] }; continue; }
     out[ev] = {};
     for (const ch of PUSH_CHANNELS) out[ev][ch] = row[ch] === true;
   }
@@ -492,6 +505,10 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       case "daily": return `昨日用车日报 · ${event.dateLabel || ts}`;
       case "weekly": return "每周用车周报";
       case "monthly": return "每月账本月报";
+      case "outage": return `⚠ 数据断联 · ${ts}`;
+      case "outage_recovered": return `✅ 数据已恢复 · ${ts}`;
+      case "chargeInterrupt": return `⚠ 充电提前中止 · ${ts}`;
+      case "tirePressure": return `🛞 胎压偏低 · ${ts}`;
       default: return `AhaTesla 通知 · ${ts}`;
     }
   }
@@ -638,13 +655,36 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       return lines.join("\n");
     }
     if (event.type === "weekly" || event.type === "monthly") return event.summary || "";
+    // ---- P2 告警事件群 ----
+    if (event.type === "outage") {
+      const min = Math.max(1, Math.round((event.outageMs ?? 0) / 60_000));
+      return `⚠ TeslaMate 数据断联已 ${min} 分钟\n账本暂停记录，恢复后将自动补齐`;
+    }
+    if (event.type === "outage_recovered") {
+      const min = Math.max(1, Math.round((event.outageMs ?? 0) / 60_000));
+      return `✅ 数据连接已恢复（断联共 ${min} 分钟）\n缺失时段的行程与充电将在下次行驶/充电后补记`;
+    }
+    if (event.type === "chargeInterrupt") {
+      const lines = [];
+      if (event.endBattery != null) lines.push(`🔋 止于 ${Math.round(event.endBattery)}%`);
+      if (event.energyKwh != null) lines.push(`⚡ 已充 ${event.energyKwh} kWh`);
+      if (event.locationName) lines.push(`📍 ${event.locationName}`);
+      lines.push("请检查充电枪/桩状态");
+      return lines.join("\n");
+    }
+    if (event.type === "tirePressure") {
+      const f = (v) => (v == null ? "--" : v.toFixed(1));
+      const tp = event.tirePressure || {};
+      return `🛞 四轮 FL ${f(tp.fl)} / FR ${f(tp.fr)} / RL ${f(tp.rl)} / RR ${f(tp.rr)} bar\n最低 ${event.minBar ?? "--"} bar，建议补至 ${event.suggest ?? 2.9} bar`;
+    }
     return "";
   }
 
   function eventUrl(event) {
     if (event.type === "trip_end" && event.driveIds?.length) return `/trips/${event.driveIds[0]}`;
-    if (event.type === "charging_done") return `/charging?focus=${event.charging_process_id}`;
+    if (event.type === "charging_done" || event.type === "chargeInterrupt") return `/charging?focus=${event.charging_process_id}`;
     if (event.type === "weekly" || event.type === "monthly") return "/reports";
+    if (event.type === "outage" || event.type === "outage_recovered") return "/settings#settings-system";
     return "/";
   }
 
@@ -669,7 +709,13 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
     }
     const rules = matrix ? { matrix } : state.pushRules;
     const m = matrixFromRules(rules);
-    const ruleKey = { trip_end: "tripEnd", charging_start: "chargingStart", charging_done: "chargingDone", daily: "daily", weekly: "weekly", monthly: "monthly" }[event.type] || event.type;
+    const ruleKey = {
+      trip_end: "tripEnd", charging_start: "chargingStart", charging_done: "chargingDone",
+      daily: "daily", weekly: "weekly", monthly: "monthly",
+      // P2 告警:outage 事件族共用 outage 矩阵行(断联与恢复一体开关)
+      outage: "outage", outage_recovered: "outage",
+      chargeInterrupt: "chargeInterrupt", tirePressure: "tirePressure"
+    }[event.type] || event.type;
     const targets = m[ruleKey] || {};
     const title = eventTitle(event);
     let body = eventBody(event);

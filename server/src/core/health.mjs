@@ -43,3 +43,35 @@ export function resetHealth() {
   state.lastOkAt = null;
   state.lastFailAt = null;
 }
+
+// ---- P2 告警:断联/恢复边沿观察者 -------------------------------------------
+// 每次 recordProbe 后调用 observe(result)：断联持续超阈值时触发一次 onOutage，
+// 恢复时若曾通知过则触发一次 onRecovered(带断联总时长)。纯边沿语义，天然各一次。
+export function createOutageWatcher({ thresholdMs = 10 * 60_000, onOutage, onRecovered } = {}) {
+  let notified = false;    // 本次断联是否已推送过
+  let outageStart = null;  // ms epoch
+  return {
+    observe(result, now = Date.now()) {
+      if (!result?.dbOk) {
+        if (!outageStart) outageStart = now;
+        if (!notified && result.outageMs >= thresholdMs) {
+          notified = true;
+          onOutage?.(result.outageMs);
+        }
+        return null;
+      }
+      if (notified && outageStart) {
+        const totalMs = now - outageStart;
+        notified = false;
+        outageStart = null;
+        onRecovered?.(totalMs);
+        return "recovered";
+      }
+      notified = false;
+      outageStart = null;
+      return null;
+    },
+    // 测试辅助
+    _reset() { notified = false; outageStart = null; }
+  };
+}

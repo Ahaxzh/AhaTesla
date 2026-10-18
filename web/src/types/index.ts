@@ -251,7 +251,7 @@ export interface LedgerSummary {
 }
 
 export type PushChannelId = 'webpush' | 'telegram' | 'feishu' | 'wecom' | 'ntfy' | 'bark'
-export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly'
+export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly' | 'outage' | 'chargeInterrupt' | 'tirePressure'
 
 export interface PushMatrix {
   [event: string]: { [channel: string]: boolean }

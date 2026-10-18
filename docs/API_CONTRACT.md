@@ -97,7 +97,7 @@
 ### 推送规则（矩阵化）
 - `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu,wecom,ntfy,bark}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}, quietHours:{enabled,start,end}}
 - `PUT /api/push-rules` {matrix, quietHours?} → {ok}
-  - v1 为每事件单一 bool → v2 为 6 事件 × 6 渠道矩阵（P6 分组3 + m4b 三新渠道）；新渠道默认全关（用户显式开）；weeklyReportDay 并入 settings
+  - v1 为每事件单一 bool → v2 为 9 事件 × 6 渠道矩阵（P6 分组3 + m4b 三渠道 + P2 告警三事件）；内容事件新渠道默认全关（用户显式开）,告警事件（outage/chargeInterrupt/tirePressure）默认 webpush/telegram/feishu 全开且**不受 quietHours 静音约束**;outage_recovered 复用 outage 矩阵行;weeklyReportDay 并入 settings;P2 起告警事件语义:outage=断联≥10min 与恢复各推一次,chargeInterrupt=充电结束 end_battery<80 派生告警(与 charging_done 并存,每会话一次),tirePressure=四轮最低<2.6bar(24h 节流)
   - quietHours（P1，PUSH-DESIGN）：{enabled:boolean, start:'HH:MM', end:'HH:MM'}（北京时间，start>end 跨午夜；start==end 等效关闭）。仅约束 trip_end：命中时段不即时投递，摘要并入次日早报「🌙 昨夜静默行程」段。charging/日报/告警不受影响。默认 {enabled:false,start:'23:00',end:'07:00'}
   - 正文富化（P1，字段由富化层注入、数据可得才显示）：trip_end 计价批次行 `🔋 计价批次`（fifoBatches>1）；charging_start 当前电量/预估行；charging_done 近 5 次同站均价对比行与 ⚠ 提前中止标题；daily 插枪提醒行（TOU 谷价）与昨夜静默段；monthly 年度累计行
   - `daily`（m4c-c1）：昨日用车日报，每日 08:00 推送；昨日无行程且无充电自动跳过；不落报告归档表
@@ -160,7 +160,7 @@
 | 5 | GET/PUT /api/pricing（defaultRate/locations TOU 双模）· /api/pricing/history | ✅ 已实现 | kv pricing:location-tou:<id>（M1 承接） |
 | 5 | POST /api/ledger/summary · /api/ledger/recalculate(+jobId) | ✅ 已实现 | 月度账本 + 7 天补录窗口 + 进度（M1） |
 | 6 | 渠道配置（webpush/telegram/feishu/wecom/ntfy/bark）+ /api/push/env | ✅ 已实现 | 六渠道平权 AC-10.1 + m4b；Telegram/飞书/企微 webhookKey/Bark deviceKey 密文 AES-GCM 落库 |
-| 6 | GET/PUT /api/push-rules（6×3 矩阵） | ✅ 已实现 | B4 矩阵替换 v1 单 bool（M2）；daily 事件 m4c 新增 |
+| 6 | GET/PUT /api/push-rules（9×6 矩阵） | ✅ 已实现 | B4 矩阵替换 v1 单 bool（M2）；daily m4c;outage/chargeInterrupt/tirePressure 告警三事件 P2 |
 | 6 | /api/reports（列表/详情/generate） | ✅ 已实现 | 不可变快照 report_snapshots；周一/月初 08:00 定时（M2） |
 | 7 | /api/system/status（latencyMs/readonlyVerified）· /events（deliveryMs）· /health-lite | ✅ 已实现 | GA-31/32；health-lite 匿名供失联横幅轮询（M2） |
 | 7 | WebSocket /ws | ⏸ 未实现 | 契约标注"可选，前端轮询兜底"；轮询路径已全覆盖，按需后补 |

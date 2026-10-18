@@ -41,13 +41,21 @@ describe('SettingsPage', () => {
     expect(screen.queryByTestId('resync-meta')).not.toBeInTheDocument()
   })
 
-  it('推送矩阵：6 事件 × 6 渠道，含每日早报行', async () => {
+  it('推送矩阵：9 事件 × 6 渠道，含每日早报与告警三行(P2)', async () => {
     renderWithProviders(<SettingsPage />)
     // 矩阵列表要等 pushRules 查询返回（此前是骨架屏）
     const list = await screen.findByTestId('push-matrix-list')
-    // 6 行事件 × 6 渠道 chip 全渲染（m4b 起 wecom/ntfy/bark 并列）
-    expect(within(list).getAllByTestId(/^matrix-/).length).toBeGreaterThanOrEqual(6 * 6)
+    // 9 行事件 × 6 渠道 chip 全渲染（m4b 起 wecom/ntfy/bark 并列;P2 告警三行）
+    expect(within(list).getAllByTestId(/^matrix-/).length).toBeGreaterThanOrEqual(9 * 6)
     expect(within(list).getByText('每日早报')).toBeInTheDocument()
+    // 告警三行存在且 desc 标注不受静音时段影响
+    expect(within(list).getByText('数据断联告警')).toBeInTheDocument()
+    expect(within(list).getByText('充电提前中止')).toBeInTheDocument()
+    expect(within(list).getByText('胎压过低')).toBeInTheDocument()
+    expect(within(list).getByText(/不受静音时段影响/)).toBeInTheDocument()
+    // 告警默认即时渠道开(msw 矩阵)
+    expect(screen.getByTestId('matrix-outage-telegram')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('matrix-outage-wecom')).toHaveAttribute('aria-pressed', 'false')
     // msw 默认 daily: webpush=true → chip 按钮处于按下态;新渠道默认关
     expect(screen.getByTestId('matrix-daily-webpush')).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByTestId('matrix-daily-feishu')).toHaveAttribute('aria-pressed', 'false')
