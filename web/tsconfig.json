@@ -6,9 +6,8 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -21,5 +20,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src", "tests"]
+  "include": ["./src", "./tests"]
 }

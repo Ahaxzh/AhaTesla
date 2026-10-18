@@ -17,6 +17,15 @@ updates:
     groups:
       web-deps:
         patterns: ["*"]
+    ignore:
+      # 构建链大版本手动升(dependabot 会直接改写 version range 跳大版本,
+      # TS7/Vite8 这类跳变曾在 PR #3 直接打破镜像构建)
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vite
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
