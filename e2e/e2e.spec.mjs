@@ -41,21 +41,30 @@ test("总览页：车辆状态卡、本月账本卡、24h时间轴、热力图",
 test("行程页：列表加载、分页、详情路线", async ({ page }) => {
   await login(page);
   await navigate(page, "trips");
-  // 列表有行程（真实库 2592 条）
-  await expect(page.locator("tbody tr, [data-testid='trip-row'], li").first()).toBeVisible({ timeout: 10000 });
+  // 列表有行程（真实库 2592 条；并行压测下首屏查询可达 10s+，放宽到 20s）
+  await expect(page.locator("tbody tr, [data-testid='trip-row'], li").first()).toBeVisible({ timeout: 20000 });
   // 下一页
   const nextBtn = page.getByRole("button", { name: /下一页|下一|next|>|›/i }).first();
   if (await nextBtn.isVisible().catch(() => false)) {
     await nextBtn.click();
     await page.waitForTimeout(600);
   }
-  // 点进详情
-  await page.locator("tbody tr, [data-testid='trip-row'], li a, a[href*='/trips/']").first().click();
+  // 点进详情：优先挑里程 ≥1km 的行（首条可能是当天 0.1km 挪车微行程，轨迹不足以画线）
+  const rows = page.locator("tbody tr, [data-testid='trip-row']");
+  const count = Math.min(await rows.count(), 10);
+  let target = null;
+  for (let i = 0; i < count; i++) {
+    const text = await rows.nth(i).innerText();
+    const m = text.match(/(\d+(?:\.\d+)?)\s*km/i);
+    if (!m || Number(m[1]) >= 1) { target = rows.nth(i); break; }
+  }
+  (target ?? page.locator("tbody tr, [data-testid='trip-row'], li a, a[href*='/trips/']").first()).click();
   // 等详情数据渲染：路线图（有点）或空态占位（点不足）其一出现
-  await page.waitForSelector("[data-testid='route-map'], [data-testid='route-map-empty']", { timeout: 10000 });
+  await page.waitForSelector("[data-testid='route-map'], [data-testid='route-map-empty']", { timeout: 20000 });
   const empty = await page.locator("[data-testid='route-map-empty']").isVisible().catch(() => false);
   if (!empty) {
-    await expect(page.locator("[data-testid='route-map'] svg")).toBeVisible();
+    // preferCanvas: true → 轨迹画在 canvas（svg 仅在无 canvas 渲染器时出现）
+    await expect(page.locator("[data-testid='route-map'] canvas, [data-testid='route-map'] svg").first()).toBeVisible();
   }
   // v2.1 P3：FIFO 扣减明细卡（有账本数据时出现批次表，无数据时显示空态说明）
   await page.waitForSelector("[data-testid='fifo-card']", { timeout: 10000 });
@@ -68,9 +77,10 @@ test("充电页：列表与按地点统计", async ({ page }) => {
   await expect(page.getByText(/kWh/i).first()).toBeVisible();
 });
 
-test("电价页：地点单价表 + 默认电价显示", async ({ page }) => {
+test("设置页：电价分区地点电价表 + 默认电价显示", async ({ page }) => {
   await login(page);
-  await navigate(page, "pricing");
+  await navigate(page, "settings");
+  await page.waitForSelector("[data-testid='location-table']", { timeout: 10000 });
   await expect(page.getByText(/CND/).first()).toBeVisible({ timeout: 10000 });
   await expect(page.getByText(/1\.8/).first()).toBeVisible();
 });
@@ -86,10 +96,11 @@ test("推送页：三渠道卡片渲染（WebPush/Telegram/飞书）", async ({ 
   await page.waitForSelector("[data-testid='webpush-https-warning'], [data-testid='webpush-enable']", { timeout: 10000 });
 });
 
-test("系统页：DB/MQTT 状态", async ({ page }) => {
+test("设置页：系统分区 DB/MQTT 状态", async ({ page }) => {
   await login(page);
-  await navigate(page, "system");
-  await expect(page.getByText("TeslaMate DB")).toBeVisible({ timeout: 8000 });
+  await navigate(page, "settings");
+  // 首次冷查询（DB 连通+只读校验）可能数秒，放宽到 15s
+  await expect(page.getByText("TeslaMate DB")).toBeVisible({ timeout: 15000 });
   await expect(page.getByText("Mosquitto MQTT")).toBeVisible();
 });
 
@@ -99,13 +110,30 @@ test("设置页：修改密码表单存在并可取消", async ({ page }) => {
   await expect(page.locator("input[type='password']").first()).toBeVisible();
 });
 
+test("头像菜单：修改密码跳到设置页安全分区并滚动到位", async ({ page }) => {
+  await login(page);
+  await navigate(page, "trips"); // 从其他页进入，验证跨路由跳转
+  // 头像菜单只在桌面侧栏；移动端无此入口（改密入口在设置页内）
+  const menuBtn = page.getByTestId("user-menu-button");
+  if (!(await menuBtn.isVisible().catch(() => false))) {
+    test.skip(true, "移动端无头像菜单");
+    return;
+  }
+  await menuBtn.click();
+  await page.getByTestId("user-menu-password").click();
+  await expect(page).toHaveURL(/settings/, { timeout: 8000 });
+  // 滚动后安全分区进入视口（修改密码表单可见）
+  await expect(page.getByTestId("change-password-card")).toBeVisible({ timeout: 5000 });
+});
+
 test("登出后回到登录页且受保护页 401 跳转", async ({ page }) => {
   await login(page);
   await navigate(page, "settings");
-  // 登出
-  const logout = page.getByRole("button", { name: /退出|登出|logout/i }).first();
-  if (await logout.isVisible().catch(() => false)) {
-    await logout.click();
+  // 桌面侧栏头像菜单里的登出
+  const menuBtn = page.getByTestId("user-menu-button");
+  if (await menuBtn.isVisible().catch(() => false)) {
+    await menuBtn.click();
+    await page.getByTestId("user-menu-logout").click();
     await expect(page).toHaveURL(/login/, { timeout: 8000 });
   }
 });
