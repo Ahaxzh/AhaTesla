@@ -103,4 +103,4 @@ TeslaMate 本就多车,当前代码 car_id 硬编码是 GAP 分析旧债(GA-05)�
 
 ## 远期池(v3.x+,不承诺)
 
-原生 Tesla Fleet API 直连(去 TeslaMate)· 「问我的车」对话助手 · 多车 UI · Discord/Slack/SMTP 渠道 · 移动端原生壳
+原生 Tesla Fleet API 直连(去 TeslaMate)· 「问我的车」对话助手 · 多车 UI · Discord/Slack/SMTP 渠道 · 移动端原生壳 · **Tailwind v4 迁移**(重写版:@tailwindcss/postcss + CSS-first 配置替换 tailwind.config,dependabot 已禁跳等手动专项)
