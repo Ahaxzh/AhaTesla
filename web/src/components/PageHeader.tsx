@@ -14,7 +14,7 @@ export function PageHeader({
   return (
     <div className="mb-5 flex items-center justify-between gap-3">
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/12 text-tesla">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/[0.12] text-tesla">
           <Icon className="h-[18px] w-[18px]" />
         </div>
         <div>

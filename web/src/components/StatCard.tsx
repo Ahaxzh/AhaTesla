@@ -12,7 +12,7 @@ interface StatCardProps {
 export function StatCard({ icon: Icon, label, value, hint, accent, ...rest }: StatCardProps) {
   return (
     <div
-      className={`glass-card fade-up flex items-center gap-3.5 p-4 ${accent ? 'border-tesla/25' : ''}`}
+      className={`glass-card-flat fade-up flex items-center gap-3.5 p-4 ${accent ? 'border-tesla/25' : ''}`}
       data-testid={rest['data-testid'] ?? 'stat-card'}
     >
       <div
@@ -24,10 +24,10 @@ export function StatCard({ icon: Icon, label, value, hint, accent, ...rest }: St
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-xs text-slate-400">{label}</div>
-        <div className="num mt-0.5 truncate text-lg font-semibold text-white" title={value}>
+        <div className="num mt-0.5 truncate text-base font-semibold text-slate-100" title={value}>
           {value}
         </div>
-        {hint && <div className="mt-0.5 truncate text-[11px] text-slate-500">{hint}</div>}
+        {hint && <div className="mt-0.5 truncate text-[11px] text-slate-400">{hint}</div>}
       </div>
     </div>
   )

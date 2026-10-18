@@ -51,7 +51,7 @@ export default function SetupPage() {
   const goto = (next: number) => setStep(Math.min(4, Math.max(1, next)))
 
   return (
-    <div className="flex min-h-dvh flex-col items-center bg-base-950 px-4 py-10">
+    <div className="flex min-h-dvh flex-col items-center bg-base-950 px-4 pb-10 pt-[max(2.5rem,env(safe-area-inset-top))]">
       <div className="mb-6 flex flex-col items-center gap-2">
         <LogoMark size={44} />
         <div className="text-xl font-semibold tracking-tight text-white">
@@ -80,7 +80,7 @@ export default function SetupPage() {
 function SetupProgress({ current }: { current: number }) {
   const labels = ['管理员', '数据源', '账本', '通知']
   return (
-    <ol className="flex items-center gap-2" data-testid="setup-progress">
+    <ol className="flex w-full max-w-md items-center gap-2 px-1" data-testid="setup-progress">
       {labels.map((label, i) => {
         const n = i + 1
         const active = n === current
@@ -88,15 +88,15 @@ function SetupProgress({ current }: { current: number }) {
         return (
           <li key={label} className="flex items-center gap-2">
             <span
-              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${
                 done ? 'bg-emerald-500/20 text-emerald-400' : active ? 'bg-tesla/20 text-tesla' : 'bg-slate-800 text-slate-500'
               }`}
               aria-current={active ? 'step' : undefined}
             >
               {n}
             </span>
-            <span className={`text-xs ${active ? 'text-white' : 'text-slate-500'}`}>{label}</span>
-            {n < 4 && <span className="mx-1 h-px w-6 bg-slate-800" />}
+            <span className={`whitespace-nowrap text-xs ${active ? 'text-white' : 'text-slate-400'}`}>{label}</span>
+            {n < 4 && <span className="mx-1 h-px min-w-2 flex-1 bg-slate-800" />}
           </li>
         )
       })}
@@ -173,7 +173,9 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
         />
       </div>
       {error && (
-        <p className="text-sm text-red-400" data-testid="setup-admin-error" role="alert">{error}</p>
+        <div role="alert" data-testid="setup-admin-error" className="rounded-lg border border-tesla/30 bg-tesla/10 px-3 py-2 text-xs text-tesla-soft">
+          {error}
+        </div>
       )}
       <button
         type="submit"
@@ -304,7 +306,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           type="button"
           role="tab"
           aria-selected={mode === 'connect'}
-          className={`rounded-xl border px-3 py-2.5 text-sm ${mode === 'connect' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400'}`}
+          className={`rounded-xl border px-3 py-2.5 text-sm transition ${mode === 'connect' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400 hover:border-white/20 hover:text-slate-200'}`}
           onClick={() => setMode('connect')}
           data-testid="setup-mode-connect"
         >
@@ -314,7 +316,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
           type="button"
           role="tab"
           aria-selected={mode === 'fullstack'}
-          className={`rounded-xl border px-3 py-2.5 text-sm ${mode === 'fullstack' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400'}`}
+          className={`rounded-xl border px-3 py-2.5 text-sm transition ${mode === 'fullstack' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400 hover:border-white/20 hover:text-slate-200'}`}
           onClick={() => setMode('fullstack')}
           data-testid="setup-mode-fullstack"
         >
@@ -396,7 +398,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
         </div>
       )}
 
-      {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
+      {error && <div role="alert" className="rounded-lg border border-tesla/30 bg-tesla/10 px-3 py-2 text-xs text-tesla-soft">{error}</div>}
 
       {discovery?.found && (
         <div className="space-y-2" data-testid="setup-car-found">
@@ -453,8 +455,8 @@ function CarOption({ car, selected, onSelect }: { car: DiscoveredCar; selected: 
       role="radio"
       aria-checked={selected}
       onClick={onSelect}
-      className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm ${
-        selected ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-300'
+      className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+        selected ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-300 hover:border-white/20 hover:text-white'
       }`}
       data-testid={`setup-car-option-${car.id}`}
     >

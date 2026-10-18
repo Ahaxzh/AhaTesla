@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { AlertTriangle } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { RouteMap } from '@/components/RouteMap'
+import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice } from '@/utils/format'
@@ -40,10 +42,11 @@ function EfficiencyBadge({ ratio }: { ratio: number | null | undefined }) {
 
 export default function TripDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: trip, isLoading } = useQuery({
+  const { data: trip, isLoading, isError, refetch } = useQuery({
     queryKey: ['trip', id],
     queryFn: () => api.trip(id!),
     enabled: !!id,
+    retry: false,
   })
 
   return (
@@ -54,11 +57,20 @@ export default function TripDetailPage() {
         </Link>
         <div>
           <h1 className="page-title">行程详情</h1>
-          {trip && <p className="mt-0.5 text-xs text-slate-500">{fmtDateTime(trip.startAt)}</p>}
+          {trip && <p className="mt-0.5 text-xs text-slate-400">{fmtDateTime(trip.startAt)}</p>}
         </div>
       </div>
 
-      {isLoading || !trip ? (
+      {isError ? (
+        <div className="glass-card-flat" data-testid="trip-error">
+          <EmptyState
+            icon={AlertTriangle}
+            title="行程详情加载失败"
+            description="数据源暂时不可用，请稍后重试"
+            action={{ label: '重试', onClick: () => void refetch() }}
+          />
+        </div>
+      ) : isLoading || !trip ? (
         <div className="space-y-4">
           <SkeletonCards count={4} />
           <div className="skeleton h-56 rounded-2xl" />
@@ -75,7 +87,7 @@ export default function TripDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <EfficiencyBadge ratio={trip.efficiency?.ratio} />
             {/* 口径标注（AC-6.3） */}
-            <span className="text-[11px] text-slate-500" data-testid="energy-formula-note">
+            <span className="text-[11px] text-slate-400" data-testid="energy-formula-note">
               耗电口径：基于起止表显续航差 × 车辆效率系数
             </span>
           </div>
@@ -86,33 +98,33 @@ export default function TripDetailPage() {
           {/* 模块3：环境剖析微卡片 */}
           {trip.environment && (
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="environment-card">
-              <div className="glass-card flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Thermometer className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-[10px] text-slate-500">平均室外温度</div>
+                  <div className="text-xs text-slate-400">平均室外温度</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.avgTempC != null ? `${trip.environment.avgTempC.toFixed(1)}°C` : '--'}</div>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Wind className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-[10px] text-slate-500">空调耗电估算</div>
+                  <div className="text-xs text-slate-400">空调耗电估算</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.acEstimateKwh != null ? fmtKwh(trip.environment.acEstimateKwh) : '--'}</div>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex items-center gap-3 p-4">
                 <GaugeIcon className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-[10px] text-slate-500">均速 / 最高</div>
+                  <div className="text-xs text-slate-400">均速 / 最高</div>
                   <div className="num mt-0.5 text-sm text-slate-200">
                     {trip.environment.avgSpeedKmh?.toFixed(0) ?? '--'} / {trip.environment.maxSpeedKmh?.toFixed(0) ?? '--'} km/h
                   </div>
                 </div>
               </div>
-              <div className="glass-card flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Layers className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
-                  <div className="text-[10px] text-slate-500">GPS 采样点</div>
+                  <div className="text-xs text-slate-400">GPS 采样点</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
                 </div>
               </div>
@@ -121,7 +133,7 @@ export default function TripDetailPage() {
 
           {/* 模块4：FIFO 电费分摊明细（核心价值卡） */}
           {trip.fifo && (
-            <section className="glass-card p-5" data-testid="fifo-card">
+            <section className="glass-card-flat p-5" data-testid="fifo-card">
               <h2 className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-200">
                 <Coins className="h-4 w-4 text-tesla" /> FIFO 电费分摊明细
               </h2>
@@ -147,7 +159,7 @@ export default function TripDetailPage() {
                         <tr key={i}>
                           <td className="max-w-[220px] truncate py-2.5 pr-3 text-slate-200">{b.source}</td>
                           <td className="num py-2.5 px-3 text-right text-slate-300">{b.kwh.toFixed(1)}</td>
-                          <td className="num py-2.5 px-3 text-right text-slate-400">¥{fmtPrice(b.price)}</td>
+                          <td className="num py-2.5 px-3 text-right text-slate-300">¥{fmtPrice(b.price)}</td>
                           <td className="num py-2.5 pl-3 text-right font-medium text-white">{fmtCny(b.amount)}</td>
                         </tr>
                       ))}
@@ -192,11 +204,11 @@ export default function TripDetailPage() {
           )}
 
           {/* 起终点 */}
-          <div className="glass-card space-y-4 p-5" data-testid="trip-endpoints">
+          <div className="glass-card-flat space-y-4 p-5" data-testid="trip-endpoints">
             <div className="flex gap-3">
               <span className="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 border-emerald-400" aria-hidden />
               <div className="min-w-0">
-                <div className="text-[11px] text-slate-500">起点 · {fmtDateTime(trip.startAt)}</div>
+                <div className="text-[11px] text-slate-400">起点 · {fmtDateTime(trip.startAt)}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-200">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
                   <span className="break-all">{trip.startAddress || '起点（未命名位置）'}</span>
@@ -206,7 +218,7 @@ export default function TripDetailPage() {
             <div className="flex gap-3">
               <span className="mt-1.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full border-2 border-tesla bg-tesla/40" aria-hidden />
               <div className="min-w-0">
-                <div className="text-[11px] text-slate-500">终点 · {fmtDateTime(trip.endAt)}</div>
+                <div className="text-[11px] text-slate-400">终点 · {fmtDateTime(trip.endAt)}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-slate-200">
                   <MapPin className="h-3.5 w-3.5 shrink-0 text-tesla" />
                   <span className="break-all">{trip.endAddress || '终点（未命名位置）'}</span>

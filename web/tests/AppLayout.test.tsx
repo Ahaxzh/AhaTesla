@@ -38,7 +38,7 @@ describe('AppLayout 响应式导航', () => {
     expect(screen.getByTestId('sidebar-car')).toBeInTheDocument()
   })
 
-  it('移动 TabBar 使用 lg:hidden 策略，含 4 个主入口（§6.1）', async () => {
+  it('移动 TabBar 使用 lg:hidden 策略，含 5 个主入口（报告并入，修复移动端不可达）', async () => {
     renderWithProviders(<AppLayout />)
     const tabbar = await screen.findByTestId('mobile-tabbar')
     // lg:hidden 在外层 fixed 容器上
@@ -49,14 +49,14 @@ describe('AppLayout 响应式导航', () => {
     }
   })
 
-  it('TabBar 为 4 项（概览/行程/充电/设置，PRD §6.1），侧栏 5 项（v2.2 电价/推送/系统并入设置）', () => {
-    expect(NAV_ITEMS.map((n) => n.to)).toEqual(['/', '/trips', '/charging', '/settings'])
-    expect(SIDEBAR_ITEMS.map((n) => n.to)).toEqual(['/', '/trips', '/charging', '/settings', '/reports'])
+  it('TabBar 与侧栏共用 5 项导航（概览/行程/充电/报告/设置），报告页移动端可达', () => {
+    expect(NAV_ITEMS.map((n) => n.to)).toEqual(['/', '/trips', '/charging', '/reports', '/settings'])
+    expect(SIDEBAR_ITEMS).toBe(NAV_ITEMS)
   })
 
-  it('移动 TabBar 网格为 4 列', async () => {
+  it('移动 TabBar 网格为 5 列', async () => {
     renderWithProviders(<AppLayout />)
     const tabbar = await screen.findByTestId('mobile-tabbar')
-    expect(tabbar.className).toContain('grid-cols-4')
+    expect(tabbar.className).toContain('grid-cols-5')
   })
 })

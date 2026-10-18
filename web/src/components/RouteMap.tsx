@@ -232,21 +232,32 @@ export function RouteMap({
           </div>
         )}
         {/* 图层切换 */}
-        <div className="absolute right-2 top-2 z-[1000] flex overflow-hidden rounded-lg border border-white/15 bg-[rgba(11,15,20,0.85)] text-[11px] font-medium">
+        <div
+          className="absolute right-2 top-2 z-[1000] flex overflow-hidden rounded-xl border border-white/15 bg-[rgba(11,15,20,0.85)] text-[11px] font-medium"
+          role="group"
+          aria-label="底图图层"
+        >
           <button
-            className={`px-2.5 py-1 ${!satellite ? 'bg-tesla text-white' : 'text-slate-300'}`}
+            aria-pressed={!satellite}
+            className={`px-3 py-1.5 transition ${!satellite ? 'bg-tesla text-white' : 'text-slate-300 hover:bg-white/[0.08]'}`}
             onClick={() => setSatellite(false)}
           >
             标准
           </button>
           <button
-            className={`px-2.5 py-1 ${satellite ? 'bg-tesla text-white' : 'text-slate-300'}`}
+            aria-pressed={satellite}
+            className={`px-3 py-1.5 transition ${satellite ? 'bg-tesla text-white' : 'text-slate-300 hover:bg-white/[0.08]'}`}
             onClick={() => setSatellite(true)}
           >
             卫星
           </button>
         </div>
       </div>
+      {!showSpeedLegend && (
+        <div className="border-t border-white/[0.06] px-3 py-1.5 text-right text-[10px] text-slate-500">
+          底图©高德
+        </div>
+      )}
       {showSpeedLegend && (
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 border-t border-white/[0.06] px-3 py-2 text-[11px] text-slate-400" data-testid="route-speed-legend">
           <span className="flex items-center gap-1.5">

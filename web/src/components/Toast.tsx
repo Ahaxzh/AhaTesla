@@ -28,7 +28,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const toast = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = nextId++
-    setItems((prev) => [...prev, { id, kind, message }])
+    // 栈上限 3：错误突发时只保留最新的（AppLayout 会把每次失败查询都 toast）
+    setItems((prev) => [...prev, { id, kind, message }].slice(-3))
     window.setTimeout(() => {
       setItems((prev) => prev.filter((t) => t.id !== id))
     }, 3500)
@@ -41,12 +42,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         data-testid="toast-root"
-        className="pointer-events-none fixed inset-x-0 top-3 z-[100] flex flex-col items-center gap-2 px-4"
+        className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[100] flex flex-col items-center gap-2 px-4"
       >
         {items.map((t) => (
           <div
             key={t.id}
-            role="status"
+            role={t.kind === 'error' ? 'alert' : 'status'}
             className={`glass-card fade-up pointer-events-auto flex w-full max-w-sm items-center gap-2.5 px-4 py-3 text-sm text-slate-100 ${
               t.kind === 'error' ? 'border-tesla/40' : ''
             }`}
@@ -55,7 +56,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <span className="flex-1">{t.message}</span>
             <button
               aria-label="关闭提示"
-              className="text-slate-500 transition hover:text-slate-200"
+              className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-slate-200"
               onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
             >
               <X className="h-3.5 w-3.5" />

@@ -24,11 +24,11 @@ export function Pagination({
         .filter((p) => p === 1 || p === pageCount || Math.abs(p - page) <= 1)
         .map((p, idx, arr) => (
           <span key={p} className="flex items-center">
-            {idx > 0 && p - arr[idx - 1] > 1 && <span className="px-1.5 text-xs text-slate-600">…</span>}
+            {idx > 0 && p - arr[idx - 1] > 1 && <span className="px-1.5 text-xs text-slate-500">…</span>}
             <button
               onClick={() => onChange(p)}
               aria-current={p === page ? 'page' : undefined}
-              className={`num h-9 min-w-9 rounded-lg px-2 text-sm transition ${
+              className={`num h-9 min-w-9 rounded-xl px-2 text-sm transition ${
                 p === page
                   ? 'bg-tesla font-semibold text-white'
                   : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'

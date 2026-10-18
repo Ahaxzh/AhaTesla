@@ -61,7 +61,7 @@ export default function LoginPage() {
           <div className="text-2xl font-semibold tracking-tight text-white">
             Aha<span className="text-tesla">Tesla</span>
           </div>
-          <p className="text-xs text-slate-500">行车数据 · 电费账本 · 智能推送</p>
+          <p className="text-xs text-slate-400">行车数据 · 电费账本 · 智能推送</p>
         </div>
 
         <form onSubmit={onSubmit} className="glass-card space-y-4 p-6" noValidate>
@@ -115,7 +115,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-5 text-center text-[11px] text-slate-600">AhaTesla · TeslaMate 数据面板</p>
+        <p className="mt-5 text-center text-[11px] text-slate-500">AhaTesla · TeslaMate 数据面板</p>
       </div>
     </div>
   )

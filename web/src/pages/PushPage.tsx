@@ -58,18 +58,20 @@ function WebPushCard({ https }: { https: boolean }) {
   const subscriberCount = webpush?.subscriberCount ?? 0
 
   return (
-    <section className="glass-card p-5" data-testid="webpush-card">
+    <section className="glass-card-flat p-5" data-testid="webpush-card">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/12 text-tesla">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/[0.12] text-tesla">
             <Smartphone className="h-[18px] w-[18px]" />
           </div>
           <div>
             <h2 className="text-sm font-medium text-slate-100">Web Push</h2>
-            <p className="text-[11px] text-slate-500">默认推送渠道 · 零第三方依赖</p>
+            <p className="text-[11px] text-slate-400">默认推送渠道 · 零第三方依赖</p>
           </div>
         </div>
-        {webpush && (
+        {!channels ? (
+          <span className="skeleton h-[26px] w-20 rounded-full" data-testid="webpush-status-loading" />
+        ) : webpush && (
           <span
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
               subscriberCount > 0 ? 'bg-emerald-400/10 text-emerald-400' : 'bg-white/[0.06] text-slate-400'
@@ -138,18 +140,20 @@ function TelegramCard() {
   })
 
   return (
-    <section className="glass-card p-5" data-testid="telegram-card">
+    <section className="glass-card-flat p-5" data-testid="telegram-card">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/12 text-tesla">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/[0.12] text-tesla">
             <Send className="h-[18px] w-[18px]" />
           </div>
           <div>
             <h2 className="text-sm font-medium text-slate-100">Telegram</h2>
-            <p className="text-[11px] text-slate-500">@BotFather 创建 Bot 取 Token → @userinfobot 取 ChatID</p>
+            <p className="text-[11px] text-slate-400">@BotFather 创建 Bot 取 Token → @userinfobot 取 ChatID</p>
           </div>
         </div>
-        {telegram && (
+        {!channels ? (
+          <span className="skeleton h-[26px] w-20 rounded-full" data-testid="telegram-status-loading" />
+        ) : telegram && (
           <span
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
               telegram.connected ? 'bg-emerald-400/10 text-emerald-400' : 'bg-white/[0.06] text-slate-400'
@@ -235,18 +239,20 @@ function FeishuCard() {
   })
 
   return (
-    <section className="glass-card p-5" data-testid="feishu-card">
+    <section className="glass-card-flat p-5" data-testid="feishu-card">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/12 text-tesla">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-tesla/[0.12] text-tesla">
             <Link2 className="h-[18px] w-[18px]" />
           </div>
           <div>
             <h2 className="text-sm font-medium text-slate-100">飞书</h2>
-            <p className="text-[11px] text-slate-500">应用消息推送渠道</p>
+            <p className="text-[11px] text-slate-400">应用消息推送渠道</p>
           </div>
         </div>
-        {feishu && (
+        {!channels ? (
+          <span className="skeleton h-[26px] w-20 rounded-full" data-testid="feishu-status-loading" />
+        ) : feishu && (
           <span
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
               feishu.connected ? 'bg-emerald-400/10 text-emerald-400' : 'bg-white/[0.06] text-slate-400'
@@ -317,7 +323,7 @@ export default function PushPage() {
   return (
     <div>
       <PageHeader icon={BellRing} title="推送" subtitle="Web Push / Telegram / 飞书 三渠道配置（事件开关在「设置 → 推送矩阵」）" />
-      <div className="space-y-4">
+      <div className="space-y-5">
         <WebPushCard https={https} />
         <TelegramCard />
         <FeishuCard />

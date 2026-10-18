@@ -43,7 +43,7 @@ export default function ReportsPage() {
               role="tab"
               aria-selected={tab === key}
               onClick={() => setTab(key)}
-              className={`rounded-lg px-3 py-1.5 text-xs transition ${
+              className={`rounded-xl px-3.5 py-1.5 text-xs transition ${
                 tab === key ? 'bg-tesla font-medium text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -80,7 +80,7 @@ export default function ReportsPage() {
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="glass-card">
+        <div className="glass-card-flat">
           <EmptyState
             icon={FileText}
             title="暂无报告"
@@ -98,13 +98,13 @@ export default function ReportsPage() {
               >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
                       r.type === 'weekly' ? 'bg-sky-400/10 text-sky-400' : 'bg-violet-400/10 text-violet-400'
                     }`}
                   >
                     {r.type === 'weekly' ? '周报' : '月报'}
                   </span>
-                  <span className="num text-[10px] text-slate-500">{fmtDateTime(r.createdAt)}</span>
+                  <span className="num text-[10px] text-slate-400">{fmtDateTime(r.createdAt)}</span>
                 </div>
                 <div className="truncate text-sm font-medium text-slate-100">{r.periodLabel}</div>
                 <div className="num mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">

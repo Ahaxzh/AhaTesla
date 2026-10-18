@@ -31,7 +31,7 @@ export function Timeline24h({ data }: { data: TimelineData }) {
   const summary = data.summary
 
   return (
-    <section className="glass-card p-5" data-testid="timeline-card">
+    <section className="glass-card-flat p-5" data-testid="timeline-card">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-sm font-medium text-slate-200">24 小时状态</h2>
         <span className="text-[11px] text-slate-500">最近 {data.windowHours} 小时</span>
@@ -51,13 +51,15 @@ export function Timeline24h({ data }: { data: TimelineData }) {
             return (
               <button
                 key={i}
-                className="group relative h-full cursor-pointer"
+                className="tl-seg group relative h-full cursor-pointer"
                 style={{ width: `${widthPct}%`, minWidth: 2, marginLeft: i === 0 ? `${leftPct}%` : undefined }}
                 aria-label={`${meta.label} ${hhmm(segment.from)} 至 ${hhmm(segment.to)}`}
                 data-testid={`timeline-seg-${segment.state}`}
                 data-active={active === i}
                 onMouseEnter={() => setActive(i)}
                 onMouseLeave={() => setActive(null)}
+                onFocus={() => setActive(i)}
+                onBlur={() => setActive(null)}
                 onClick={() => setActive(active === i ? null : i)}
               >
                 <span className={`block h-full w-full rounded-[3px] ${meta.bar} ${active === i ? 'opacity-100' : 'opacity-75'}`} />
@@ -66,7 +68,7 @@ export function Timeline24h({ data }: { data: TimelineData }) {
           })}
         </div>
         {/* 小时刻度 */}
-        <div className="mt-1.5 flex justify-between text-[10px] text-slate-600">
+        <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
           <span>{hhmm(new Date(windowStart).toISOString())}</span>
           <span>{hhmm(new Date(windowStart + span / 2).toISOString())}</span>
           <span>现在</span>

@@ -1,6 +1,9 @@
+import { useId } from 'react'
+
 /** AhaTesla Logo — 盾形 + 闪电 + 字母 A 组合，深色背景上红色渐变 */
 export function LogoMark({ size = 40, className = '' }: { size?: number; className?: string }) {
-  const id = `lg-${size}`
+  // useId：同页多实例时渐变 id 唯一，避免重复 DOM id
+  const id = `lg-${useId().replace(/:/g, '')}`
   return (
     <svg
       width={size}

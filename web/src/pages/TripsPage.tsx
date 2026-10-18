@@ -46,9 +46,9 @@ export default function TripsPage() {
       <PageHeader icon={Route} title="行程" subtitle={data ? `共 ${data.total} 条记录` : '行车记录'} />
 
       {/* 日期筛选 */}
-      <div className="glass-card mb-4 flex flex-wrap items-end gap-3 p-4" data-testid="trip-filter">
+      <div className="glass-card-flat mb-4 flex flex-wrap items-end gap-3 p-4" data-testid="trip-filter">
         <div>
-          <label htmlFor="filter-from" className="mb-1 block text-[11px] text-slate-500">开始日期</label>
+          <label htmlFor="filter-from" className="mb-1 block text-[11px] text-slate-400">开始日期</label>
           <input
             id="filter-from"
             type="date"
@@ -59,7 +59,7 @@ export default function TripsPage() {
           />
         </div>
         <div>
-          <label htmlFor="filter-to" className="mb-1 block text-[11px] text-slate-500">结束日期</label>
+          <label htmlFor="filter-to" className="mb-1 block text-[11px] text-slate-400">结束日期</label>
           <input
             id="filter-to"
             type="date"
@@ -84,7 +84,7 @@ export default function TripsPage() {
       {isLoading ? (
         <SkeletonList rows={6} />
       ) : !data || data.items.length === 0 ? (
-        <div className="glass-card">
+        <div className="glass-card-flat">
           <EmptyState
             icon={Route}
             title="没有符合条件的行程"
@@ -105,7 +105,7 @@ export default function TripsPage() {
                     <div className="truncate text-sm font-medium text-slate-100">
                       {trip.startAddress} → {trip.endAddress}
                     </div>
-                    <div className="num mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                    <div className="num mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
                       <span>{fmtDateTime(trip.startAt)}</span>
                       <span>{fmtKm(trip.distanceKm)} km</span>
                       <span>{fmtDuration(trip.durationMin)}</span>
@@ -114,9 +114,9 @@ export default function TripsPage() {
                   </div>
                   <div className="text-right">
                     <div className="num text-sm font-semibold text-tesla">{fmtCny(trip.costCny)}</div>
-                    <div className="num mt-0.5 text-[11px] text-slate-500">{fmtKm(trip.kwhPer100km, 1)} kWh/100km</div>
+                    <div className="num mt-0.5 text-[11px] text-slate-400">{fmtKm(trip.kwhPer100km, 1)} kWh/100km</div>
                   </div>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-600" />
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
                 </Link>
               </li>
             ))}

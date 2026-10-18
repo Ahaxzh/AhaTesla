@@ -40,7 +40,7 @@ export default function ReportDetailPage() {
           <h1 className="page-title">
             {report.type === 'weekly' ? '周报' : '月报'} · {report.periodLabel}
           </h1>
-          {report.carName && <p className="mt-0.5 text-xs text-slate-500">{report.carName}</p>}
+          {report.carName && <p className="mt-0.5 text-xs text-slate-400">{report.carName}</p>}
         </div>
       </div>
 
@@ -58,7 +58,7 @@ export default function ReportDetailPage() {
       </div>
 
       {/* 主跑路线 TOP3 */}
-      <section className="glass-card mt-4 p-5" data-testid="report-routes">
+      <section className="glass-card-flat mt-4 p-5" data-testid="report-routes">
         <h2 className="mb-3 text-sm font-medium text-slate-200">主跑路线 TOP 3</h2>
         {report.topRoutes.length === 0 ? (
           <p className="py-3 text-center text-xs text-slate-500">本期无行程记录</p>
@@ -66,11 +66,11 @@ export default function ReportDetailPage() {
           <ol className="space-y-2.5">
             {report.topRoutes.map((r, i) => (
               <li key={r.route} className="flex items-center gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-tesla/12 text-xs font-semibold text-tesla">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-tesla/[0.12] text-xs font-semibold text-tesla">
                   {i + 1}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm text-slate-200">{r.route}</span>
-                <span className="num shrink-0 text-xs text-slate-500">{r.count} 次</span>
+                <span className="num shrink-0 text-xs text-slate-400">{r.count} 次</span>
               </li>
             ))}
           </ol>
@@ -78,10 +78,10 @@ export default function ReportDetailPage() {
       </section>
 
       {/* 账本结语 */}
-      <section className="glass-card mt-4 p-5" data-testid="report-closing">
+      <section className="glass-card-flat mt-4 p-5" data-testid="report-closing">
         <h2 className="mb-2 text-sm font-medium text-slate-200">账本结语</h2>
         <p className="text-sm leading-6 text-slate-300">{report.closing}</p>
-        <p className="mt-3 text-[11px] text-slate-500">{report.baselineNote}</p>
+        <p className="mt-3 text-[11px] text-slate-400">{report.baselineNote}</p>
       </section>
     </div>
   )

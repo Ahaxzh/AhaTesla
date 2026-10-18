@@ -19,20 +19,23 @@ export function Toggle({ checked, onChange, disabled, label, ...rest }: TogglePr
       disabled={disabled}
       data-state={checked ? 'checked' : 'unchecked'}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tesla/70 disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tesla/70 disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? 'border-tesla/60 bg-tesla' : 'border-white/10 bg-white/[0.08]'
       }`}
     >
       <span
-        className={`inline-block h-4.5 h-[18px] w-4.5 w-[18px] transform rounded-full bg-white shadow transition-transform duration-200 ${
-          checked ? 'translate-x-[22px]' : 'translate-x-[3px]'
+        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${
+          checked ? 'translate-x-[23px]' : 'translate-x-[3px]'
         }`}
       />
     </button>
   )
   if (!label) return handle
   return (
-    <label className="flex cursor-pointer items-center gap-3" data-testid="toggle-row">
+    <label
+      className={`flex items-center gap-3 ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+      data-testid="toggle-row"
+    >
       {handle}
       <span className="text-sm text-slate-200">{label}</span>
     </label>

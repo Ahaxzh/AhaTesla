@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BatteryCharging, Coins, MapPin, Pencil, X, Zap } from 'lucide-react'
+import { AlertTriangle, BatteryCharging, Coins, MapPin, Pencil, X, Zap } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { Pagination } from '@/components/Pagination'
@@ -17,8 +17,8 @@ const PAGE_SIZE = 20
 const COST_SOURCE_TAG = {
   manual: { label: '已录入', cls: 'bg-emerald-400/15 text-emerald-400 border border-emerald-400/30' },
   geofence: { label: '规则计价', cls: 'bg-sky-400/10 text-sky-400 border border-sky-400/25' },
-  default: { label: '默认估算', cls: 'bg-white/[0.05] text-slate-500 border border-white/[0.08]' },
-  unknown: { label: '未计价', cls: 'bg-white/[0.05] text-slate-500 border border-white/[0.08]' },
+  default: { label: '默认估算', cls: 'bg-white/[0.05] text-slate-400 border border-white/[0.08]' },
+  unknown: { label: '未计价', cls: 'bg-white/[0.05] text-slate-400 border border-white/[0.08]' },
 } as const
 
 /** 功率曲线（SVG，SoC 横轴 × kW 纵轴，峰值打点） */
@@ -42,8 +42,8 @@ function PowerCurve({ detail }: { detail: ChargeDetail }) {
   const peakY = detail.maxKw != null ? y(detail.maxKw) : null
 
   return (
-    <div data-testid="power-curve">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="充电功率曲线">
+    <div data-testid="power-curve" className="overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[420px]" role="img" aria-label="充电功率曲线">
         {/* 网格 */}
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={PAD} x2={W - PAD} y1={PAD + f * (H - PAD * 2)} y2={PAD + f * (H - PAD * 2)} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
@@ -52,14 +52,14 @@ function PowerCurve({ detail }: { detail: ChargeDetail }) {
         {peakX != null && peakY != null && (
           <>
             <circle cx={peakX} cy={peakY} r="4" fill="#f59e0b" />
-            <text x={peakX} y={peakY - 8} textAnchor="middle" fontSize="11" fill="#f59e0b">
+            <text x={peakX} y={peakY - 9} textAnchor="middle" fontSize="14" fontWeight="600" fill="#f59e0b">
               {detail.maxKw}kW @ {detail.maxKwSoc}%
             </text>
           </>
         )}
-        <text x={PAD} y={H - 8} fontSize="10" fill="#64748b">{minSoc}% SoC</text>
-        <text x={W - PAD} y={H - 8} fontSize="10" fill="#64748b" textAnchor="end">{maxSoc}% SoC</text>
-        <text x={4} y={PAD + 4} fontSize="10" fill="#64748b">{maxKw}kW</text>
+        <text x={PAD} y={H - 8} fontSize="13" fill="#94a3b8">{minSoc}% SoC</text>
+        <text x={W - PAD} y={H - 8} fontSize="13" fill="#94a3b8" textAnchor="end">{maxSoc}% SoC</text>
+        <text x={4} y={PAD + 4} fontSize="13" fill="#94a3b8">{maxKw}kW</text>
       </svg>
     </div>
   )
@@ -87,10 +87,11 @@ export default function ChargingPage() {
     queryKey: ['charging-stats', month],
     queryFn: () => api.chargingStats('month', month || currentMonth()),
   })
-  const { data: detail } = useQuery({
+  const { data: detail, isError: detailError, refetch: refetchDetail } = useQuery({
     queryKey: ['charging-detail', detailId],
     queryFn: () => api.chargingDetail(detailId!),
     enabled: detailId != null,
+    retry: false,
   })
 
   const saveCost = useMutation({
@@ -103,6 +104,14 @@ export default function ChargingPage() {
     },
     onError: (err) => toast(err.message, 'error'),
   })
+
+  // 弹窗键盘交互：Escape 关闭
+  useEffect(() => {
+    if (detailId == null) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setDetailId(null)
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [detailId])
 
   const pageCount = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
   const byLocation = stats?.byLocation ?? []
@@ -124,22 +133,29 @@ export default function ChargingPage() {
           data-testid="month-filter"
         />
         {month && (
-          <button className="text-xs text-slate-500 hover:text-tesla" onClick={() => setMonth('')} data-testid="month-clear">
+          <button className="btn-ghost !py-2 text-xs" onClick={() => setMonth('')} data-testid="month-clear">
             清除
           </button>
         )}
       </div>
 
-      {stats && (
-        <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-3">
-          <StatCard icon={Zap} label="本月充电量" value={fmtKwh(stats.totalKWh)} />
-          <StatCard icon={Coins} label="本月电费" value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
-          <StatCard icon={BatteryCharging} label="平均单价" value={`¥${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
-        </div>
-      )}
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3" data-testid="charge-stats">
+        {stats ? (
+          <>
+            <StatCard icon={Zap} label="本月充电量" value={fmtKwh(stats.totalKWh)} />
+            <StatCard icon={Coins} label="本月电费" value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
+            <StatCard icon={BatteryCharging} label="平均单价" value={`¥${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
+          </>
+        ) : (
+          <div className="glass-card-flat col-span-2 space-y-3 p-4 sm:col-span-3">
+            <div className="skeleton h-3 w-1/4" />
+            <div className="skeleton h-6 w-2/5" />
+          </div>
+        )}
+      </div>
 
       {/* 按地点统计条形图（纯 CSS） */}
-      <section className="glass-card mb-4 p-5" data-testid="location-chart">
+      <section className="glass-card-flat mb-4 p-5" data-testid="location-chart">
         <h2 className="mb-4 text-sm font-medium text-slate-200">按地点统计（本月）</h2>
         {byLocation.length === 0 ? (
           <EmptyState icon={MapPin} title="暂无地点数据" description="充电后按地点聚合的统计会显示在这里" />
@@ -172,7 +188,7 @@ export default function ChargingPage() {
       {isLoading ? (
         <SkeletonList rows={6} />
       ) : !data || data.items.length === 0 ? (
-        <div className="glass-card">
+        <div className="glass-card-flat">
           <EmptyState icon={BatteryCharging} title="暂无充电记录" description="TeslaMate 记录到充电会话后会自动同步" />
         </div>
       ) : (
@@ -181,24 +197,24 @@ export default function ChargingPage() {
             {data.items.map((c) => {
               const tag = COST_SOURCE_TAG[c.costSource ?? 'unknown']
               return (
-                <li key={c.id} className="glass-card p-4" data-testid="charge-item">
+                <li key={c.id} className="glass-card-flat p-4" data-testid="charge-item">
                   <div className="flex items-center justify-between gap-3">
                     <button
-                      className="flex min-w-0 items-center gap-2 text-left text-sm font-medium text-slate-100 hover:text-tesla"
+                      className="flex min-w-0 items-center gap-2 rounded-lg py-1.5 text-left text-sm font-medium text-slate-100 transition hover:text-tesla"
                       onClick={() => { setDetailId(c.id); setCostInput('') }}
                       data-testid={`charge-detail-open-${c.id}`}
                     >
                       <MapPin className="h-4 w-4 shrink-0 text-tesla" />
-                      <span className="truncate">{c.locationName}</span>
+                      <span className="min-w-0 truncate">{c.locationName}</span>
                     </button>
                     <div className="flex shrink-0 items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${tag.cls}`} data-testid={`cost-source-${c.id}`}>
+                      <span className={`rounded-full px-2 py-0.5 text-[11px] ${tag.cls}`} data-testid={`cost-source-${c.id}`}>
                         {tag.label}
                       </span>
                       <span className="num text-sm font-semibold text-tesla">{fmtCny(c.costCny)}</span>
                     </div>
                   </div>
-                  <div className="num mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                  <div className="num mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
                     <span>{fmtDateTime(c.startAt)}</span>
                     <span>{fmtDuration(c.durationMin)}</span>
                     <span>{fmtKwh(c.energyAddedKWh)}</span>
@@ -206,7 +222,7 @@ export default function ChargingPage() {
                     <span>峰值 {c.powerMaxKw.toFixed(1)} kW</span>
                   </div>
                   <div className="mt-2.5 flex items-center gap-2">
-                    <span className="num text-[11px] text-slate-500">{c.startBattery}%</span>
+                    <span className="num text-[11px] text-slate-400">{c.startBattery}%</span>
                     <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
                       <div
                         className="absolute inset-y-0 rounded-full bg-gradient-to-r from-sky-500/60 to-emerald-400/80"
@@ -233,31 +249,38 @@ export default function ChargingPage() {
           onClick={(e) => { if (e.target === e.currentTarget) setDetailId(null) }}
         >
           <div className="glass-card max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-b-none p-5 sm:rounded-2xl">
-            {detail ? (
+            {detailError ? (
+              <EmptyState
+                icon={AlertTriangle}
+                title="详情加载失败"
+                description="数据源暂时不可用，请稍后重试"
+                action={{ label: '重试', onClick: () => void refetchDetail() }}
+              />
+            ) : detail ? (
               <>
                 <div className="mb-4 flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold text-slate-100">{detail.locationName}</h2>
-                    <p className="num mt-0.5 text-[11px] text-slate-500">
+                    <p className="num mt-0.5 text-[11px] text-slate-400">
                       {fmtDateTime(detail.startAt)} · {fmtDuration(detail.durationMin)}
                     </p>
                   </div>
-                  <button onClick={() => setDetailId(null)} aria-label="关闭" className="btn-ghost !p-2" data-testid="charge-detail-close">
+                  <button onClick={() => setDetailId(null)} aria-label="关闭" autoFocus className="btn-ghost !p-2" data-testid="charge-detail-close">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
 
                 <div className="num mb-4 grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-xl bg-white/[0.04] p-3">
-                    <div className="text-[10px] text-slate-500">充入</div>
+                    <div className="text-[11px] text-slate-400">充入</div>
                     <div className="mt-1 text-sm font-semibold text-white">{fmtKwh(detail.energyAddedKWh)}</div>
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
-                    <div className="text-[10px] text-slate-500">费用</div>
+                    <div className="text-[11px] text-slate-400">费用</div>
                     <div className="mt-1 text-sm font-semibold text-tesla">{fmtCny(detail.costCny)}</div>
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
-                    <div className="text-[10px] text-slate-500">单价</div>
+                    <div className="text-[11px] text-slate-400">单价</div>
                     <div className="mt-1 text-sm font-semibold text-white">¥{fmtPrice(detail.pricePerUnit)}</div>
                   </div>
                 </div>
