@@ -11,55 +11,73 @@ import { saveState } from "../core/state.mjs";
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_WINDOW_MS = 15 * 60 * 1000;
 
-// 进程内限速状态（单实例；重启清零可接受——锁窗 15 分钟足够挡爆破）
-const loginFailures = { count: 0, lockedUntil: 0 };
+// 进程内限速状态（单实例；重启清零可接受——锁窗 15 分钟足够挡爆破）。
+// 按来源 IP 分桶：原全局单桶会让任意陌生人对 /api/auth/login 空转 5 次
+// 就把真正的主人锁在门外（未认证全局 DoS）。
+const loginFailures = new Map(); // ip → { count, lockedUntil }
 export function resetLoginLockoutForTest() {
-  loginFailures.count = 0;
-  loginFailures.lockedUntil = 0;
+  loginFailures.clear();
+}
+
+function clientIp(ctx) {
+  return String(ctx.req?.socket?.remoteAddress || "unknown");
 }
 
 export function createAuthRoutes({ state, getSecret, saveStateFn = saveState, eventLog }) {
   function issueTokens(ctx) {
     const epoch = refreshEpoch();
-    const token = signJwt({ sub: state.username, typ: "access" }, getSecret(), { ttlS: TOKEN_TTL_S });
+    // access 也带 ep：revoke-all/改密后中间件立即可拒（此前 access 无 epoch，
+    // 吊销后旧 access 仍可用满 24h）
+    const token = signJwt({ sub: state.username, typ: "access", ep: epoch }, getSecret(), { ttlS: TOKEN_TTL_S });
     const refresh = signJwt({ sub: state.username, typ: "refresh", ep: epoch }, getSecret(), { ttlS: REFRESH_TOKEN_TTL_S });
     ctx.setCookie(TOKEN_COOKIE, token, { maxAge: TOKEN_TTL_S, httpOnly: true, path: "/", sameSite: "Lax" });
     ctx.setCookie(REFRESH_COOKIE, refresh, { maxAge: REFRESH_TOKEN_TTL_S, httpOnly: true, path: "/", sameSite: "Lax" });
     return token;
   }
 
-  function loginLocked() {
-    return Date.now() < loginFailures.lockedUntil;
+  function bucketFor(ip) {
+    let bucket = loginFailures.get(ip);
+    if (!bucket) {
+      bucket = { count: 0, lockedUntil: 0 };
+      loginFailures.set(ip, bucket);
+    }
+    return bucket;
   }
 
-  function recordLoginFailure() {
-    loginFailures.count += 1;
-    if (loginFailures.count >= MAX_LOGIN_FAILURES) {
-      loginFailures.lockedUntil = Date.now() + LOCK_WINDOW_MS;
-      loginFailures.count = 0;
+  function loginLocked(ip) {
+    const bucket = loginFailures.get(ip);
+    return Boolean(bucket) && Date.now() < bucket.lockedUntil;
+  }
+
+  function recordLoginFailure(ip) {
+    const bucket = bucketFor(ip);
+    bucket.count += 1;
+    if (bucket.count >= MAX_LOGIN_FAILURES) {
+      bucket.lockedUntil = Date.now() + LOCK_WINDOW_MS;
+      bucket.count = 0;
     }
   }
 
   return {
     async login(ctx) {
-      if (loginLocked()) {
-        const waitMin = Math.ceil((loginFailures.lockedUntil - Date.now()) / 60_000);
+      const ip = clientIp(ctx);
+      if (loginLocked(ip)) {
+        const waitMin = Math.ceil((loginFailures.get(ip).lockedUntil - Date.now()) / 60_000);
         throw new HttpError(429, "too_many_attempts", `登录失败次数过多，请 ${waitMin} 分钟后重试`);
       }
       const { username, password } = ctx.body || {};
       if (!username || !password) throw new HttpError(400, "bad_request", "username and password required");
       // AC-3.3：错误提示不区分「用户名不存在 vs 密码错误」；未初始化也同文案
       if (username !== state.username || !state.passwordHash) {
-        recordLoginFailure();
+        recordLoginFailure(ip);
         throw new HttpError(401, "invalid_credentials", "invalid username or password");
       }
       const ok = await verifyPassword(password, state.passwordHash);
       if (!ok) {
-        recordLoginFailure();
+        recordLoginFailure(ip);
         throw new HttpError(401, "invalid_credentials", "invalid username or password");
       }
-      loginFailures.count = 0;
-      loginFailures.lockedUntil = 0;
+      loginFailures.delete(ip);
       const token = issueTokens(ctx);
       eventLog?.log("auth.login", { username });
       return { token, user: { username: state.username } };
@@ -74,7 +92,7 @@ export function createAuthRoutes({ state, getSecret, saveStateFn = saveState, ev
       if (Number(payload.ep ?? 0) !== refreshEpoch()) {
         throw new HttpError(401, "unauthorized", "session revoked");
       }
-      const token = signJwt({ sub: state.username, typ: "access" }, getSecret(), { ttlS: TOKEN_TTL_S });
+      const token = signJwt({ sub: state.username, typ: "access", ep: refreshEpoch() }, getSecret(), { ttlS: TOKEN_TTL_S });
       ctx.setCookie(TOKEN_COOKIE, token, { maxAge: TOKEN_TTL_S, httpOnly: true, path: "/", sameSite: "Lax" });
       return { ok: true };
     },

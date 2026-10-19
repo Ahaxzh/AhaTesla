@@ -377,6 +377,9 @@ export function createSetupRoutes({
     }
   }
 
+  // 注册竞态占位（check-then-await-then-write 窗口内并发注册后写者胜）
+  let registerInProgress = false;
+
   function requireAdmin(ctx) {
     if (!ctx.user) throw new HttpError(401, "unauthorized", "authentication required");
   }
@@ -404,13 +407,21 @@ export function createSetupRoutes({
       const name = String(username ?? "").trim();
       if (!name || name.length < 3) throw new HttpError(400, "bad_request", "用户名至少 3 个字符");
       if (typeof password !== "string" || password.length < 8) throw new HttpError(400, "weak_password", "密码至少 8 位（P1 Step1 强度校验）");
-      state.username = name;
-      state.passwordHash = await hashPassword(password);
-      state.role = "admin";
-      saveStateFn(state);
-      eventLog?.log("setup.admin_registered", { username: name });
-      issueAdminToken(ctx); // 注册后自动登录（P1 Step1）
-      return { ok: true, user: { username: name, role: "admin" } };
+      // 竞态防御：hashPassword 的 await 会让并发的第二个注册请求也通过
+      // ensureUninitialized（后写者胜）。同步占位后二次校验。
+      if (registerInProgress || state.passwordHash) throw new HttpError(409, "conflict", "setup already in progress");
+      registerInProgress = true;
+      try {
+        state.username = name;
+        state.passwordHash = await hashPassword(password);
+        state.role = "admin";
+        saveStateFn(state);
+        eventLog?.log("setup.admin_registered", { username: name });
+        issueAdminToken(ctx); // 注册后自动登录（P1 Step1）
+        return { ok: true, user: { username: name, role: "admin" } };
+      } finally {
+        registerInProgress = false;
+      }
     },
 
     // POST /api/setup/test-connection —— 管理员；四级校验（探测，不落盘）。

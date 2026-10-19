@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
 import DashboardPage from './pages/DashboardPage'
@@ -34,21 +35,26 @@ function LoginRoute() {
   return <LoginPage />
 }
 
+/** 路由级错误边界包装：单页渲染异常只熄灭该页（导航壳仍在），可重试 */
+function Page({ path, children }: { path: string; children: ReactNode }) {
+  return <ErrorBoundary resetKey={path}>{children}</ErrorBoundary>
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="/login" element={<LoginRoute />} />
-        <Route path="/setup" element={<SetupPage />} />
+        <Route path="/login" element={<Page path="/login"><LoginRoute /></Page>} />
+        <Route path="/setup" element={<Page path="/setup"><SetupPage /></Page>} />
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Protected><DashboardPage /></Protected>} />
-          <Route path="/trips" element={<Protected><TripsPage /></Protected>} />
-          <Route path="/trips/:id" element={<Protected><TripDetailPage /></Protected>} />
-          <Route path="/charging" element={<Protected><ChargingPage /></Protected>} />
-          <Route path="/push" element={<Protected><PushPage /></Protected>} />
-          <Route path="/reports" element={<Protected><ReportsPage /></Protected>} />
-          <Route path="/reports/:id" element={<Protected><ReportDetailPage /></Protected>} />
-          <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
+          <Route path="/" element={<Page path="/"><Protected><DashboardPage /></Protected></Page>} />
+          <Route path="/trips" element={<Page path="/trips"><Protected><TripsPage /></Protected></Page>} />
+          <Route path="/trips/:id" element={<Page path="/trips/:id"><Protected><TripDetailPage /></Protected></Page>} />
+          <Route path="/charging" element={<Page path="/charging"><Protected><ChargingPage /></Protected></Page>} />
+          <Route path="/push" element={<Page path="/push"><Protected><PushPage /></Protected></Page>} />
+          <Route path="/reports" element={<Page path="/reports"><Protected><ReportsPage /></Protected></Page>} />
+          <Route path="/reports/:id" element={<Page path="/reports/:id"><Protected><ReportDetailPage /></Protected></Page>} />
+          <Route path="/settings" element={<Page path="/settings"><Protected><SettingsPage /></Protected></Page>} />
           {/* v2.4 电价/系统并入设置页分区，旧地址重定向 */}
           <Route path="/pricing" element={<Navigate to="/settings#settings-pricing" replace />} />
           <Route path="/system" element={<Navigate to="/settings#settings-system" replace />} />

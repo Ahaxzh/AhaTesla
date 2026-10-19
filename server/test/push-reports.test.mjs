@@ -374,26 +374,32 @@ test("heatmap 路由：90 天按本地日期聚合（P2 模块4）", async () =>
 
 // ---- m4c-c1 · 每日早报 ------------------------------------------------------------
 
-test("nextReportRun daily：07:59 → 今日 08:00；08:01 → 明日 08:00；月末跨日", () => {
-  const before = nextReportRun("daily", new Date("2026-10-16T07:59:00"));
-  assert.equal(before.getDate(), 16);
-  assert.equal(before.getHours(), 8);
-  const after = nextReportRun("daily", new Date("2026-10-16T08:01:00"));
-  assert.equal(after.getDate(), 17);
-  assert.equal(after.getHours(), 8);
+test("nextReportRun daily：07:59 → 今日 08:00；08:01 → 明日 08:00；月末跨日（tz 感知）", () => {
+  // tz=UTC 显式传入：断言按 UTC 墙钟（不依赖测试机进程时区）
+  const before = nextReportRun("daily", new Date("2026-10-16T07:59:00Z"), "UTC");
+  assert.equal(before.getUTCDate(), 16);
+  assert.equal(before.getUTCHours(), 8);
+  const after = nextReportRun("daily", new Date("2026-10-16T08:01:00Z"), "UTC");
+  assert.equal(after.getUTCDate(), 17);
+  assert.equal(after.getUTCHours(), 8);
   // 月末 10-31 08:01 → 11-01
-  const monthEnd = nextReportRun("daily", new Date("2026-10-31T08:01:00"));
-  assert.equal(monthEnd.getMonth(), 10);
-  assert.equal(monthEnd.getDate(), 1);
+  const monthEnd = nextReportRun("daily", new Date("2026-10-31T08:01:00Z"), "UTC");
+  assert.equal(monthEnd.getUTCMonth(), 10);
+  assert.equal(monthEnd.getUTCDate(), 1);
+  // Asia/Shanghai：UTC 00:01 = 北京 08:01 → 次日北京 08:00 = 次日 00:00Z
+  const sh = nextReportRun("daily", new Date("2026-10-16T00:01:00Z"), "Asia/Shanghai");
+  assert.equal(sh.getUTCDate(), 17);
+  assert.equal(sh.getUTCHours(), 0);
 });
 
-test("buildReport daily：昨日窗口聚合 + 上周同日对比 + 本月累计 + 充电摘要 + 最低胎压", async () => {
+test("buildReport daily：昨日窗口聚合 + 上周同日对比 + 本月累计 + 充电摘要 + 最低胎压（tz 感知）", async () => {
   useMemoryStore();
-  const now = new Date("2026-10-15T10:00:00"); // 日报窗口 = 10-14 00:00 ~ 10-15 00:00（本地）
-  const mk = (h, m = 0) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, h, m);
+  // tz=UTC 显式传入：窗口边界按 UTC 墙钟构造（不依赖测试机进程时区）
+  const now = new Date("2026-10-15T10:00:00Z"); // 日报窗口 = 10-14 00:00 ~ 10-15 00:00（UTC）
+  const mk = (h, m = 0) => new Date(Date.UTC(2026, 9, 14, h, m));
   const dayStart = mk(0), dayEnd = mk(24);
   const lwStart = new Date(dayStart.getTime() - 7 * 86400000), lwEnd = new Date(dayEnd.getTime() - 7 * 86400000);
-  const moStart = new Date(dayStart.getFullYear(), dayStart.getMonth(), 1);
+  const moStart = new Date(Date.UTC(2026, 9, 1));
   const driveRows = {
     [dayStart.toISOString()]: [
       { id: 1, distance_km: 20, duration_min: 40, cost: 3.0 },
@@ -417,7 +423,7 @@ test("buildReport daily：昨日窗口聚合 + 上周同日对比 + 本月累计
       ? [{ id: 9, end_date: "2026-10-14T15:30:00", charge_energy_added: 41.2, geofence_name: "家庭充电桩" }]
       : [])
   };
-  const report = await buildReport({ kind: "daily", now, deps });
+  const report = await buildReport({ kind: "daily", now, tz: "UTC", deps });
   assert.equal(report.kpi.distanceKm, 42.5);
   assert.equal(report.kpi.driveCount, 2);
   assert.equal(report.kpi.totalCost, 6.32);
@@ -481,7 +487,8 @@ test("report 调度器 daily：空日跳过 + 有数据投递 + 跨重启去重 
   assert.ok(pushes[0].kpi && pushes[0].dateLabel && pushes[0].type === "daily");
   assert.equal(store.listReportSnapshots("daily", 10).length, 0);
   const dayKey = pushes[0] && sent.report.periodStart.slice(0, 10);
-  assert.equal(state.dailyLastRun, dayKey);
+  // M1 修复：去重键落 SQLite kv（saveState 白名单会丢 state.dailyLastRun，重启即重发）
+  assert.equal(store.kvGet("report:dailyLastRun"), dayKey);
   // 同日再触发（跨重启场景）→ 去重
   const dup = await scheduler2.runKind("daily");
   assert.equal(dup, null);

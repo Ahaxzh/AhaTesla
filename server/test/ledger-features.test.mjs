@@ -51,18 +51,35 @@ test("isOffPeak：谷段窗口判断（含跨午夜）", () => {
 });
 
 test("touSplitSession：跨午夜会话按时长比例分摊，费用 = Σ段电量×段价", () => {
-  // 22:00 → 次日 02:00（UTC），谷窗 23:00-07:00：峰 60min 谷 180min，共 240min
+  // 窗口按「时区墙钟」解释：tz=UTC 时 22:00→02:00 会话跨 23:00-07:00 谷窗
+  // （峰 60min 谷 180min，共 240min）—— 时区参数显式给 UTC 保持纯数学口径。
   const start = Date.UTC(2026, 0, 1, 22, 0);
   const end = Date.UTC(2026, 0, 2, 2, 0);
   const split = touSplitSession({
     startMs: start, endMs: end, energyKwh: 40,
-    window: { offPeakStart: "23:00", offPeakEnd: "07:00", offPeakRate: 0.3, peakRate: 1.2 }
+    window: { offPeakStart: "23:00", offPeakEnd: "07:00", offPeakRate: 0.3, peakRate: 1.2 },
+    tz: "UTC"
   });
   assert.ok(split);
   assert.equal(split.offPeakKwh, 30); // 180/240 × 40
   assert.equal(split.peakKwh, 10);     // 60/240 × 40
   assert.equal(split.costCny, 30 * 0.3 + 10 * 1.2); // 9 + 12 = 21
   assert.equal(split.source, "geofence-tou");
+});
+
+test("touSplitSession：默认 Asia/Shanghai —— 整夜谷电充电不得按峰价计（时区修复回归）", () => {
+  // 北京 23:00 → 次日 07:00（= UTC 15:00 → 23:00）整段在谷窗内。
+  // 修复前用 getUTCHours() 比对窗口，整夜被错判为峰电（8 小时平移）。
+  const start = Date.UTC(2026, 0, 1, 15, 0);
+  const end = Date.UTC(2026, 0, 1, 23, 0); // 北京次日 07:00
+  const split = touSplitSession({
+    startMs: start, endMs: end, energyKwh: 56,
+    window: { offPeakStart: "23:00", offPeakEnd: "07:00", offPeakRate: 0.3, peakRate: 1.2 }
+  });
+  assert.ok(split);
+  assert.equal(split.offPeakKwh, 56); // 全谷
+  assert.equal(split.peakKwh, 0);
+  assert.equal(split.costCny, 56 * 0.3);
 });
 
 test("priceFromGeofence TOU 优先于固定单价（同围栏配置了 tou 窗口）", () => {
@@ -73,7 +90,7 @@ test("priceFromGeofence TOU 优先于固定单价（同围栏配置了 tou 窗�
     start_at: "2026-01-01T22:00:00Z", end_at: "2026-01-02T02:00:00Z"
   };
   const tou = new Map([[5, { offPeakStart: "23:00", offPeakEnd: "07:00", offPeakRate: 0.3, peakRate: 1.2 }]]);
-  const priced = priceChargingSession(session, 1, { touByGeofenceId: tou });
+  const priced = priceChargingSession(session, 1, { touByGeofenceId: tou, tz: "UTC" });
   assert.equal(priced.source, "geofence-tou");
   assert.equal(priced.costCny, 21);
 });

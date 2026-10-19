@@ -2,6 +2,7 @@
 import { HttpError } from "./http-kit.mjs";
 import { getGeofences } from "../core/teslamate-queries.mjs";
 import { setDefaultRate } from "../core/state.mjs";
+import { bumpPricingVersion } from "../core/fifo-ledger.mjs";
 import { finiteNumber } from "../core/util.mjs";
 
 const TOU_KEY = (id) => `pricing:location-tou:${id}`;
@@ -64,6 +65,7 @@ export function createPricingRoutes({ db, state, setDefaultRateFn = setDefaultRa
       } else {
         throw new HttpError(400, "bad_request", "priceMode must be 'fixed' or 'tou'");
       }
+      bumpPricingVersion(); // 计价规则变化 → 全站回放缓存立即失效
       const tou = touFor(id);
       return { ok: true, id, priceMode: body.priceMode, ...(tou ? { tou } : {}) };
     },
@@ -74,6 +76,7 @@ export function createPricingRoutes({ db, state, setDefaultRateFn = setDefaultRa
         throw new HttpError(400, "bad_request", "rate must be a number in [0, 20] (CNY/kWh)");
       }
       setDefaultRateFn(state, rate, "api");
+      bumpPricingVersion();
       return { ok: true, defaultRateCnyPerKwh: state.pricing.defaultRateCnyPerKwh };
     },
 

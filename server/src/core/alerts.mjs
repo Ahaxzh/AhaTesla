@@ -13,21 +13,23 @@ function finite(v) {
 }
 
 /**
- * 巡检最新四轮胎压。
- * 返回 null(无数据/未越限)或 { fl, fr, rl, rr, min, suggest }。
+ * 巡检最新四轮胎压（m4e 多车：carId 缺省巡全部车，任一车越限即返回并带 carId）。
+ * 返回 null(无数据/未越限)或 { carId, fl, fr, rl, rr, min, suggest }。
  */
-export async function checkTirePressure(db, { thresholdBar = TIRE_THRESHOLD_BAR } = {}) {
+export async function checkTirePressure(db, { thresholdBar = TIRE_THRESHOLD_BAR, carId = null } = {}) {
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   let latest = null;
   let suggest = TIRE_DEFAULT_SUGGEST;
   try {
     const rows = await db.query(`
-      SELECT p.tpms_pressure_fl::float8 AS fl, p.tpms_pressure_fr::float8 AS fr,
+      SELECT p.car_id, p.tpms_pressure_fl::float8 AS fl, p.tpms_pressure_fr::float8 AS fr,
              p.tpms_pressure_rl::float8 AS rl, p.tpms_pressure_rr::float8 AS rr
       FROM positions p
       WHERE p.tpms_pressure_fl IS NOT NULL
+        AND ($1::int IS NULL OR p.car_id = $1::int)
       ORDER BY p.id DESC
       LIMIT 1
-    `);
+    `, [car]);
     latest = rows?.[0] ?? null;
     // 建议值:同车近 200 条读数的 P90(数据不足 20 条回落默认)
     const p90 = await db.queryOne(`
@@ -36,10 +38,11 @@ export async function checkTirePressure(db, { thresholdBar = TIRE_THRESHOLD_BAR 
         SELECT p.tpms_pressure_fl::float8 AS val
         FROM positions p
         WHERE p.tpms_pressure_fl IS NOT NULL
+          AND ($1::int IS NULL OR p.car_id = $1::int)
         ORDER BY p.id DESC
         LIMIT 200
       ) v
-    `);
+    `, [latest?.car_id ?? car]);
     if (p90?.p90 != null && Number(p90.p90) >= thresholdBar) suggest = Math.round(p90.p90 * 10) / 10;
   } catch {
     return null; // 巡检失败静默(断联告警另有 outage 事件负责)
@@ -52,5 +55,5 @@ export async function checkTirePressure(db, { thresholdBar = TIRE_THRESHOLD_BAR 
   if (vals.length < 3) return null; // 至少三轮有效才判定
   const min = Math.min(...vals);
   if (min >= thresholdBar) return null;
-  return { ...tp, min: Math.round(min * 100) / 100, suggest };
+  return { carId: latest.car_id != null ? Number(latest.car_id) : null, ...tp, min: Math.round(min * 100) / 100, suggest };
 }

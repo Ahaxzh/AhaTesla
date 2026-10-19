@@ -10,6 +10,7 @@ import {
   FileBarChart,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
+import { setCurrencySymbol } from '@/utils/format'
 import { LogoFull } from '@/components/Logo'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCar } from '@/contexts/CarContext'
@@ -248,6 +249,17 @@ export function AppLayout() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const { t } = useI18n()
+
+  // 实例货币符号注入格式化层（修复：货币设置保存后从未被消费，全站硬编码 ¥）
+  const { data: instanceSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.settings,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  useEffect(() => {
+    setCurrencySymbol(instanceSettings?.currency?.symbol)
+  }, [instanceSettings?.currency?.symbol])
 
   useEffect(() => {
     setApiHandlers({

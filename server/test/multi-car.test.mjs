@@ -9,6 +9,7 @@ import {
 import { batchesFromChargingSessions, allocateDriveCosts } from "../src/core/pricing-ledger.mjs";
 import { buildReport } from "../src/core/report-engine.mjs";
 import { buildDemoDataset, createDemoDb } from "../src/core/demo-data.mjs";
+import { TripMonitor } from "../src/core/trip-monitor.mjs";
 
 function captureDb(reply = {}) {
   const calls = [];
@@ -149,4 +150,113 @@ test("demo 双车：数据集/清单/按车查询", async () => {
 
   const all = await db.query(...(() => { const q = listDrivesSql({}); return [q.sql, [...q.params, 500, 0]]; })());
   assert.ok(all.length > rows.length, "不过滤时含两车行程");
+});
+
+// ---- H1 回归：FIFO 全量回放（fifo-ledger） ------------------------------------
+// 修复前每个调用点只喂"当前页/单条"行程对着满额批次池抽电 —— 第二趟行程
+// 仍按最老批次计价，账本闭包失效。修复后所有路径走同一次全量回放。
+
+test("H1 getFifoLedger：晚近行程按已被历史扣减后的批次计价（D2 抽 C2 而非 C1）", async () => {
+  // 批次 1.5 kWh/个 = 单趟行程耗电（10km 理想续航 × 0.15 kWh/km）→ 首趟即耗尽首批
+  const charging = [
+    { id: 1, car_id: 1, start_date: "2026-01-01 10:00", end_date: "2026-01-01 11:00", charge_energy_added: 1.5, cost: 10, geofence_id: null },
+    { id: 2, car_id: 1, start_date: "2026-02-01 10:00", end_date: "2026-02-01 11:00", charge_energy_added: 1.5, cost: 20, geofence_id: null }
+  ];
+  const drives = [
+    { id: 101, car_id: 1, start_at: "2026-01-02 08:00", end_at: "2026-01-02 08:30", distance_km: 40, duration_min: 30, efficiency: 150, ideal_used_km: 10, rated_used_km: 10 },
+    { id: 102, car_id: 1, start_at: "2026-02-02 08:00", end_at: "2026-02-02 08:30", distance_km: 40, duration_min: 30, efficiency: 150, ideal_used_km: 10, rated_used_km: 10 }
+  ];
+  const db = {
+    query: async (sql) => {
+      const s = String(sql);
+      if (s.includes("ideal_used_km")) return drives;
+      if (s.includes("FROM charging_processes cp")) return charging;
+      if (s.includes("FROM cars")) return [{ id: 1, efficiency: 150 }];
+      if (s.includes("FROM geofences")) return [];
+      if (s.includes("max(end_date)") && s.includes("FROM drives")) return [{ max_id: 102, max_end: "2026-02-02 08:30" }];
+      if (s.includes("max(end_date)")) return [{ max_id: 2, max_end: "2026-02-01 11:00" }];
+      return [];
+    },
+    queryOne: async (sql) => (await db.query(sql))[0] ?? null
+  };
+  const { getFifoLedger, clearFifoLedgerCache } = await import("../src/core/fifo-ledger.mjs");
+  clearFifoLedgerCache();
+  const ledger = await getFifoLedger(db, { pricing: { defaultRateCnyPerKwh: 1, history: [] } }, 1);
+  const d1 = ledger.byDriveId.get("101");
+  const d2 = ledger.byDriveId.get("102");
+  assert.equal(d1.cost_cny, 10); // D1 抽 C1：10kWh × ¥1/kWh
+  assert.equal(d2.cost_cny, 20); // D2 必须抽 C2（¥2/kWh）—— 修复前会再抽 C1 报 ¥10
+});
+
+test("H1 跨车回放互不干扰：B 轴推进不推高 A 的计价", async () => {
+  const charging = [
+    { id: 1, car_id: 1, start_date: "2026-01-01 10:00", end_date: "2026-01-01 11:00", charge_energy_added: 1.5, cost: 10, geofence_id: null },
+    { id: 2, car_id: 2, start_date: "2026-01-01 12:00", end_date: "2026-01-01 13:00", charge_energy_added: 1.5, cost: 30, geofence_id: null }
+  ];
+  const drives = [
+    { id: 201, car_id: 2, start_at: "2026-01-01 11:30", end_at: "2026-01-01 12:00", distance_km: 40, duration_min: 30, efficiency: 150, ideal_used_km: 10, rated_used_km: 10 },
+    { id: 202, car_id: 1, start_at: "2026-01-02 08:00", end_at: "2026-01-02 08:30", distance_km: 40, duration_min: 30, efficiency: 150, ideal_used_km: 10, rated_used_km: 10 }
+  ];
+  const db = {
+    query: async (sql) => {
+      const s = String(sql);
+      if (s.includes("ideal_used_km")) return drives;
+      if (s.includes("FROM charging_processes cp")) return charging;
+      if (s.includes("FROM cars")) return [{ id: 1, efficiency: 150 }, { id: 2, efficiency: 150 }];
+      if (s.includes("FROM geofences")) return [];
+      if (s.includes("max(end_date)") && s.includes("FROM drives")) return [{ max_id: 202, max_end: "2026-01-02 08:30" }];
+      if (s.includes("max(end_date)")) return [{ max_id: 2, max_end: "2026-01-01 13:00" }];
+      return [];
+    },
+    queryOne: async (sql) => (await db.query(sql))[0] ?? null
+  };
+  const { getFifoLedger, clearFifoLedgerCache } = await import("../src/core/fifo-ledger.mjs");
+  clearFifoLedgerCache();
+  const ledger = await getFifoLedger(db, { pricing: { defaultRateCnyPerKwh: 1, history: [] } }, 1);
+  assert.equal(ledger.byDriveId.get("202").cost_cny, 10); // A 车 202 抽 A 池 C1（¥1/kWh）
+});
+
+// ---- H4 回归：监视器按车分会话/游标 -------------------------------------------
+
+test("H4 多车乱序结算：B 车新行程不得推高 A 车游标，A 晚结算仍发 trip_end", () => {
+  const events = [];
+  const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
+  monitor.reconcile({ completed: [], actives: [], max_drive_id: 100, latest_charging_id: 500, latest_charging_done_id: 500 }, "t0");
+
+  // B 车（id 101）先结算；A 车（id 100 ≤ 全局 max，但 > A 桶游标）后结算
+  monitor.reconcile({ completed: [{ id: 101, car_id: 2, start_at: "2026-10-10 10:00", end_at: "2026-10-10 10:20" }], actives: [] }, "t1");
+  monitor.reconcile({ completed: [{ id: 100, car_id: 1, start_at: "2026-10-10 09:00", end_at: "2026-10-10 09:30" }], actives: [] }, "t2");
+
+  // 两车各自 30 分钟闲置超时 → 两个独立 trip_end（此前全局会话会合并成 1 个，
+  // 且 A 的 100 因 id ≤ 全局游标被吞）
+  const t3 = "2026-10-10 23:00";
+  monitor.reconcile({ completed: [], actives: [] }, t3);
+  const tripEnds = events.filter((e) => e.type === "trip_end");
+  assert.equal(tripEnds.length, 2, `应有两车各自 trip_end，实际 ${tripEnds.length}`);
+  assert.ok(tripEnds.some((e) => e.segment_ids.includes(100)));
+  assert.ok(tripEnds.some((e) => e.segment_ids.includes(101)));
+});
+
+test("H4 多车并发驾驶互不合并：短间隔跨车行程产出独立会话", () => {
+  const events = [];
+  const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
+  monitor.reconcile({ completed: [], actives: [], max_drive_id: 0, latest_charging_id: 0, latest_charging_done_id: 0 }, "t0");
+  // A 车 10:00 停；B 车 10:10-10:20 开（间隔 10 分钟 < 30 分钟闲置阈值）
+  monitor.reconcile({ completed: [{ id: 1, car_id: 1, start_at: "2026-10-10 09:30", end_at: "2026-10-10 10:00" }], actives: [] }, "t1");
+  monitor.reconcile({ completed: [{ id: 2, car_id: 2, start_at: "2026-10-10 10:10", end_at: "2026-10-10 10:20" }], actives: [] }, "t2");
+  monitor.reconcile({ completed: [], actives: [] }, "2026-10-10 23:00");
+  const tripEnds = events.filter((e) => e.type === "trip_end");
+  assert.equal(tripEnds.length, 2, `两车各自成会话（修复前合并为 1），实际 ${tripEnds.length}`);
+});
+
+test("H4 多车充电乱序结算：B 的 done 不得吞掉 A 的晚结算充电", () => {
+  const events = [];
+  const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
+  monitor.reconcile({ completed: [], actives: [], max_drive_id: 0, latest_charging_id: 600, latest_charging_done_id: 600 }, "t0");
+
+  monitor.reconcileChargingClosed([{ id: 601, car_id: 2, start_at: "2026-10-10 12:00", end_at: "2026-10-10 13:00" }], "t1");
+  monitor.reconcileChargingClosed([{ id: 600, car_id: 1, start_at: "2026-10-10 11:00", end_at: "2026-10-10 11:30" }], "t2");
+
+  const dones = events.filter((e) => e.type === "charging_done");
+  assert.equal(dones.length, 2, `A(600) 与 B(601) 各自 charging_done，实际 ${dones.length}`);
 });

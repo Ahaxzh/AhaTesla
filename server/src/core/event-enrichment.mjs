@@ -15,27 +15,9 @@
 import { getGeofences } from "./teslamate-queries.mjs";
 import { getAddresses } from "./teslamate-queries.mjs";
 import { listChargingForStats } from "./teslamate-queries.mjs";
-import { batchesFromChargingSessions, allocateDriveCosts, driveEnergyKwh, priceChargingSession } from "./pricing-ledger.mjs";
-import { getStore } from "./state.mjs";
-
-/** TOU 分时窗口表（与 ledger-routes 同源 kv pricing:location-tou:<id>），供计价复用 */
-function touOptionsFor(sessions) {
-  try {
-    const ids = [...new Set((sessions || []).map((s) => Number(s.geofence_id)).filter(Number.isFinite))];
-    if (!ids.length) return {};
-    const store = getStore();
-    const map = new Map();
-    for (const id of ids) {
-      const raw = store.kvGet?.(`pricing:location-tou:${id}`);
-      if (raw) {
-        try { map.set(id, JSON.parse(raw)); } catch { /* 坏数据忽略 */ }
-      }
-    }
-    return map.size ? { touByGeofenceId: map } : {};
-  } catch {
-    return {};
-  }
-}
+import { priceChargingSession } from "./pricing-ledger.mjs";
+import { getFifoLedger } from "./fifo-ledger.mjs";
+import { pricingOptionsFor } from "./pricing-options.mjs";
 
 function finite(v) {
   const n = Number(v);
@@ -49,7 +31,8 @@ function round(v, digits = 1) {
 }
 
 /** 行程事件富化：查各 drive 段的聚合指标 + 端点信息。
- *  opts（P1-b）：{defaultRate, defaultRateHistory} 提供时附加 FIFO 计价批次明细。 */
+ *  opts：{state} 提供时附加 FIFO 计价结果（能耗/电费/省钱/批次明细）——
+ *  修复推送小结从未带出 ⚡/¥/💰 数字的问题（模板有字段、富化层从未填）。 */
 export async function enrichTripEndEvent(db, event, opts = {}) {
   const ids = (event.segment_ids ?? []).map(Number).filter(Number.isInteger);
   if (!ids.length) return event;
@@ -178,27 +161,34 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
     || await nearestAddr(last.end_lat, last.end_lng)
     || null;
 
-  // P1-b 计价批次明细：FIFO 切片聚合到充电地点粒度（行程结算时点批次可能未全结算,
-  // 取当前已可用部分;任何失败静默省略字段——渲染端数据可得才显示）。
-  // m4e：批次按本行程的车取（allocateDriveCosts 内部还会按 car_id 二次分池兜底）
+  // P1-b 计价：全量回放缓存取本组行程段的分摊（与 Web 端同一套数字），
+    // 并补齐能耗/电费/省钱核心数字（模板字段此前从未被填充）。
+  // 任何失败静默省略字段——渲染端数据可得才显示。
   let fifoBatches = null;
+  let energyKwh = null;
+  let costCny = null;
+  let savedCny = null;
   const tripCarId = Number.isInteger(Number(first.car_id)) && Number(first.car_id) > 0 ? Number(first.car_id) : null;
-  if (opts.defaultRate != null) {
+  if (opts.state?.pricing) {
     try {
-      const sessions = await listChargingForStats(db, { carId: tripCarId });
-      const batches = batchesFromChargingSessions(sessions, touOptionsFor(sessions));
-      if (batches.length) {
-        const { allocations } = allocateDriveCosts({
-          drives: rows.map((r) => ({ id: r.id, start_at: r.start_date, estimated_kwh: driveEnergyKwh(r) })),
-          batches,
-          defaultRate: opts.defaultRate,
-          defaultRateHistory: opts.defaultRateHistory || []
-        });
-        const nameByCp = new Map(sessions.map((s) => [Number(s.id), s.geofence_name || null]));
+      const ledger = await getFifoLedger(db, opts.state, tripCarId);
+      const allocs = rows.map((r) => ledger.byDriveId.get(String(r.id))).filter(Boolean);
+      const pricedAllocs = allocs.filter((a) => a.cost_cny_precise != null);
+      const energySum = allocs.reduce((sum, a) => sum + (a.energy_kwh ?? 0), 0);
+      const costSum = pricedAllocs.reduce((sum, a) => sum + a.cost_cny_precise, 0);
+      if (allocs.length) {
+        energyKwh = round(energySum, 1);
+        if (pricedAllocs.length === allocs.length) {
+          costCny = round(costSum, 2);
+          const baseline = { literPer100km: 8.0, fuelPriceCnyPerL: 8.20, ...(opts.state.fuelBaseline || {}) };
+          const perKm = baseline.literPer100km / 100 * baseline.fuelPriceCnyPerL;
+          savedCny = round(totalKm * perKm - costSum, 2);
+        }
+        const nameByCp = new Map(ledger.chargingRows.map((s) => [Number(s.id), s.geofence_name || null]));
         const merged = new Map();
-        for (const alloc of allocations) {
+        for (const alloc of allocs) {
           for (const slice of alloc.slices || []) {
-            if (slice.source === "unpriced") continue;
+            if (slice.source === "unpriced" || slice.source === "parking_loss") continue;
             const key = slice.source === "batch" ? `cp-${slice.batch_id}` : "default";
             const label = slice.source === "batch"
               ? (nameByCp.get(Number(String(slice.batch_id).replace(/^cp-/, ""))) || "充电批次")
@@ -218,7 +208,10 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
     carId: tripCarId,
     distanceKm: round(totalKm, 1),
     durationMin: round(totalMin, 0),
-    kwhPer100km: totalKm > 2 ? round((event.energyKwh ?? 0) / totalKm * 100, 1) : null,
+    ...(energyKwh != null ? { energyKwh } : {}),
+    ...(costCny != null ? { costCny } : {}),
+    ...(savedCny != null ? { savedCny } : {}),
+    kwhPer100km: totalKm > 2 && energyKwh != null ? round(energyKwh / totalKm * 100, 1) : null,
     avgTempC: temps.length ? round(temps.reduce((s, v) => s + v, 0) / temps.length, 1) : null,
     minTempC: minTemps.length ? round(Math.min(...minTemps), 1) : null,
     maxSpeedKmh: round(maxSpeed, 0),
@@ -232,13 +225,14 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
   };
 }
 
-/** 充电完成事件富化：补温度/电量 + P1-d 同站近 5 次均价对比与提前中止标记 */
-export async function enrichChargingDoneEvent(db, event) {
+/** 充电完成事件富化：补温度/电量/能耗/费用 + P1-d 同站近 5 次均价对比与提前中止标记。
+ *  opts：{state} 提供时按四层回退计价并带出「充入 X kWh · ¥Y」（模板字段此前从未填充）。 */
+export async function enrichChargingDoneEvent(db, event, opts = {}) {
   const id = Number(event.charging_process_id);
   if (!Number.isInteger(id)) return event;
   try {
     const rows = await db.query(`
-      SELECT c.end_battery_level, cp.charge_energy_added::float8 AS added,
+      SELECT cp.end_battery_level, cp.charge_energy_added::float8 AS added,
              cp.geofence_id, cp.car_id, cp.start_date, cp.end_date, cp.cost,
              g.name AS geofence_name,
              g.cost_per_unit AS geofence_cost_per_unit, g.session_fee AS geofence_session_fee,
@@ -261,12 +255,25 @@ export async function enrichChargingDoneEvent(db, event) {
     if (r.car_id != null) out.carId = Number(r.car_id);
     if (out.endBattery != null && out.endBattery < 80) out.endedEarly = true;
 
+    // 能耗/费用（四层回退，与充电页同口径）：有可用价才带出
+    if (opts.state?.pricing && finite(r.added) != null) {
+      try {
+        const priced = priceChargingSession(
+          { ...r, charge_energy_added: r.added },
+          opts.state.pricing.defaultRateCnyPerKwh,
+          await pricingOptionsFor(db, opts.state)
+        );
+        out.energyKwh = round(r.added, 1);
+        if (priced.costCny != null) out.costCny = priced.costCny;
+      } catch { /* 计价失败省略 */ }
+    }
+
     // P1-d 同站近 5 次有效均价对比（不含本次；同车；分层计价:实付 > 围栏价/TOU > 默认价）
     if (r.geofence_id != null) {
       try {
         const sessions = await listChargingForStats(db, { carId: Number.isInteger(Number(r.car_id)) ? Number(r.car_id) : null });
-        const opts = touOptionsFor(sessions);
-        const priceOf = (s) => priceChargingSession(s, null, opts)?.pricePerUnit ?? null;
+        const priceOpts = await pricingOptionsFor(db, opts.state);
+        const priceOf = (s) => priceChargingSession(s, null, priceOpts)?.pricePerUnit ?? null;
         const thisPrice = priceOf({ ...r, charge_energy_added: r.added });
         const past = sessions
           .filter((s) => Number(s.geofence_id) === Number(r.geofence_id)
@@ -304,9 +311,14 @@ export async function enrichChargingStartEvent(db, event) {
     if (r.location_name) out.locationName = r.location_name;
     if (r.car_id != null) out.carId = Number(r.car_id);
 
-    // 电量：最新有效 position 读数（充电刚开始即起点电量）
+    // 电量：本车最新有效 position 读数（充电刚开始即起点电量；m4e 多车必须
+    // 按车过滤，否则 B 车刚上报会把 A 车的充电开始电量标成 B 车的）
+    const carFilter = Number.isInteger(r.car_id) && r.car_id > 0;
     const p = await db.queryOne(
-      `SELECT p.battery_level::float8 AS bl FROM positions p WHERE p.battery_level IS NOT NULL ORDER BY p.id DESC LIMIT 1`
+      `SELECT p.battery_level::float8 AS bl FROM positions p
+       WHERE p.battery_level IS NOT NULL AND ($1::int IS NULL OR p.car_id = $1::int)
+       ORDER BY p.id DESC LIMIT 1`,
+      [carFilter ? Number(r.car_id) : null]
     ).catch(() => null);
     if (p && finite(p.bl) != null) out.batteryPct = Math.round(finite(p.bl));
 

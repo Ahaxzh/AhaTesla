@@ -22,12 +22,13 @@ const nodeRequire = createRequire(import.meta.url);
 
 const HM_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
 
-export function inQuietHours(quietHours, now = new Date()) {
+export function inQuietHours(quietHours, now = new Date(), tz = "Asia/Shanghai") {
   const qh = quietHours && quietHours.enabled ? quietHours : null;
   if (!qh || !HM_RE.test(String(qh.start)) || !HM_RE.test(String(qh.end))) return false;
   if (qh.start === qh.end) return false;
+  // 静音窗口按用户本地墙钟理解；跟随实例时区（此前硬编码上海）
   const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai", hour: "2-digit", minute: "2-digit", hour12: false
+    timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false
   });
   const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
   const cur = Number(parts.hour === "24" ? "0" : parts.hour) * 60 + Number(parts.minute);
@@ -699,7 +700,7 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
    */
   async function dispatch(event, { matrix } = {}) {
     // P1-a 静音时段：trip_end 命中 → 摘要入 backlog，次日早报合并呈现（不丢弃）
-    if (event.type === "trip_end" && inQuietHours(state.pushRules?.quietHours)) {
+    if (event.type === "trip_end" && inQuietHours(state.pushRules?.quietHours, new Date(), state?.settings?.timezone || "Asia/Shanghai")) {
       const rules = state.pushRules;
       const backlog = Array.isArray(rules.quietBacklog) ? rules.quietBacklog : [];
       backlog.push(quietDigest(event));

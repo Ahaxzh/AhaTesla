@@ -95,10 +95,12 @@ export interface Charge {
   energyAddedKWh: number
   costCny: number
   pricePerUnit: number
-  startBattery: number
-  endBattery: number
+  /** SoC 采样缺失时为 null（服务端 ?? null 直传，展示层需判空） */
+  startBattery: number | null
+  endBattery: number | null
   durationMin: number
-  powerMaxKw: number
+  /** 峰值功率：charges 表无采样时为 null（渲染层判空，防 null.toFixed 白屏） */
+  powerMaxKw: number | null
   /** 费用来源三态（P4）：manual=已录入 / geofence=规则计价 / default=默认估算 */
   costSource?: 'manual' | 'geofence' | 'default' | 'unknown'
 }
@@ -115,7 +117,8 @@ export interface ChargeDetail extends Charge {
 export interface DashboardData {
   car: {
     name: string
-    currentBattery: number
+    /** 车辆 asleep/数据缺失时为 null（BatteryRing 与文案需判空，防"0%"红圈） */
+    currentBattery: number | null
     rangeKm: number
     state: string
     odometerKm: number

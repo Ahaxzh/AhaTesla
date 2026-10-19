@@ -19,7 +19,13 @@ export function parseCookies(header) {
     if (idx === -1) continue;
     const key = part.slice(0, idx).trim();
     const value = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(value);
+    if (!key) continue;
+    // 畸形百分号编码不应炸掉整个请求（URIError 此前发生在 try 块之外）
+    try {
+      out[key] = decodeURIComponent(value);
+    } catch {
+      out[key] = value;
+    }
   }
   return out;
 }
@@ -104,10 +110,16 @@ export function createApp({ onError = () => {} } = {}) {
           res.end(out.body);
           return ctx;
         },
-        setCookie(name, value, { maxAge, httpOnly = true, path = "/", sameSite = "Lax" } = {}) {
+        setCookie(name, value, { maxAge, httpOnly = true, path = "/", sameSite = "Lax", secure } = {}) {
           let cookie = `${name}=${encodeURIComponent(value)}; Path=${path}; SameSite=${sameSite}`;
           if (httpOnly) cookie += "; HttpOnly";
           if (maxAge !== undefined) cookie += `; Max-Age=${maxAge}`;
+          // Secure 标记：HTTPS（反代 x-forwarded-proto 或 TLS socket）下自动带上，
+          // 防 token 经明文 HTTP 链路被嗅探；localhost HTTP 开发不受影响。
+          const isHttps = secure
+            ?? (req.socket?.encrypted === true
+              || String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https");
+          if (isHttps) cookie += "; Secure";
           const prev = res.getHeader("set-cookie");
           const list = prev ? (Array.isArray(prev) ? prev : [prev]) : [];
           list.push(cookie);
@@ -141,10 +153,12 @@ export function createApp({ onError = () => {} } = {}) {
       } catch (error) {
         const httpError = error instanceof HttpError
           ? error
-          : new HttpError(500, "internal", error?.message || "internal error");
+          : new HttpError(500, "internal", "internal error");
+        // 5xx 不回传原始 error.message（pg/SQL/URL 错误可能携带内部片段）；
+        // 详情经 onError 进事件日志。
         if (httpError.status >= 500) onError(error);
         if (!res.writableEnded) {
-          ctx.json({ error: { code: httpError.code, message: httpError.message } }, httpError.status);
+          ctx.json({ error: { code: httpError.code, message: httpError.status >= 500 ? "internal error" : httpError.message } }, httpError.status);
         }
         return ctx;
       }

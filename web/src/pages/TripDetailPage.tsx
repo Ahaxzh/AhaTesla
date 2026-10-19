@@ -20,7 +20,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { useI18n } from '@/i18n'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice } from '@/utils/format'
+import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice, getCurrencySymbol } from '@/utils/format'
 
 /** 能效达成率标签（P3 模块1）：≥100% 绿 / <85% 橙 */
 function EfficiencyBadge({ ratio }: { ratio: number | null | undefined }) {
@@ -166,7 +166,7 @@ export default function TripDetailPage() {
                         <tr key={i}>
                           <td className="max-w-[220px] truncate py-2.5 pr-3 text-slate-200">{b.source}</td>
                           <td className="num py-2.5 px-3 text-right text-slate-300">{b.kwh.toFixed(1)}</td>
-                          <td className="num py-2.5 px-3 text-right text-slate-300">¥{fmtPrice(b.price)}</td>
+                          <td className="num py-2.5 px-3 text-right text-slate-300">{getCurrencySymbol()}{fmtPrice(b.price)}</td>
                           <td className="num py-2.5 pl-3 text-right font-medium text-white">{fmtCny(b.amount)}</td>
                         </tr>
                       ))}

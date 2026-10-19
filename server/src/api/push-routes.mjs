@@ -8,6 +8,11 @@ import { saveChannelConfig, loadChannelConfig, PUSH_EVENTS, PUSH_CHANNELS } from
 import { buildReport, startReportScheduler } from "../core/report-engine.mjs";
 import { saveState } from "../core/state.mjs";
 import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
+
+// ESM 下 require 未定义（此前 init-vapid 在"全新实例零订阅"时必炸 ReferenceError
+// —— ensureVapid 因无订阅短路，globalThis 缓存从未被填充，形成鸡生蛋死锁）
+const nodeRequire = createRequire(import.meta.url);
 
 export function createPushRoutes({ state, notifier, eventLog, store, reportScheduler, buildDeps }) {
   const channelsApi = () => notifier.channels;
@@ -60,10 +65,11 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
       }
       let kp;
       try {
-        const wp = globalThis.__ahatesla_webpush ?? require("web-push");
+        const wp = globalThis.__ahatesla_webpush
+          ?? (globalThis.__ahatesla_webpush = nodeRequire("web-push"));
         kp = wp.generateVAPIDKeys();
       } catch (error) {
-        throw new HttpError(500, "internal", `web-push unavailable: ${error.message}`);
+        throw new HttpError(500, "internal", "web-push unavailable");
       }
       saveChannelConfig("webpush", {
         config: { vapid: { publicKey: kp.publicKey, privateKey: kp.privateKey } }

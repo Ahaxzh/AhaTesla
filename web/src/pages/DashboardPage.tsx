@@ -47,12 +47,12 @@ function statePill(state: string): { labelKey: string; labelZh: string; cls: str
 export default function DashboardPage() {
   const { t } = useI18n()
   const { currentCarId } = useCar()
-  const { data, isLoading } = useQuery({ queryKey: ['dashboard', currentCarId], queryFn: () => api.dashboard(currentCarId) })
+  const { data, isLoading, isError, refetch } = useQuery({ queryKey: ['dashboard', currentCarId], queryFn: () => api.dashboard(currentCarId), retry: false })
   const { data: timeline } = useQuery({ queryKey: ['timeline', currentCarId], queryFn: () => api.timeline(currentCarId), retry: false })
   const [heatmapDays, setHeatmapDays] = useState(90)
   const { data: heatmap } = useQuery({ queryKey: ['heatmap', heatmapDays, currentCarId], queryFn: () => api.heatmap(heatmapDays, currentCarId), retry: false })
   // P2 模块3 小字：总电费 = 行驶分摊 + 驻车/哨兵（POST /api/ledger/summary）
-  const { data: ledger } = useQuery({
+  const { data: ledger, refetch: refetchLedger } = useQuery({
     queryKey: ['ledger-summary', currentCarId],
     queryFn: () => api.ledgerSummary(undefined, currentCarId),
     retry: false,
@@ -68,7 +68,18 @@ export default function DashboardPage() {
     <div>
       <PageHeader icon={Gauge} title={t('dash.title', '总览')} subtitle={car?.name ?? 'Tesla'} />
 
-      {isLoading || !data ? (
+      {isError ? (
+        <div className="glass-card fade-up flex flex-col items-center gap-3 p-10 text-center" data-testid="dashboard-error">
+          <div className="text-4xl">📡</div>
+          <div className="text-sm text-slate-300">{t('dash.loadError', '数据加载失败，请检查 TeslaMate 数据源连接')}</div>
+          <button
+            className="rounded-lg bg-white/10 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/20"
+            onClick={() => { void refetch(); void refetchLedger(); }}
+          >
+            {t('common.retry', '重试')}
+          </button>
+        </div>
+      ) : isLoading || !data ? (
         <div className="space-y-4">
           <div className="skeleton h-56 rounded-2xl" />
           <SkeletonCards />
@@ -117,7 +128,7 @@ export default function DashboardPage() {
               data-testid="stat-cost"
               hint={
                 ledger
-                  ? `${t('dash.costHintDriving', '含行驶')} ¥${(ledger.breakdown.drivingCost ?? 0).toFixed(2)} · ${t('dash.costHintParking', '驻车/哨兵')} ¥${(ledger.breakdown.parkingCost ?? 0).toFixed(2)}`
+                  ? `${t('dash.costHintDriving', '含行驶')} ${fmtCny(ledger.breakdown.drivingCost ?? 0)} · ${t('dash.costHintParking', '驻车/哨兵')} ${fmtCny(ledger.breakdown.parkingCost ?? 0)}`
                   : undefined
               }
             />
@@ -202,12 +213,15 @@ function RecentTripRow({ trip }: { trip: Trip }) {
 }
 
 function RecentChargeRow({ charge }: { charge: Charge }) {
+  const soc = charge.startBattery != null && charge.endBattery != null
+    ? ` · ${charge.startBattery}%→${charge.endBattery}%`
+    : '';
   return (
     <li className="flex items-center gap-3 px-1 py-3">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm text-slate-200">{charge.locationName}</div>
         <div className="num mt-0.5 text-[11px] text-slate-500">
-          {fmtDateTime(charge.startAt)} · {fmtKwh(charge.energyAddedKWh)} · {charge.startBattery}%→{charge.endBattery}%
+          {fmtDateTime(charge.startAt)} · {fmtKwh(charge.energyAddedKWh)}{soc}
         </div>
       </div>
       <div className="num text-sm font-medium text-slate-300">{fmtCny(charge.costCny)}</div>

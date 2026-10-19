@@ -19,6 +19,13 @@ export AHATESLA_E2E_DB_PASSWORD="$PW"
 SETUP_PORT="${SETUP_E2E_PORT:-18590}"
 SETUP_PID=""
 SETUP_DATA_DIR=""
+# 常规用例同样走隔离实例（临时数据目录 + 注入临时密码 + 独立端口）：
+# 此前依赖「常驻 :18500 + 手工注密 + 手工重启」三步人工操作，换台机器必挂；
+# 且向常驻实例写账号哈希本身就不干净。隔离实例连同一个只读库，数据一致。
+MAIN_PORT="${MAIN_E2E_PORT:-18501}"
+MAIN_PID=""
+MAIN_DATA_DIR=""
+E2E_PASSWORD=""
 cleanup() {
   if [ -n "$SETUP_PID" ]; then
     kill "$SETUP_PID" 2>/dev/null || true
@@ -26,8 +33,36 @@ cleanup() {
   if [ -n "$SETUP_DATA_DIR" ]; then
     rm -rf "$SETUP_DATA_DIR" 2>/dev/null || true
   fi
+  if [ -n "$MAIN_PID" ]; then
+    kill "$MAIN_PID" 2>/dev/null || true
+  fi
+  if [ -n "$MAIN_DATA_DIR" ]; then
+    rm -rf "$MAIN_DATA_DIR" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
+
+start_main_instance() {
+  [ -n "$PW" ] || { echo "未从 server/.env 解析到 DB 密码，无法启动常规 e2e 实例" >&2; exit 1; }
+  MAIN_DATA_DIR=$(mktemp -d /tmp/ahatesla-main-e2e-XXXXXX)
+  # 先注入凭据再启动（state 只在进程启动时装载；账号库须先就位）
+  E2E_PASSWORD="$(openssl rand -hex 12)"
+  AHATESLA_E2E_PASSWORD="$E2E_PASSWORD" AHA_DATA_DIR="$MAIN_DATA_DIR" node scripts/e2e-reset-password.mjs >/dev/null
+  AHA_DATA_DIR="$MAIN_DATA_DIR" \
+  PORT="$MAIN_PORT" \
+  DB_URL="postgres://ahatesla_ro:${PW}@127.0.0.1:15432/teslamate" \
+  MQTT_URL="mqtt://127.0.0.1:65535" \
+    node server/src/index.mjs >/dev/null 2>&1 &
+  MAIN_PID=$!
+  export E2E_BASE_URL="http://127.0.0.1:${MAIN_PORT}"
+  export AHATESLA_E2E_PASSWORD="$E2E_PASSWORD"
+  for i in $(seq 1 60); do
+    if curl -sf "http://127.0.0.1:${MAIN_PORT}/api/system/health-lite" >/dev/null 2>&1; then return 0; fi
+    sleep 0.5
+  done
+  echo "常规 e2e 实例（:${MAIN_PORT}）启动超时" >&2
+  exit 1
+}
 
 run_setup=0
 setup_only=0
@@ -54,6 +89,11 @@ if [ "$run_setup" = "1" ] && [ -n "$PW" ]; then
     if curl -sf "$SETUP_E2E_BASE_URL/api/setup/status" >/dev/null 2>&1; then break; fi
     sleep 0.5
   done
+fi
+
+# 常规（非 setup-only）路径都需要隔离实例承载登录态
+if [ "$setup_only" != "1" ]; then
+  start_main_instance
 fi
 
 if [ "$setup_only" = "1" ]; then

@@ -7,36 +7,50 @@
 //   - 测试直接调 buildWeeklyReport/buildMonthlyReport
 //
 // deliveryMs 埋点：报告生成时刻 → 各渠道送达时刻差，写事件日志（GA-12）。
-import { isoFromTeslaMate, round, finiteNumber } from "./util.mjs";
+import { isoFromTeslaMate, round, finiteNumber, wallClockToUtcMs } from "./util.mjs";
 import { saveState, getStore } from "./state.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// tz 感知的墙钟部件（setHours/getFullYear 全是服务器进程时区，Docker 常为 UTC，
+// 直接用会把周月边界与 08:00 调度整体平移 8 小时 —— 修复 M5）
+function tzParts(ms, tz) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false
+  }).formatToParts(new Date(ms));
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
+  const weekdays = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return {
+    y: Number(p.year), mo: Number(p.month), d: Number(p.day),
+    dow: weekdays[p.weekday] ?? 0,
+    h: Number(p.hour === "24" ? "0" : p.hour), mi: Number(p.minute)
+  };
+}
+
 function periodRange(now, kind, tz = "Asia/Shanghai") {
   // 周报：上一周（周一 00:00 ~ 周日 24:00）；月报：上一自然月；日报：昨日 0~24 点。
-  const locale = safeLocale(tz);
+  const zone = safeLocale(tz);
+  const p = tzParts(now.getTime(), zone);
   if (kind === "daily") {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - 1);
-    return { start, end: new Date(start.getTime() + DAY_MS), label: fmtLabel(start, "daily", locale) };
+    const startMs = wallClockToUtcMs(zone, p.y, p.mo, p.d - 1);
+    return { start: new Date(startMs), end: new Date(startMs + DAY_MS), label: fmtLabel(new Date(startMs), "daily", zone) };
   }
   if (kind === "weekly") {
-    const day = now.getDay() === 0 ? 7 : now.getDay(); // 周一=1…周日=7
-    const thisMonday = new Date(now);
-    thisMonday.setHours(0, 0, 0, 0);
-    thisMonday.setDate(thisMonday.getDate() - (day - 1));
+    const daysSinceMonday = (p.dow + 6) % 7;
+    const thisMondayMs = wallClockToUtcMs(zone, p.y, p.mo, p.d - daysSinceMonday);
+    const startMs = thisMondayMs - 7 * DAY_MS;
     return {
-      start: new Date(thisMonday.getTime() - 7 * DAY_MS),
-      end: thisMonday,
-      label: fmtLabel(new Date(thisMonday.getTime() - 7 * DAY_MS), "weekly", locale)
+      start: new Date(startMs),
+      end: new Date(thisMondayMs),
+      label: fmtLabel(new Date(startMs), "weekly", zone)
     };
   }
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startMs = wallClockToUtcMs(zone, p.y, p.mo - 1, 1);
   return {
-    start: new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() - 1, 1),
-    end: firstOfMonth,
-    label: fmtLabel(new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() - 1, 1), "monthly", locale)
+    start: new Date(startMs),
+    end: new Date(wallClockToUtcMs(zone, p.y, p.mo, 1)),
+    label: fmtLabel(new Date(startMs), "monthly", zone)
   };
 }
 
@@ -75,11 +89,17 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
   const { start, end, label } = periodRange(now, kind, tz);
   const { db, state, computeTripViews, listDrivesSql, listChargingForStats, getParkingLoss, carId } = deps;
 
-  const { sql, params } = listDrivesSql({ from: start.toISOString(), to: end.toISOString(), carId });
-  const driveRows = await db.query(sql, [...params, 200, 0]);
+  // 分页取全窗口行程（修 LIMIT 200 静默截断：高频月的周/月报少算电费）
+  const driveRows = [];
+  for (let offset = 0; offset < 500_000; offset += 1000) {
+    const { sql, params } = listDrivesSql({ from: start.toISOString(), to: end.toISOString(), carId });
+    const page = await db.query(sql, [...params, 1000, offset]);
+    driveRows.push(...page);
+    if (page.length < 1000) break;
+  }
   const views = await computeTripViews(db, driveRows, {
-    defaultRate: state.pricing.defaultRateCnyPerKwh,
-    history: state.pricing.history
+    state,
+    carId
   });
 
   const distanceKm = round(views.reduce((s, v) => s + (v.distanceKm ?? 0), 0), 1);
@@ -191,7 +211,9 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
   if (kind === "daily") {
     compare = await windowStats(deps, new Date(start.getTime() - 7 * DAY_MS), new Date(end.getTime() - 7 * DAY_MS))
       .then((lastWeek) => {
-        const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+        // 本月累计起点：tz 墙钟月初（服务器本地构造在 UTC 容器里偏 8 小时）
+        const sp = tzParts(start.getTime(), tz);
+        const monthStart = new Date(wallClockToUtcMs(tz, sp.y, sp.mo, 1));
         return windowStats(deps, monthStart, end).then((month) => {
           const pct = (cur, prev) => (prev > 0 ? round((cur - prev) / prev * 100, 0) : null);
           return {
@@ -213,7 +235,9 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
   let ytd = null;
   if (kind === "monthly") {
     try {
-      const yearStart = new Date(start.getFullYear(), 0, 1);
+      // 年度起点：tz 墙钟 1 月 1 日（同上，避免 UTC 容器偏移）
+      const yp = tzParts(start.getTime(), tz);
+      const yearStart = new Date(wallClockToUtcMs(tz, yp.y, 1, 1));
       const w = await windowStats(deps, yearStart, end);
       if (w.distanceKm > 0 || w.totalCost > 0) {
         ytd = {
@@ -280,11 +304,16 @@ async function cheapestTouHint(deps) {
 
 /** 窗口内行程里程/电费聚合（日报对比段复用账本口径的 computeTripViews；m4e 按车） */
 async function windowStats(deps, start, end) {
-  const { sql, params } = deps.listDrivesSql({ from: start.toISOString(), to: end.toISOString(), carId: deps.carId });
-  const rows = await deps.db.query(sql, [...params, 200, 0]);
+  const rows = [];
+  for (let offset = 0; offset < 500_000; offset += 1000) {
+    const { sql, params } = deps.listDrivesSql({ from: start.toISOString(), to: end.toISOString(), carId: deps.carId });
+    const page = await deps.db.query(sql, [...params, 1000, offset]);
+    rows.push(...page);
+    if (page.length < 1000) break;
+  }
   const views = await deps.computeTripViews(deps.db, rows, {
-    defaultRate: deps.state.pricing.defaultRateCnyPerKwh,
-    history: deps.state.pricing.history
+    state: deps.state,
+    carId: deps.carId
   });
   return {
     distanceKm: round(views.reduce((s, v) => s + (v.distanceKm ?? 0), 0), 1),
@@ -337,40 +366,39 @@ function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parki
 
 /** 计算下一次触发时刻（日报每日 08:00 / 周报每周一 08:00 / 月报每月 1 日 08:00，实例时区）。 */
 export function nextReportRun(kind, now = new Date(), tz = "Asia/Shanghai") {
-  tz = safeLocale(tz);
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false
-  });
-  const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
-  const h = Number(parts.hour === "24" ? "0" : parts.hour);
-  // 简化：目标日判定基于本地日期。日报 → 明/今日 08:00；周报 → 下一个周一；月报 → 下月 1 日。
+  const zone = safeLocale(tz);
+  const p = tzParts(now.getTime(), zone);
+  const atToday = () => new Date(wallClockToUtcMs(zone, p.y, p.mo, p.d, 8, 0) + 5_000);
   if (kind === "daily") {
-    const at = new Date(now);
-    at.setHours(8, 0, 5, 0);
-    if (at <= now) at.setDate(at.getDate() + 1);
+    const at = atToday();
+    if (at.getTime() <= now.getTime()) {
+      return new Date(wallClockToUtcMs(zone, p.y, p.mo, p.d + 1, 8, 0) + 5_000);
+    }
     return at;
   }
   if (kind === "weekly") {
-    const day = now.getDay() === 0 ? 7 : now.getDay();
-    let daysAhead = (8 - day) % 7; // 下一个周一
-    if (daysAhead === 0 && h >= 8) daysAhead = 7;
-    const at = new Date(now.getTime() + daysAhead * DAY_MS);
-    at.setHours(8, 0, 5, 0);
+    const daysToMonday = (8 - p.dow) % 7; // 下一个周一（dow: 0=Sun…6=Sat）
+    const at = daysToMonday === 0 && p.h >= 8
+      ? new Date(wallClockToUtcMs(zone, p.y, p.mo, p.d + 7, 8, 0) + 5_000)
+      : new Date(wallClockToUtcMs(zone, p.y, p.mo, p.d + daysToMonday, 8, 0) + 5_000);
     return at;
   }
-  const at = new Date(now.getFullYear(), now.getMonth() + 1, 1, 8, 0, 5, 0);
-  if (at <= now) at.setMonth(at.getMonth() + 1);
+  let at = new Date(wallClockToUtcMs(zone, p.y, p.mo + 1, 1, 8, 0) + 5_000);
+  if (at.getTime() <= now.getTime()) {
+    at = new Date(wallClockToUtcMs(zone, p.y, p.mo + 2, 1, 8, 0) + 5_000);
+  }
   return at;
 }
 
-/** 日报 → 推送事件（扁平字段，push-channels.eventBody 消费；dateLabel = 昨日 M-DD） */
-function dailyEvent(report, quietTrips = []) {
-  const d = new Date(report.periodStart);
-  const pad = (n) => String(n).padStart(2, "0");
+/** 日报 → 推送事件（扁平字段，push-channels.eventBody 消费；dateLabel = 昨日 M-DD，实例时区） */
+function dailyEvent(report, quietTrips = [], tz = "Asia/Shanghai") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date(report.periodStart));
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
   return {
     type: "daily",
-    dateLabel: `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    dateLabel: `${p.month}-${p.day}`,
     carId: report.carId ?? null,
     carName: report.carName ?? null,
     summary: report.closing,
@@ -405,16 +433,19 @@ export function startReportScheduler({
           return null;
         }
         const dayKey = report.periodStart.slice(0, 10);
-        if (state.dailyLastRun === dayKey) {
+        // M1 修复：去重键走 SQLite kv —— saveState 的白名单会静默丢弃
+        // state.dailyLastRun，重启后同日日报会重发一遍。
+        const lastRun = store.kvGet?.("report:dailyLastRun");
+        if (lastRun === dayKey) {
           logger(`report daily ${dayKey} already sent, skip`);
           return null;
         }
-        state.dailyLastRun = dayKey;
+        store.kvPut?.("report:dailyLastRun", dayKey);
         // P1-a 静音消费：backlog 里的昨夜行程并入早报「昨夜」段，投递后清空
         const quietTrips = Array.isArray(state.pushRules?.quietBacklog) ? state.pushRules.quietBacklog.slice() : [];
         try { saveState(state); } catch { /* 状态持久化失败不阻断推送 */ }
         const dispatchResult = await notifier.dispatch(
-          dailyEvent(report, quietTrips),
+          dailyEvent(report, quietTrips, tz),
           { matrix: matrixForReport(state, kind) }
         );
         if (quietTrips.length) {

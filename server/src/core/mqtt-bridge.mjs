@@ -13,13 +13,13 @@
 //
 // This is AhaTesla's own implementation; no third-party source is used.
 
-// 默认只读订阅主题（per-car 通配 1 位车 id；消息只读解析，永不发布）。
-export function defaultSubscribeTopics(carId = 1) {
+// 默认只读订阅主题（m4e：+ 通配全部车 id；消息只读解析，永不发布）。
+export function defaultSubscribeTopics() {
   return [
-    `teslamate/cars/${carId}/locked`,
-    `teslamate/cars/${carId}/driver_front_door_open`,
-    `teslamate/cars/${carId}/plugged_in`,
-    `teslamate/cars/${carId}/charging`
+    "teslamate/cars/+/locked",
+    "teslamate/cars/+/driver_front_door_open",
+    "teslamate/cars/+/plugged_in",
+    "teslamate/cars/+/charging"
   ];
 }
 
@@ -66,7 +66,9 @@ export async function startMqttBridge(options = {}) {
   return new Promise((resolve) => {
     let settled = false;
     let client;
-    const signalState = { charging: null, plugged_in: null };
+    // m4e：充电边沿基线按车分桶（此前单桶 —— 两辆车的 charging 信号会互相
+    // 打掉对方的"首帧基线"，产生假边沿或漏边沿）
+    const signalState = {}; // `${carId}:${field}` → bool
     const finish = (bridge) => {
       if (!settled) {
         settled = true;
@@ -102,36 +104,48 @@ export async function startMqttBridge(options = {}) {
     });
 
     client.on("connect", () => {
-      logger(`mqtt connected: ${url}`);
+      // 红线 2：URL 可能带 user:pass 凭据，日志只打 host:port
+      let safeUrl = url;
+      try {
+        const u = new URL(url);
+        if (u.username || u.password) {
+          u.username = "***";
+          u.password = "";
+          safeUrl = u.toString();
+        }
+      } catch { /* keep raw only if unparseable */ }
+      logger(`mqtt connected: ${safeUrl}`);
       for (const topic of topics) client.subscribe(topic, { qos: 0 });
       finish(bridge);
     });
 
     client.on("message", (topic, payload) => {
-      const field = topic.split("/").pop();
+      const parts = topic.split("/");
+      const field = parts[parts.length - 1];
+      const carId = Number(parts[2]) > 0 ? Number(parts[2]) : null; // teslamate/cars/<id>/<field>
       const value = payloadToBool(payload);
       try {
         if (field === "locked" || field === "driver_front_door_open") {
-          const changed = monitor.observeVehicleSignal(field, value);
-          if (changed) eventLog?.log?.("mqtt.signal", { field, value });
+          const changed = monitor.observeVehicleSignal(field, value, undefined, carId);
+          if (changed) eventLog?.log?.("mqtt.signal", { field, value, carId });
           return;
         }
         if (field === "charging" || field === "plugged_in") {
-          const prev = field === "charging" ? signalState.charging : signalState.plugged_in;
-          if (prev === null) {
+          const sk = `${carId ?? "null"}:${field}`;
+          const chargingKey = `${carId ?? "null"}:charging`;
+          const pluggedKey = `${carId ?? "null"}:plugged_in`;
+          if (signalState[sk] === undefined) {
             // 首帧只建基线，不产生事件（与轮询水线同理）
-            if (field === "charging") signalState.charging = value;
-            else signalState.plugged_in = value;
+            signalState[sk] = value;
             return;
           }
           const boundary = parseChargingBoundary(
-            signalState.charging, field === "charging" ? value : signalState.charging,
-            signalState.plugged_in, field === "plugged_in" ? value : signalState.plugged_in
+            signalState[chargingKey] ?? null, field === "charging" ? value : signalState[chargingKey] ?? null,
+            signalState[pluggedKey] ?? null, field === "plugged_in" ? value : signalState[pluggedKey] ?? null
           );
-          if (field === "charging") signalState.charging = value;
-          else signalState.plugged_in = value;
+          signalState[sk] = value;
           if (!boundary) return;
-          eventLog?.log?.("mqtt.charging_boundary", { kind: boundary.kind, source: "mqtt" });
+          eventLog?.log?.("mqtt.charging_boundary", { kind: boundary.kind, source: "mqtt", carId });
           // 双源一致：MQTT 只负责"更早发现"，事件语义与去重完全落在轮询侧的
           // observeCharging*（水位游标 + eventKey）。MQTT 无 charging_process id，
           // 无法构造稳定 eventKey，因此这里仅记日志 + 触发一次即时轮询探测，

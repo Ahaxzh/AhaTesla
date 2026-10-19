@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { ChevronRight, Route } from 'lucide-react'
@@ -21,6 +21,9 @@ export default function TripsPage() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
 
+  // 切车/改筛选回第 1 页（车 B 只有 12 条时，沿用 A 的第 3 页会看到假"无数据"）
+  useEffect(() => { setPage(1) }, [currentCarId, from, to])
+
   const params = useMemo(
     () => ({
       limit: PAGE_SIZE,
@@ -32,7 +35,7 @@ export default function TripsPage() {
     [page, from, to, currentCarId],
   )
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['trips', params],
     queryFn: () => api.trips(params),
     placeholderData: keepPreviousData,
@@ -92,6 +95,15 @@ export default function TripsPage() {
 
       {isLoading ? (
         <SkeletonList rows={6} />
+      ) : isError ? (
+        <div className="glass-card-flat">
+          <EmptyState
+            icon={Route}
+            title={t('common.loadError.title', '加载失败')}
+            description={t('common.loadError.desc', '数据源连接异常，数据不会丢失')}
+            action={{ label: t('common.retry', '重试'), onClick: () => void refetch() }}
+          />
+        </div>
       ) : !data || data.items.length === 0 ? (
         <div className="glass-card-flat">
           <EmptyState

@@ -3,8 +3,9 @@ import type { FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, CircleDashed, Copy, ExternalLink, Lock, ShieldCheck, XCircle } from 'lucide-react'
-import { api } from '@/api/client'
+import { api, subscribeWebPush } from '@/api/client'
 import { useAuth } from '@/contexts/AuthContext'
+import { useMutation } from '@tanstack/react-query'
 import { useToast } from '@/components/Toast'
 import { LogoMark } from '@/components/Logo'
 import { useI18n } from '@/i18n'
@@ -724,6 +725,17 @@ function Step3Ledger({ onDone, onSkip }: { onDone: () => void; onSkip: () => voi
 
 function Step4Notify({ https, onDone, onSkip }: { https: boolean; onDone: () => void; onSkip: () => void }) {
   const { t } = useI18n()
+  const { toast } = useToast()
+  // 修复：按钮此前只做跳转 —— 现在真正走订阅流程（VAPID → 浏览器订阅 → 上报），
+  // 完成后再进入仪表盘；失败（如用户拒绝权限）不阻断向导。
+  const enablePush = useMutation({
+    mutationFn: subscribeWebPush,
+    onSuccess: () => {
+      toast(t('push.webpush.enabled.toast', 'Web Push 已开启，本设备将收到通知'), 'success')
+      onDone()
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
   return (
     <div className="glass-card space-y-4 p-6" data-testid="setup-notify">
       <div>
@@ -731,8 +743,8 @@ function Step4Notify({ https, onDone, onSkip }: { https: boolean; onDone: () => 
         <p className="mt-1 text-xs text-slate-500">{t('setup.s4.desc', '可跳过——稍后在「推送」页配置 Web Push / Telegram / 飞书。')}</p>
       </div>
       {https ? (
-        <button type="button" className="btn-primary w-full" onClick={onDone} data-testid="setup-enable-webpush">
-          {t('setup.s4.webpush', '一键开启 Web Push')}
+        <button type="button" className="btn-primary w-full" disabled={enablePush.isPending} onClick={() => enablePush.mutate()} data-testid="setup-enable-webpush">
+          {enablePush.isPending ? t('common.working', '处理中…') : t('setup.s4.webpush', '一键开启 Web Push')}
         </button>
       ) : (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300" data-testid="setup-http-warning">

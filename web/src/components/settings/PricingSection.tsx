@@ -8,7 +8,7 @@ import { ChevronDown, Database, History, Save } from 'lucide-react'
 import { api } from '@/api/client'
 import { EmptyState } from '@/components/EmptyState'
 import { useToast } from '@/components/Toast'
-import { fmtDateTime } from '@/utils/format'
+import { fmtDateTime, getCurrencySymbol } from '@/utils/format'
 import type { PricingLocation } from '@/types'
 
 /** 行内分时编辑面板的受控状态（同一时间只展开一行） */
@@ -188,8 +188,8 @@ export function PricingSection() {
               <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-xs">
                 <span className="num text-slate-400">{fmtDateTime(h.changedAt)}</span>
                 <span className="num text-slate-300">
-                  ¥{h.from.toFixed(2)} <span className="text-slate-500">→</span>{' '}
-                  <span className="font-medium text-tesla">¥{h.to.toFixed(2)}</span>
+                  {getCurrencySymbol()}{h.from.toFixed(2)} <span className="text-slate-500">→</span>{' '}
+                  <span className="font-medium text-tesla">{getCurrencySymbol()}{h.to.toFixed(2)}</span>
                 </span>
                 <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-slate-500">{h.source}</span>
               </li>
@@ -224,18 +224,18 @@ function LocationRow({
         <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-200" title={loc.name}>{loc.name}</td>
         <td className="num px-4 py-2.5 text-right font-medium text-white">
           {isTou && loc.tou
-            ? <span title={`谷 ¥${loc.tou.offPeakRate.toFixed(3)} / 峰 ¥${loc.tou.peakRate.toFixed(3)}`}>分时</span>
-            : loc.pricePerUnit != null ? `¥${loc.pricePerUnit.toFixed(2)}` : '--'}
+            ? <span title={`谷 ${getCurrencySymbol()}${loc.tou.offPeakRate.toFixed(3)} / 峰 ${getCurrencySymbol()}${loc.tou.peakRate.toFixed(3)}`}>分时</span>
+            : loc.pricePerUnit != null ? `${getCurrencySymbol()}${loc.pricePerUnit.toFixed(2)}` : '--'}
         </td>
         <td className="num px-4 py-2.5 text-right text-slate-400">
-          {loc.sessionFee != null ? `¥${loc.sessionFee.toFixed(2)}` : '--'}
+          {loc.sessionFee != null ? `${getCurrencySymbol()}${loc.sessionFee.toFixed(2)}` : '--'}
         </td>
         <td className="px-4 py-2.5 text-slate-400">
           {isTou && loc.tou ? (
             <span className="num" title="谷段 → 峰段">
-              <span className="text-sky-400">谷 {loc.tou.offPeakStart}~{loc.tou.offPeakEnd} ¥{loc.tou.offPeakRate.toFixed(2)}</span>
+              <span className="text-sky-400">谷 {loc.tou.offPeakStart}~{loc.tou.offPeakEnd} {getCurrencySymbol()}{loc.tou.offPeakRate.toFixed(2)}</span>
               <span className="mx-1.5 text-slate-600">/</span>
-              <span className="text-amber-400">峰 ¥{loc.tou.peakRate.toFixed(2)}</span>
+              <span className="text-amber-400">峰 {getCurrencySymbol()}{loc.tou.peakRate.toFixed(2)}</span>
             </span>
           ) : (
             `固定 · ${loc.billingType}`

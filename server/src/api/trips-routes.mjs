@@ -1,8 +1,8 @@
 // trips routes — list/detail with batch-ledger cost allocation.
 import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
-import { driveEnergyKwh, batchesFromChargingSessions, allocateDriveCosts } from "../core/pricing-ledger.mjs";
-import { listDrivesSql, getRoutePoints, getAddresses, getGeofences, listChargingForStats } from "../core/teslamate-queries.mjs";
+import { getFifoLedger } from "../core/fifo-ledger.mjs";
+import { listDrivesSql, getRoutePoints, getAddresses, getGeofences } from "../core/teslamate-queries.mjs";
 import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
 
 function addressLabel(address) {
@@ -58,30 +58,23 @@ function validateIso(value, field) {
   return new Date(value).toISOString();
 }
 
-// Shared: build batches from priced charging history + allocate drive costs.
-export async function computeTripViews(db, drives, { defaultRate, history, chargingSessions = null }) {
+// Shared: build trip views with costs from the full-replay FIFO ledger (H1 修复).
+// 成本一律取自 getFifoLedger 的全量回放结果（历史行程已扣减批次池，闭包成立）。
+// 优先用调用方传入的完整 state（时区/默认价/历史价一体）；仅传 defaultRate/
+// history 的旧调用点（如 report-engine 依赖注入）合成等价最小 state。
+export async function computeTripViews(db, drives, { defaultRate, history, state = null, carId = null } = {}) {
   const addressIds = drives.flatMap((drive) => [drive.start_address_id, drive.end_address_id]);
   const addressMap = await getAddresses(db, addressIds);
   // Fallback labels: reverse-geocoded addresses may be absent (privacy-off setups),
   // while TeslaMate geofence names (e.g. "CND", "HOME") are always set for known spots.
   const geofenceRows = await getGeofences(db);
   const geofenceMap = Object.fromEntries(geofenceRows.map((row) => [row.id, row.name]));
-  const charging = chargingSessions ?? await listChargingForStats(db, {});
-  const batches = batchesFromChargingSessions(charging);
-  const allocationInput = drives.map((drive) => ({
-    id: drive.id,
-    start_at: drive.start_at,
-    estimated_kwh: driveEnergyKwh(drive)
-  }));
-  const { allocations } = allocateDriveCosts({
-    drives: allocationInput,
-    batches,
-    defaultRate,
-    defaultRateHistory: history
-  });
-  const costById = new Map(allocations.map((allocation) => [String(allocation.drive_id), allocation]));
+  const ledgerState = state ?? {
+    pricing: { defaultRateCnyPerKwh: defaultRate, history: history ?? [] }
+  };
+  const ledger = await getFifoLedger(db, ledgerState, carId);
   return drives.map((drive) => {
-    const allocation = costById.get(String(drive.id));
+    const allocation = ledger.byDriveId.get(String(drive.id));
     const energy = allocation?.energy_kwh ?? null;
     const distance = finiteNumber(drive.distance_km);
     return {
@@ -172,11 +165,7 @@ export function createTripsRoutes({ db, state }) {
         ${to ? `AND d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')` : ""}
         ${carFilterSql(carId)}
       `);
-      const items = await computeTripViews(db, rows, {
-        defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history,
-        carId
-      });
+      const items = await computeTripViews(db, rows, { state, carId });
       return { total: totalRow ? totalRow.total : rows.length, items };
     },
 
@@ -184,22 +173,15 @@ export function createTripsRoutes({ db, state }) {
       const drive = await getDrive(db, ctx.params.id);
       if (!drive) throw new HttpError(404, "not_found", "trip not found");
       const [view] = await computeTripViews(db, [drive], {
-        defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history,
+        state,
         carId: drive.car_id ?? null
       });
 
-      // FIFO 扣减明细（GA-23/24）：重建该行程的批次分配 slices（m4e:批次池与
-      // 行程同车隔离 —— 与本行程车主一致地取充电批次）
-      const charging = await listChargingForStats(db, { carId: drive.car_id ?? null });
-      const batches = batchesFromChargingSessions(charging);
-      const { allocations } = allocateDriveCosts({
-        drives: [{ id: drive.id, start_at: drive.start_at, estimated_kwh: driveEnergyKwh(drive) }],
-        batches,
-        defaultRate: state.pricing.defaultRateCnyPerKwh,
-        defaultRateHistory: state.pricing.history
-      });
-      const alloc = allocations[0] || {};
+      // FIFO 扣减明细（GA-23/24）：直接取全量回放中该行程的分配 slices
+      // （批次池已被更早行程扣减 —— 与列表/账本同一次回放，同一套数字）
+      const ledger = await getFifoLedger(db, state, drive.car_id ?? null);
+      const alloc = ledger.byDriveId.get(String(drive.id)) ?? {};
+      const charging = ledger.chargingRows;
       const geofenceRows = await getGeofences(db);
       const geofenceById = new Map(geofenceRows.map((g) => [g.id, g.name]));
       const batchLabel = (batchId) => {

@@ -10,7 +10,7 @@ import { StatCard } from '@/components/StatCard'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice } from '@/utils/format'
+import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice, getCurrencySymbol } from '@/utils/format'
 import type { ChargeDetail } from '@/types'
 
 const PAGE_SIZE = 20
@@ -82,8 +82,10 @@ export default function ChargingPage() {
   }
 
   const { currentCarId } = useCar()
+  // 切车回第 1 页（防跨车高页码空列表）
+  useEffect(() => { setPage(1) }, [currentCarId])
   const listParams = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, month: month || undefined, carId: currentCarId }
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['charging', listParams],
     queryFn: () => api.charging(listParams),
     placeholderData: keepPreviousData,
@@ -105,7 +107,12 @@ export default function ChargingPage() {
       toast(t('charging.toast.saved', '实付电费已录入，账本将在后台重算'), 'success')
       setCostInput('')
       void queryClient.invalidateQueries({ queryKey: ['charging'] })
+      void queryClient.invalidateQueries({ queryKey: ['charging-stats'] })
       void queryClient.invalidateQueries({ queryKey: ['charging-detail', detailId] })
+      // 补录影响全站账本口径（本月电费/行程卡片/仪表盘）
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      void queryClient.invalidateQueries({ queryKey: ['ledger-summary'] })
+      void queryClient.invalidateQueries({ queryKey: ['trips'] })
     },
     onError: (err) => toast(err.message, 'error'),
   })
@@ -149,7 +156,7 @@ export default function ChargingPage() {
           <>
             <StatCard icon={Zap} label={t('charging.stat.kwh', '本月充电量')} value={fmtKwh(stats.totalKWh)} />
             <StatCard icon={Coins} label={t('charging.stat.cost', '本月电费')} value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
-            <StatCard icon={BatteryCharging} label={t('charging.stat.price', '平均单价')} value={`¥${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
+            <StatCard icon={BatteryCharging} label={t('charging.stat.price', '平均单价')} value={`${getCurrencySymbol()}${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
           </>
         ) : (
           <div className="glass-card-flat col-span-2 space-y-3 p-4 sm:col-span-3">
@@ -171,7 +178,7 @@ export default function ChargingPage() {
                 <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
                   <span className="truncate font-medium text-slate-200">{loc.name}</span>
                   <span className="num shrink-0 text-slate-400">
-                    {fmtKwh(loc.kwh)} · ¥{fmtPrice(loc.pricePerUnit)}/kWh · {loc.count} {t('charging.chart.countUnit', '次')}
+                    {fmtKwh(loc.kwh)} · {getCurrencySymbol()}{fmtPrice(loc.pricePerUnit)}/kWh · {loc.count} {t('charging.chart.countUnit', '次')}
                   </span>
                 </div>
                 <div className="h-2.5 overflow-hidden rounded-full bg-white/[0.05]" role="presentation">
@@ -192,6 +199,15 @@ export default function ChargingPage() {
       {/* 充电列表 */}
       {isLoading ? (
         <SkeletonList rows={6} />
+      ) : isError ? (
+        <div className="glass-card-flat">
+          <EmptyState
+            icon={BatteryCharging}
+            title={t('common.loadError.title', '加载失败')}
+            description={t('common.loadError.desc', '数据源连接异常，数据不会丢失')}
+            action={{ label: t('common.retry', '重试'), onClick: () => void refetch() }}
+          />
+        </div>
       ) : !data || data.items.length === 0 ? (
         <div className="glass-card-flat">
           <EmptyState icon={BatteryCharging} title={t('charging.list.empty.title', '暂无充电记录')} description={t('charging.list.empty.desc', 'TeslaMate 记录到充电会话后会自动同步')} />
@@ -223,19 +239,23 @@ export default function ChargingPage() {
                     <span>{fmtDateTime(c.startAt)}</span>
                     <span>{fmtDuration(c.durationMin)}</span>
                     <span>{fmtKwh(c.energyAddedKWh)}</span>
-                    <span>¥{fmtPrice(c.pricePerUnit)}/kWh</span>
-                    <span>{t('charging.peakPrefix', '峰值')} {c.powerMaxKw.toFixed(1)} kW</span>
+                    <span>{getCurrencySymbol()}{fmtPrice(c.pricePerUnit)}/kWh</span>
+                    {c.powerMaxKw != null && (
+                      <span>{t('charging.peakPrefix', '峰值')} {c.powerMaxKw.toFixed(1)} kW</span>
+                    )}
                   </div>
-                  <div className="mt-2.5 flex items-center gap-2">
-                    <span className="num text-[11px] text-slate-400">{c.startBattery}%</span>
-                    <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
-                      <div
-                        className="absolute inset-y-0 rounded-full bg-gradient-to-r from-sky-500/60 to-emerald-400/80"
-                        style={{ left: `${c.startBattery}%`, width: `${Math.max(c.endBattery - c.startBattery, 1)}%` }}
-                      />
+                  {c.startBattery != null && c.endBattery != null && (
+                    <div className="mt-2.5 flex items-center gap-2">
+                      <span className="num text-[11px] text-slate-400">{c.startBattery}%</span>
+                      <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+                        <div
+                          className="absolute inset-y-0 rounded-full bg-gradient-to-r from-sky-500/60 to-emerald-400/80"
+                          style={{ left: `${c.startBattery}%`, width: `${Math.max(c.endBattery - c.startBattery, 1)}%` }}
+                        />
+                      </div>
+                      <span className="num text-[11px] text-slate-300">{c.endBattery}%</span>
                     </div>
-                    <span className="num text-[11px] text-slate-300">{c.endBattery}%</span>
-                  </div>
+                  )}
                 </li>
               )
             })}
@@ -286,7 +306,7 @@ export default function ChargingPage() {
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
                     <div className="text-[11px] text-slate-400">{t('charging.modal.price', '单价')}</div>
-                    <div className="mt-1 text-sm font-semibold text-white">¥{fmtPrice(detail.pricePerUnit)}</div>
+                    <div className="mt-1 text-sm font-semibold text-white">{getCurrencySymbol()}{fmtPrice(detail.pricePerUnit)}</div>
                   </div>
                 </div>
 

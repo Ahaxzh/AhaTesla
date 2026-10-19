@@ -47,7 +47,28 @@ function parseHm(hm) {
 }
 
 // 计算充电会话在 TOU 两档之间的费用（无功率曲线 → 匀功率假设，按时长比例）。
-export function touSplitSession({ startMs, endMs, energyKwh, window }) {
+//
+// 时区口径：TOU 窗口是用户按本地墙钟配置的（如谷电 23:00-07:00 指北京时间），
+// 而会话时刻是 TeslaMate 的 naive-UTC。归类必须先把每一分钟换算到实例时区
+// 的"当天分钟数"再比对窗口 —— 直接用 getUTCHours() 会把整夜谷电错判成峰电
+// （Asia/Shanghai 差 8 小时）。offset 按天缓存（目标时区无夏令时；即便有，
+// 也只在过渡日有一小时误差，费用影响可忽略）。
+function localMinutesOfDay(ms, tz, offsetCache) {
+  const dayKey = Math.floor(ms / 86_400_000);
+  let offset = offsetCache.get(dayKey);
+  if (offset === undefined) {
+    const dayStart = new Date(dayKey * 86_400_000);
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false
+    }).formatToParts(dayStart).map((p) => [p.type, p.value]));
+    const wall = Number(parts.hour === "24" ? "0" : parts.hour) * 60 + Number(parts.minute);
+    offset = wall - (dayStart.getUTCHours() * 60 + dayStart.getUTCMinutes());
+    offsetCache.set(dayKey, offset);
+  }
+  return ((Math.floor(ms / 60_000) + offset) % 1440 + 1440) % 1440;
+}
+
+export function touSplitSession({ startMs, endMs, energyKwh, window, tz = "Asia/Shanghai" }) {
   const offPeakRate = finiteNumber(window?.offPeakRate);
   const peakRate = finiteNumber(window?.peakRate);
   if (offPeakRate === null || peakRate === null || offPeakRate < 0 || peakRate < 0) return null;
@@ -58,10 +79,9 @@ export function touSplitSession({ startMs, endMs, energyKwh, window }) {
   const totalMin = Math.round((endMs - startMs) / 60_000);
   if (totalMin <= 0) return null;
   let offPeakMin = 0;
-  const startDate = new Date(startMs);
+  const offsetCache = new Map();
   for (let i = 0; i < totalMin; i++) {
-    const at = new Date(startDate.getTime() + i * 60_000);
-    if (isOffPeak(at.getUTCHours() * 60 + at.getUTCMinutes(), window)) offPeakMin += 1;
+    if (isOffPeak(localMinutesOfDay(startMs + i * 60_000, tz, offsetCache), window)) offPeakMin += 1;
   }
   const peakMin = totalMin - offPeakMin;
   const offKwh = round(energyKwh * (offPeakMin / totalMin));
@@ -79,8 +99,9 @@ export function touSplitSession({ startMs, endMs, energyKwh, window }) {
 // ---- charging session pricing (AC-7.1 fallback ladder) --------------------
 
 // Layer ①: AhaTesla 本地手动录入（SQLite charge_cost_overrides，AC-7.1/7.6）。
-// 调用方注入 overrides：Map<cpId, cost>。实付金额权威，直接入账。
-function priceFromLocalOverride(session, energy, _defaultRate, overrides) {
+// 调用方注入 options.overrides：Map<cpId, cost>。实付金额权威，直接入账。
+function priceFromLocalOverride(session, energy, _defaultRate, options = {}) {
+  const overrides = options.overrides;
   if (!overrides) return null;
   const key = Number(session.__overrideKey ?? session.id);
   if (!Number.isFinite(key)) return null;
@@ -108,13 +129,17 @@ function priceFromStatedCost(session, energy) {
 // The effective unit price stays the geofence rate itself (the flat fee is not
 // energy, so it must not be divided back into the price).
 // 分时模式（priceMode="tou" + tou 窗口）按充电起止跨时段比例计价（契约 §8.1）。
-function priceFromGeofence(session, energy, defaultRate, _overrides, touByGeofenceId) {
+// options.tz：TOU 窗口的墙钟时区（默认 Asia/Shanghai，与设置页口径一致）。
+function priceFromGeofence(session, energy, defaultRate, options = {}) {
   // TOU 优先：围栏配置了分时窗口 → 按时段分摊
-  const tou = touByGeofenceId?.get(Number(session.geofence_id));
+  const tou = options.touByGeofenceId?.get(Number(session.geofence_id));
   if (tou) {
     const startMs = timeMs(session.start_at ?? session.start_date);
     const endMs = timeMs(session.end_at ?? session.end_date);
-    const split = touSplitSession({ startMs, endMs, energyKwh: energy, window: tou });
+    const split = touSplitSession({
+      startMs, endMs, energyKwh: energy, window: tou,
+      tz: options.tz || "Asia/Shanghai"
+    });
     if (split) {
       const sessionFee = finiteNumber(session.geofence_session_fee) ?? 0;
       return sessionFee > 0
@@ -151,11 +176,11 @@ const CHARGING_PRICE_LAYERS = [priceFromLocalOverride, priceFromStatedCost, pric
 // `unknown` result (nulls) when no layer can produce a figure — callers must
 // treat that as "cannot price", never as zero.
 // options.overrides: Map<cpId, cost>（第①层本地补录）；options.touByGeofenceId:
-// Map<geofenceId, touWindow>（第③层分时窗口）。
+// Map<geofenceId, touWindow>（第③层分时窗口）；options.tz：TOU 窗口墙钟时区。
 export function priceChargingSession(session = {}, defaultRate = null, options = {}) {
   const energy = finiteNumber(session.charge_energy_added);
   for (const layer of CHARGING_PRICE_LAYERS) {
-    const priced = layer(session, energy, defaultRate, options.overrides, options.touByGeofenceId);
+    const priced = layer(session, energy, defaultRate, options);
     if (priced) return priced;
   }
   return { costCny: null, pricePerUnit: null, source: "unknown" };
@@ -178,7 +203,10 @@ export function batchesFromChargingSessions(sessions, options = {}) {
     const energy = finiteNumber(session.charge_energy_added);
     if (energy === null || energy <= 0) continue;
 
-    const priced = priceChargingSession(session, session.__defaultRate ?? null, options);
+    // 第④层兜底：无任何费用来源的会话按默认价入池（options.defaultRate），
+    // 与充电页展示口径一致 —— 否则这批 kWh 永不进池，行程尾段会按默认价
+    // 计费但批次明细里看不到来源，两处对不上。
+    const priced = priceChargingSession(session, session.__defaultRate ?? options.defaultRate ?? null, options);
     if (priced.costCny === null || priced.pricePerUnit === null) continue;
 
     const availableMs = timeMs(session.end_at ?? session.end_date)
@@ -204,12 +232,17 @@ export function batchesFromChargingSessions(sessions, options = {}) {
 // The default tariff is versioned: when the owner changes it, only drives
 // started afterwards should see the new rate (AC-7.3). Replay every change that
 // took effect at or before `atMs`, in order, and the last one wins.
+// 首条变更之前的行程按首条的 `from`（变更前旧价）计 —— 否则会用"当前价"
+// 回溯定价，历史重算在降价场景系统性少算。
 function tariffAt(currentRate, history, atMs) {
   let effective = finiteNumber(currentRate);
   const changes = (Array.isArray(history) ? history : [])
-    .map((entry) => ({ at: timeMs(entry.changedAt), to: finiteNumber(entry.to) }))
+    .map((entry) => ({ at: timeMs(entry.changedAt), to: finiteNumber(entry.to), from: finiteNumber(entry.from) }))
     .filter((entry) => entry.at !== null && entry.to !== null)
     .sort((a, b) => a.at - b.at);
+  if (changes.length && atMs < changes[0].at) {
+    return changes[0].from ?? effective;
+  }
   for (const change of changes) {
     if (change.at > atMs) break;
     effective = change.to;
@@ -323,14 +356,20 @@ function drawFromDefaultTariff(queueResult, defaultRate, defaultRateHistory, dri
 // （电能不跨车转移）。car_id 缺失（null/undefined）的行共用一个"无主池"，
 // 单车数据（或存量调用点不带 car_id）因此保持与历史完全一致的行为。
 //
-// Returns {allocations, remaining_batches}. Each allocation carries the drive's
-// energy split across its sources (batch / default / unpriced), the trip cost as
-// shown to the user (`cost_cny`, 2dp) and a high-precision internal twin
-// (`cost_cny_precise`, 10dp) that later aggregation may sum without drift
-// (PRD §7.3). A drive is `allocation_reliable` only when it has both a start
-// time and a non-negative energy figure; `cost_complete` is false whenever any
-// of its energy could not be priced.
-export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHistory = [] } = {}) {
+// parkingLosses（AC-7.5 事件驱动）：[{car_id, at_ms, kwh}] 与行程按时序
+// 交织扣减池 —— 驻车损耗先于其后的行程消耗批次，账本闭包因此对"行驶+
+// 驻车"整体成立（Σ分摊 ≡ 实付）。返回值附 parking_allocations 供月度
+// 汇总直接取数。
+//
+// Returns {allocations, parking_allocations?, remaining_batches}. Each
+// allocation carries the drive's energy split across its sources
+// (batch / default / unpriced), the trip cost as shown to the user (`cost_cny`,
+// 2dp) and a high-precision internal twin (`cost_cny_precise`, 10dp) that later
+// aggregation may sum without drift (PRD §7.3). A drive is
+// `allocation_reliable` only when it has both a start time and a non-negative
+// energy figure; `cost_complete` is false whenever any of its energy could not
+// be priced.
+export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHistory = [], parkingLosses = null } = {}) {
   const poolKey = (row) => {
     const id = Number(row?.car_id);
     return Number.isInteger(id) && id > 0 ? id : null;
@@ -339,7 +378,7 @@ export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHi
   // 按车分池建队列；同一池内保持时间序 FIFO 语义不变
   const pools = new Map();
   const poolFor = (key) => {
-    if (!pools.has(key)) pools.set(key, { queue: [], drives: [] });
+    if (!pools.has(key)) pools.set(key, { queue: [], drives: [], losses: [] });
     return pools.get(key);
   };
   const queueRows = buildBatchQueue(batches);
@@ -353,9 +392,38 @@ export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHi
     );
   for (const drive of orderedDrives) poolFor(poolKey(drive)).drives.push(drive);
 
+  const hasLosses = Array.isArray(parkingLosses) && parkingLosses.length > 0;
+  const orderedLosses = hasLosses
+    ? parkingLosses
+      .map((loss, index) => ({
+        ...loss,
+        index,
+        at_ms: finiteNumber(loss.at_ms),
+        kwh: finiteNumber(loss.kwh)
+      }))
+      .filter((loss) => loss.at_ms !== null && loss.kwh !== null && loss.kwh > 0)
+      .sort((a, b) => a.at_ms - b.at_ms || a.index - b.index)
+    : [];
+  for (const loss of orderedLosses) poolFor(poolKey(loss)).losses.push(loss);
+
   const allocations = [];
-  for (const { queue, drives: poolDrives } of pools.values()) {
+  const parkingAllocations = [];
+  for (const { queue, drives: poolDrives, losses: poolLosses } of pools.values()) {
+    // 行程与损耗按开始时刻交织（损耗发生在间隙，时刻天然不与行程重叠）
+    let li = 0;
     for (const drive of poolDrives) {
+      while (li < poolLosses.length && poolLosses[li].at_ms <= drive.drive_at_ms) {
+        const loss = poolLosses[li++];
+        const applied = applyParkingLossToBatches(queue, loss.kwh, loss.at_ms);
+        parkingAllocations.push({
+          car_id: loss.car_id ?? null,
+          at_ms: loss.at_ms,
+          kwh: applied.absorbedKwh,
+          unabsorbed_kwh: applied.unabsorbedKwh,
+          cost_cny: round(applied.slices.reduce((sum, slice) => sum + (finiteNumber(slice.cost_cny) ?? 0), 0), 2),
+          slices: applied.slices
+        });
+      }
       const energy = finiteNumber(drive.estimated_kwh ?? drive.energy_kwh);
 
       // A drive with no usable time or energy cannot be billed at all.
@@ -391,10 +459,24 @@ export function allocateDriveCosts({ drives, batches, defaultRate, defaultRateHi
         slices: tail.slices
       });
     }
+    // 池内剩余损耗（晚于最后一趟行程）
+    while (li < poolLosses.length) {
+      const loss = poolLosses[li++];
+      const applied = applyParkingLossToBatches(queue, loss.kwh, loss.at_ms);
+      parkingAllocations.push({
+        car_id: loss.car_id ?? null,
+        at_ms: loss.at_ms,
+        kwh: applied.absorbedKwh,
+        unabsorbed_kwh: applied.unabsorbedKwh,
+        cost_cny: round(applied.slices.reduce((sum, slice) => sum + (finiteNumber(slice.cost_cny) ?? 0), 0), 2),
+        slices: applied.slices
+      });
+    }
   }
 
   return {
     allocations,
+    ...(hasLosses ? { parking_allocations: parkingAllocations } : {}),
     remaining_batches: [...pools.values()].flatMap(({ queue }) => queue.map((batch) => ({
       batch_id: batch.batch_id,
       car_id: poolKey(batch),

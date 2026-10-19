@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { User } from '@/types'
 
@@ -17,6 +18,7 @@ const AuthContext = createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [initialized, setInitialized] = useState(false)
+  const queryClient = useQueryClient()
 
   const refresh = useCallback(async () => {
     try {
@@ -36,15 +38,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const { user: u } = await api.login(username, password)
     setUser(u)
-  }, [])
+    // 登录前 /api/cars 401 过的错误态不会自愈 —— 失效重拉，
+    // 否则多车用户登录后要 F5 才能看到车切换器（M3 修复）
+    void queryClient.invalidateQueries({ queryKey: ['cars'] })
+    void queryClient.invalidateQueries({ queryKey: ['settings'] })
+  }, [queryClient])
 
   const logout = useCallback(async () => {
     try {
       await api.logout()
     } finally {
       setUser(null)
+      queryClient.clear()
     }
-  }, [])
+  }, [queryClient])
 
   const value = useMemo(
     () => ({ user, initialized, login, logout, refresh }),

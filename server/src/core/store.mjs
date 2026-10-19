@@ -219,7 +219,11 @@ function createStoreApi(db, file) {
     ON CONFLICT(id) DO UPDATE SET mode=@mode, host=@host, port=@port, database=@database, user=@user,
       password_enc=@passwordEnc, car_id=@carId, configured=@configured, configured_at=@configuredAt, meta_json=@metaJson
   `);
-  const stSubIns = db.prepare("INSERT INTO push_subscriptions (endpoint, keys_json, meta_json, created_at, updated_at) VALUES (@endpoint, @keysJson, @metaJson, @at, @at)");
+  // 重新订阅（PWA 常态：浏览器轮换 subscription）走 UPSERT —— 旧版裸 INSERT
+  // 撞 UNIQUE(endpoint) 直接 500。
+  const stSubIns = db.prepare(`INSERT INTO push_subscriptions (endpoint, keys_json, meta_json, created_at, updated_at)
+    VALUES (@endpoint, @keysJson, @metaJson, @at, @at)
+    ON CONFLICT(endpoint) DO UPDATE SET keys_json=@keysJson, meta_json=@metaJson, updated_at=@at`);
   const stSubAll = db.prepare("SELECT id, endpoint, keys_json AS keysJson, meta_json AS metaJson, created_at AS createdAt, updated_at AS updatedAt FROM push_subscriptions ORDER BY id");
   const stSubDel = db.prepare("DELETE FROM push_subscriptions WHERE endpoint=?");
   const stBatchUpsert = db.prepare(`

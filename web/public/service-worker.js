@@ -1,5 +1,5 @@
-/* AhaTesla Service Worker — HTML network-first（发版即生效），带 hash 静态资源 cache-first，API network-first，离线兜底 */
-const VERSION = 'v4'
+/* AhaTesla Service Worker — HTML network-first（发版即生效），带 hash 静态资源 cache-first，API 不缓存（隐私），离线兜底 */
+const VERSION = 'v5'
 const SHELL_CACHE = `ahatesla-shell-${VERSION}`
 const SHELL_ASSETS = ['/manifest.json', '/favicon.svg']
 
@@ -24,17 +24,11 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
 
-  // API：network-first，失败时回退缓存
+  // API：直连不落缓存。修复两点：
+  // ① 认证 API（行程/GPS 轨迹/充电历史）曾被永久写进 Cache Storage，登出后
+  //   仍留在共享机器上（隐私）；② 非 2xx 响应也被缓存，离线兜底会回放 500/401。
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(request)
-        .then((res) => {
-          const copy = res.clone()
-          caches.open(SHELL_CACHE).then((cache) => cache.put(request, copy))
-          return res
-        })
-        .catch(() => caches.match(request)),
-    )
+    event.respondWith(fetch(request))
     return
   }
 

@@ -2,7 +2,7 @@
 // Timestamps in TeslaMate are naive UTC; we pass ISO instants as timestamptz
 // literals and compare via `AT TIME ZONE 'UTC'` to stay correct regardless of
 // the server's session timezone.
-import { utcNaiveSqlExpr } from "./util.mjs";
+import { utcNaiveSqlExpr, wallClockToUtcMs } from "./util.mjs";
 
 function expr(value, errorMessage) {
   return utcNaiveSqlExpr(value, errorMessage);
@@ -99,10 +99,12 @@ export async function getDrivingState(db, { carId = null } = {}) {
           WHERE c.charging_process_id = cp.id
             AND c.date >= (now() AT TIME ZONE 'UTC') - interval '30 minutes'
         )
-        AND NOT EXISTS (   -- 充电期间不会有未完成行程
+        AND NOT EXISTS (   -- 充电期间不会有未完成行程（m4e：仅同车；另一辆车
+                           -- 在充电路上的开着行程不应压制本车的充电态判定）
           SELECT 1 FROM drives d
           WHERE d.end_date IS NULL
             AND d.start_date > cp.start_date
+            AND ($1::int IS NULL OR d.car_id = $1::int)
         )
       ORDER BY cp.start_date DESC
       LIMIT 1
@@ -115,7 +117,7 @@ export async function getDrivingState(db, { carId = null } = {}) {
     ) chg ON true
     LEFT JOIN LATERAL (
       SELECT s.state FROM states s
-      WHERE s.car_id = $1::int AND s.end_date IS NULL
+      WHERE ($1::int IS NULL OR s.car_id = $1::int) AND s.end_date IS NULL
       ORDER BY s.start_date DESC LIMIT 1
     ) s ON true
   `, [carId]);
@@ -144,20 +146,13 @@ export async function getMonthStats(db, since, carId = null) {
   `, [Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null]);
 }
 
-/** 自然月起点（北京时间月初 00:00），Dashboard「本月」统计口径 */
+/** 自然月起点（实例时区月初 00:00），Dashboard「本月」统计口径 */
 export function monthStartIso(now = new Date(), tz = "Asia/Shanghai") {
-  try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-    }).format(now);
-    // en-CA → YYYY-MM-DD；截年月拼 01 号，北京时间月初 00:00
-    return new Date(`${parts.slice(0, 7)}-01T00:00:00+08:00`).toISOString();
-  } catch {
-    const d = new Date(now);
-    d.setUTCDate(1);
-    d.setUTCHours(0, 0, 0, 0);
-    return d.toISOString();
-  }
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(now);
+  // en-CA → YYYY-MM-DD；截年月拼 01 号，墙钟 → UTC 瞬时（tz 感知，非硬编码 +08:00）
+  return new Date(wallClockToUtcMs(tz, Number(parts.slice(0, 4)), Number(parts.slice(5, 7)), 1)).toISOString();
 }
 
 export async function getWeekStats(db, since, carId = null) {
@@ -201,6 +196,8 @@ export function listDrivesSql({ from, to, carId } = {}) {
              c.efficiency,
              greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
              greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
+             d.start_ideal_range_km, d.end_ideal_range_km,
+             d.start_rated_range_km, d.end_rated_range_km,
              ep.start_lat, ep.start_lng, ep2.end_lat, ep2.end_lng, ep2.end_odometer, ep2.position_count
       FROM matched m
       JOIN drives d ON d.id = m.id
@@ -226,6 +223,39 @@ export const countDrivesSql = `
   FROM drives d
   WHERE d.end_date IS NOT NULL
 `;
+
+/** 轻量行程查询（FIFO 回放/窗口聚合专用）：不带 LATERAL 坐标子查询 ——
+ *  positions 表千万行级，listDrivesSql 的端点坐标 LATERAL 全量扫会超时；
+ *  回放只需要 id/car/时间/能耗列。 */
+export function listDrivesLightSql({ from, to, carId } = {}) {
+  const where = ["d.end_date IS NOT NULL"];
+  if (from !== undefined && from !== null) {
+    where.push(`d.end_date >= (${expr(from, "invalid from")} )`);
+  }
+  if (to !== undefined && to !== null) {
+    where.push(`d.end_date <= (${expr(to, "invalid to")} )`);
+  }
+  where.push(`($1::int IS NULL OR d.car_id = $1::int)`);
+  return {
+    sql: `
+      SELECT d.id, d.car_id,
+             d.start_date AS start_at, d.end_date AS end_at,
+             round(d.distance::numeric, 2) AS distance_km,
+             d.duration_min,
+             c.efficiency,
+             greatest(d.start_ideal_range_km - d.end_ideal_range_km, 0) AS ideal_used_km,
+             greatest(d.start_rated_range_km - d.end_rated_range_km, 0) AS rated_used_km,
+             d.start_ideal_range_km, d.end_ideal_range_km,
+             d.start_rated_range_km, d.end_rated_range_km
+      FROM drives d
+      JOIN cars c ON c.id = d.car_id
+      WHERE ${where.join(" AND ")}
+      ORDER BY d.end_date ASC
+      LIMIT $2 OFFSET $3
+    `,
+    params: [Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null]
+  };
+}
 
 export async function getDriveByIdSql(db, id, carId = null) {
   const numId = Number(id);
@@ -296,11 +326,18 @@ export async function getGeofences(db) {
 
 // ---- charging ------------------------------------------------------------
 
-export async function listCharging(db, { limit = 50, offset = 0, month = null, carId = null } = {}) {
-  // month "YYYY-MM" → 该自然月内开始/结束的会话（UTC 口径，与列表页一致）
-  const monthFilter = month
-    ? `AND cp.start_date >= (('${month}-01'::date)::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < (('${month}-01'::date + interval '1 month')::timestamptz AT TIME ZONE 'UTC')`
-    : "";
+export async function listCharging(db, { limit = 50, offset = 0, month = null, carId = null, tz = "Asia/Shanghai" } = {}) {
+  // month "YYYY-MM" → 实例时区自然月（此前 date::timestamptz 依赖 PG 会话时区，
+  // 与 /charging/stats 的北京口径漂移；"2026-99" 类非法月在上层校验）
+  let monthFilter = "";
+  if (month) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
+    const mon = m ? Number(m[2]) : 0;
+    if (!m || mon < 1 || mon > 12) throw new Error("invalid month");
+    const startIso = new Date(wallClockToUtcMs(tz, Number(m[1]), mon, 1)).toISOString();
+    const endIso = new Date(wallClockToUtcMs(tz, mon === 12 ? Number(m[1]) + 1 : Number(m[1]), mon === 12 ? 1 : mon + 1, 1)).toISOString();
+    monthFilter = `AND cp.start_date >= ('${startIso}'::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < ('${endIso}'::timestamptz AT TIME ZONE 'UTC')`;
+  }
   const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   return db.query(`
     SELECT cp.id, cp.car_id,
@@ -322,10 +359,16 @@ export async function listCharging(db, { limit = 50, offset = 0, month = null, c
   `, [limit, offset, car]);
 }
 
-export async function countCharging(db, { month = null, carId = null } = {}) {
-  const monthFilter = month
-    ? `AND cp.start_date >= (('${month}-01'::date)::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < (('${month}-01'::date + interval '1 month')::timestamptz AT TIME ZONE 'UTC')`
-    : "";
+export async function countCharging(db, { month = null, carId = null, tz = "Asia/Shanghai" } = {}) {
+  let monthFilter = "";
+  if (month) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
+    const mon = m ? Number(m[2]) : 0;
+    if (!m || mon < 1 || mon > 12) throw new Error("invalid month");
+    const startIso = new Date(wallClockToUtcMs(tz, Number(m[1]), mon, 1)).toISOString();
+    const endIso = new Date(wallClockToUtcMs(tz, mon === 12 ? Number(m[1]) + 1 : Number(m[1]), mon === 12 ? 1 : mon + 1, 1)).toISOString();
+    monthFilter = `AND cp.start_date >= ('${startIso}'::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < ('${endIso}'::timestamptz AT TIME ZONE 'UTC')`;
+  }
   const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   const row = await db.queryOne(`
     SELECT count(*)::int AS total FROM charging_processes cp WHERE cp.end_date IS NOT NULL ${monthFilter}
@@ -368,8 +411,11 @@ export async function listChargingForStats(db, { sinceIso = null, untilIso = nul
   const untilFilter = untilIso ? `AND cp.end_date < (${expr(untilIso, "invalid stats until")})` : "";
   const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   return db.query(`
-    SELECT cp.id, cp.car_id, cp.end_date, cp.charge_energy_added, cp.cost, cp.duration_min,
+    SELECT cp.id, cp.car_id, cp.end_date, cp.start_date, cp.charge_energy_added, cp.cost, cp.duration_min,
            cp.geofence_id, cp.address_id,
+           cp.start_ideal_range_km, cp.end_ideal_range_km,
+           cp.start_rated_range_km, cp.end_rated_range_km,
+           cp.start_battery_level, cp.end_battery_level,
            g.name AS geofence_name, g.cost_per_unit AS geofence_cost_per_unit, g.session_fee AS geofence_session_fee,
            a.display_name AS address_name
     FROM charging_processes cp
@@ -401,9 +447,11 @@ export async function getMaxDriveId(db) {
 }
 
 // 已结算行程增量（end_date 非空 = TeslaMate 完成结算落库，AC-12.3 起算点）。
+// m4e：带 car_id —— 游标与会话按车分桶（多车并发出行时 B 车新行不得推高
+// A 车的游标，否则 A 车晚结算的行程永远漏发 trip_end）。
 export async function getDrivesIncremental(db, sinceId, limit = 50) {
   return db.query(`
-    SELECT d.id, d.start_date AS start_at, d.end_date AS end_at
+    SELECT d.id, d.car_id, d.start_date AS start_at, d.end_date AS end_at
     FROM drives d
     WHERE d.id > $1 AND d.end_date IS NOT NULL
     ORDER BY d.id ASC
@@ -430,11 +478,24 @@ export async function getActiveDrive(db) {
   return row ? { id: row.id, start_at: row.start_at } : null;
 }
 
+/** m4e：全部近期未关闭行程（按车）。多车实例每辆车各有一条活跃会话。 */
+export async function getActiveDrives(db) {
+  const cutoff = new Date(Date.now() - 12 * 3600_000).toISOString().slice(0, 19);
+  return db.query(`
+    SELECT d.id, d.car_id, d.start_date AS start_at
+    FROM drives d
+    WHERE d.end_date IS NULL
+      AND d.start_date >= $1::timestamp
+    ORDER BY d.start_date ASC
+    LIMIT 20
+  `, [cutoff]);
+}
+
 // 充电会话增量（新行，含未结束与已结算；未结束 = 进行中，已结算 = charging_done 候选）。
 // 调用侧游标取 max(last_charging_id, last_charging_done_id)。
 export async function getChargingIncremental(db, sinceId, limit = 50) {
   return db.query(`
-    SELECT cp.id, cp.start_date AS start_at, cp.end_date AS end_at
+    SELECT cp.id, cp.car_id, cp.start_date AS start_at, cp.end_date AS end_at
     FROM charging_processes cp
     WHERE cp.id > $1
     ORDER BY cp.id ASC
@@ -449,7 +510,7 @@ export async function getChargingIncremental(db, sinceId, limit = 50) {
 // 必须以 done 游标单独增量扫描（单车站点会话按 id 顺序结算，游标安全）。
 export async function getChargingClosedIncremental(db, sinceId, limit = 50) {
   return db.query(`
-    SELECT cp.id, cp.start_date AS start_at, cp.end_date AS end_at
+    SELECT cp.id, cp.car_id, cp.start_date AS start_at, cp.end_date AS end_at
     FROM charging_processes cp
     WHERE cp.id > $1 AND cp.end_date IS NOT NULL
     ORDER BY cp.id ASC

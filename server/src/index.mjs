@@ -64,6 +64,20 @@ function log(...args) {
   process.stdout.write(`[${new Date().toISOString()}] ${args.join(" ")}\n`);
 }
 
+// 红线 2：URL 凭据（mqtt://user:pass@host）不得进日志 —— 打日志前抹掉 userinfo。
+function redactUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.username || u.password) {
+      u.username = "***";
+      u.password = "";
+    }
+    return u.toString();
+  } catch {
+    return "<invalid-url>";
+  }
+}
+
 // ---- bootstrap state ------------------------------------------------------
 
 // AC-1.4：无预设明文密码。管理员账号由 /setup 向导首位注册创建（t_3f9fe52a）；
@@ -285,6 +299,12 @@ async function main() {
     monitorSaveTimer = setTimeout(() => {
       monitorSaveTimer = null;
       try {
+        // M2:sent_keys 只保留最近 500 条(eventKey 去重只需覆盖近期),
+        // 防止常年运行下 kv blob 无限膨胀拖慢每次序列化。
+        const keys = Object.keys(monitor.state.sent_keys || {});
+        if (keys.length > 500) {
+          for (const key of keys.slice(0, keys.length - 500)) delete monitor.state.sent_keys[key];
+        }
         store.kvPut(MONITOR_STATE_KEY, JSON.stringify(monitor.state));
       } catch (error) {
         eventLog?.log?.("monitor.persist_error", { message: error.message });
@@ -332,6 +352,28 @@ async function main() {
     logger: (msg) => log("report:", msg)
   });
 
+  // M2 修复：崩溃/重启时未完成投递的 pending 事件在此补发（最多 20 条、
+  // 7 天内的才补 —— dedupe 保证同 key 不重推；过期事件直接丢弃并记日志）。
+  {
+    const pending = monitor.pendingEvents();
+    const now = Date.now();
+    let replayed = 0;
+    for (const event of pending.slice(0, 20)) {
+      const atMs = Date.parse(event.at || event.ended_at || "");
+      if (Number.isFinite(atMs) && now - atMs > 7 * 24 * 3600_000) {
+        if (event.eventKey) monitor.acknowledge(event.eventKey);
+        eventLog?.log?.("push.pending_dropped", { eventKey: event.eventKey, type: event.type });
+        continue;
+      }
+      replayed += 1;
+      dispatchPush(event).catch((error) => eventLog?.log?.("push.error", { message: error.message }));
+    }
+    if (pending.length) {
+      log(`monitor pending events: ${pending.length} loaded, ${replayed} replayed`);
+      persistMonitorState();
+    }
+  }
+
   const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
 
   // ---- m4e 多车:推送事件的车辆标记(60s 车辆缓存) --------------------------
@@ -375,11 +417,8 @@ async function main() {
     let event = rawEvent;
     try {
       if (event.type === "trip_end") {
-        event = await enrichTripEndEvent(db, event, {
-          defaultRate: state.pricing.defaultRateCnyPerKwh,
-          defaultRateHistory: state.pricing.history
-        });
-      } else if (event.type === "charging_done") event = await enrichChargingDoneEvent(db, event);
+        event = await enrichTripEndEvent(db, event, { state });
+      } else if (event.type === "charging_done") event = await enrichChargingDoneEvent(db, event, { state });
       else if (event.type === "charging_start") event = await enrichChargingStartEvent(db, event);
     } catch (error) {
       eventLog.log("push.enrich_error", { message: error.message });
@@ -393,10 +432,12 @@ async function main() {
     // 矩阵化投递（GA-08/AC-12.2）：多渠道并行 + 单渠道失败隔离 + deliveryMs 埋点
     const t0 = Date.now();
     const { results } = await notifier.dispatch(event);
-    const anySent = Object.values(results).some((r) => r?.sent);
     const deliveryMs = Date.now() - t0;
     eventLog.log("push.dispatch", { type: event.type, results, deliveryMs });
-    if (anySent && event.eventKey) monitor.acknowledge(event.eventKey);
+    // M2 修复：投递尝试即确认（不再只在 ≥1 渠道成功时确认）。dedupe 由
+    // sent_keys 承担 —— 此前全渠道失败/矩阵全关的事件会永远卡在 pending：
+    // 不重发、又堵住同 key 再触发，静音时段的 backlog 也在 kv 里无限累积。
+    if (event.eventKey) monitor.acknowledge(event.eventKey);
 
     // P2 告警派生:充电结束且明显提前(富化层 endBattery<80 置 endedEarly)→
     // 独立更醒目的 chargeInterrupt 告警(charging_done 照常已发,两者并存)。
@@ -418,8 +459,11 @@ async function main() {
   }
 
   const staticHandler = createStaticHandler(join(__dirname, "..", "..", "web", "dist"));
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    log(`AhaTesla server listening on :${PORT} (data: ${dataDir()})`);
+  // 默认只绑 127.0.0.1（裸机/systemd 部署不再意外监听全部网卡走明文 HTTP）；
+  // Docker/compose 需要容器内 0.0.0.0 —— 两份 compose 已显式设置 HOST=0.0.0.0。
+  const HOST = process.env.HOST || "127.0.0.1";
+  const server = app.listen(PORT, HOST, () => {
+    log(`AhaTesla server listening on ${HOST}:${PORT} (data: ${dataDir()})`);
     if (staticHandler) log("serving web/dist");
   });
 
@@ -442,18 +486,29 @@ async function main() {
     onRecovered: (ms) => dispatchPush({ type: "outage_recovered", outageMs: ms }).catch(() => {})
   });
 
-  // P2 告警:胎压巡检(随监控循环同频,越限且距上次告警 ≥24h 才推)
+  // P2 告警:胎压巡检(随监控循环同频,越限且距上次告警 ≥24h 才推)。
+  // m4e 多车:逐车巡检,事件带 carId(carLabelForEvent 据此挂车名后缀)。
+  // M1 修复:节流时间戳经 SQLite kv 持久化(saveState 会静默丢非白名单字段,
+  // 重启即重推;dailyLastRun 同理在 report-engine 内改走 kv)。
   if (!state.alerts) state.alerts = {};
   async function patrolTirePressure() {
     const now = Date.now();
-    if (state.alerts.lastTireAlertAt && now - state.alerts.lastTireAlertAt < 24 * 3600_000) return;
-    const r = await checkTirePressure(db);
-    if (!r) return;
-    state.alerts.lastTireAlertAt = now;
-    try { saveState(state); } catch { /* 节流窗内存生效即可 */ }
-    await dispatchPush({
-      type: "tirePressure", tirePressure: r, minBar: r.min, suggest: r.suggest
-    }).catch(() => {});
+    let lastTireAlertAt = Number(store.kvGet("alerts:lastTireAlertAt")) || 0;
+    if (lastTireAlertAt && now - lastTireAlertAt < 24 * 3600_000) return;
+    let cars = [{ id: null }];
+    try {
+      cars = await carsListCached();
+      if (!cars?.length) cars = [{ id: null }];
+    } catch { /* 车表不可达 → 全库巡检 */ }
+    for (const car of cars) {
+      const r = await checkTirePressure(db, { carId: car.id });
+      if (!r) continue;
+      store.kvPut("alerts:lastTireAlertAt", String(now));
+      await dispatchPush({
+        type: "tirePressure", carId: r.carId ?? car.id, tirePressure: r, minBar: r.min, suggest: r.suggest
+      }).catch(() => {});
+      break; // 一次巡检只推一条(24h 节流),多车问题明日再报
+    }
   }
 
   const loop = startTripMonitorLoop({
@@ -480,9 +535,9 @@ async function main() {
     const requireAuth2 = createJwtMiddleware({ getSecret: () => loadSecretKey() });
     app.routes.length = 0;
     registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
-    log(`mqtt enabled (optional enhancement): ${MQTT_URL}`);
+    log(`mqtt enabled (optional enhancement): ${redactUrl(MQTT_URL)}`);
   } else if (MQTT_URL) {
-    log(`mqtt configured but unavailable — degraded to polling baseline: ${MQTT_URL}`);
+    log(`mqtt configured but unavailable — degraded to polling baseline: ${redactUrl(MQTT_URL)}`);
   } else {
     log("mqtt not configured — polling baseline only (§7.1)");
   }

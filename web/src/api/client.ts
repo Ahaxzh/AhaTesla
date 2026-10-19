@@ -99,6 +99,32 @@ const put = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) })
 
 // ---- Auth ----
+/** urlBase64 → Uint8Array（VAPID 公钥格式转换） */
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = atob(base64)
+  const output = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i)
+  return output
+}
+
+/** 一键开启 Web Push：确保 VAPID → 浏览器订阅 → 上报（向导 Step4 与推送页共用） */
+export async function subscribeWebPush(): Promise<{ ok: boolean }> {
+  const vapid = await api.webpushInitVapid()
+  const reg = await navigator.serviceWorker.ready
+  const key = urlBase64ToUint8Array(vapid.publicKey)
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: key.buffer as ArrayBuffer,
+  })
+  const json = sub.toJSON()
+  return api.webpushSubscribe({
+    endpoint: String(json.endpoint),
+    keys: { p256dh: String(json.keys?.p256dh ?? ''), auth: String(json.keys?.auth ?? '') },
+  })
+}
+
 export const api = {
   login: (username: string, password: string) =>
     post<{ token: string; user: User }>('/api/auth/login', { username, password }),

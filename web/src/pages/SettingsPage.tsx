@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   Activity,
   BellRing,
@@ -630,7 +631,14 @@ export default function SettingsPage() {
             <h2 className="section-title">
               <BellRing className="h-4 w-4 text-tesla" /> {t('settings.nav.push', '推送')}
             </h2>
-            <p className="section-desc mt-1">{t('settings.push.desc', '6 类事件 × 6 渠道独立开关 · 渠道密钥在「推送」页配置')}</p>
+            <p className="section-desc mt-1">
+              {t('settings.push.desc', '6 类事件 × 6 渠道独立开关 · 渠道密钥在「推送」页配置')}
+              {/* 修复：/push 页此前从任何导航都到不了（矩阵文案提到却无入口） */}
+              {' '}
+              <Link to="/push" className="text-tesla hover:underline" data-testid="settings-push-page-link">
+                {t('settings.push.openChannelPage', '前往渠道配置 →')}
+              </Link>
+            </p>
             {matrix ? (
               <div className="mt-4 divide-y divide-white/[0.05]" data-testid="push-matrix-list">
                 {EVENTS.map((ev) => {

@@ -245,11 +245,11 @@ test("MQTT_URL 配置但 broker 不可达 → 优雅降级返回 null（连接�
   assert.ok(Date.now() - started < 10_000);
 });
 
-test("默认订阅主题为只读 teslamate 主题（无发布/命令主题）", () => {
-  const topics = defaultSubscribeTopics(1);
+test("默认订阅主题为只读 teslamate 主题（无发布/命令主题；+ 通配多车）", () => {
+  const topics = defaultSubscribeTopics();
   assert.ok(topics.length >= 2);
   for (const topic of topics) {
-    assert.ok(topic.startsWith("teslamate/cars/1/"), `unexpected topic ${topic}`);
+    assert.ok(topic.startsWith("teslamate/cars/+/"), `unexpected topic ${topic}`);
     assert.ok(!/command|cmd|set|control/i.test(topic), `疑似命令主题: ${topic}`);
   }
 });

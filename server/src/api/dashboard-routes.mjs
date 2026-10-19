@@ -3,9 +3,10 @@ import {
   getCarSnapshot, getDrivingState, getSystemStats, getMonthStats, getWeekStats,
   listCharging, listChargingForStats, resolveCarId
 } from "../core/teslamate-queries.mjs";
-import { listDrivesSql, monthStartIso } from "../core/teslamate-queries.mjs";
+import { listDrivesSql, listDrivesLightSql, monthStartIso } from "../core/teslamate-queries.mjs";
 import { computeTripViews } from "./trips-routes.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
+import { instanceTimezone } from "../core/pricing-options.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
 import { isDemo } from "../core/demo-data.mjs";
 import { carIdFromQuery, carsPayload } from "./car-scope.mjs";
@@ -18,6 +19,19 @@ export const FUEL_REFERENCE = Object.freeze({
   source: "assumed: 92# gasoline × 8L/100km ICE baseline",
   asOf: "2026-01-01T00:00:00Z"
 });
+
+/** 窗口内行程分页取全（修 LIMIT 200 静默截断月度电费的问题）。
+ *  月/周聚合只要里程/能耗/成本，走轻量查询（无坐标 LATERAL，大库不超时）。 */
+async function fetchAllDrivesInWindow(db, { from, to = null, carId = null }, pageSize = 1000) {
+  const rows = [];
+  for (let offset = 0; offset < 500_000; offset += pageSize) {
+    const { sql, params } = listDrivesLightSql({ from, to, carId });
+    const page = await db.query(sql, [...params, pageSize, offset]);
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
 
 export function createDashboardRoutes({ db, state }) {
   async function recentChargesViews(limit, carId = null) {
@@ -49,48 +63,54 @@ export function createDashboardRoutes({ db, state }) {
     async dashboard(ctx) {
       // 主绑定 car_id（AC-2.3 + m4e）：?carId= > settings.primaryCarId > 向导绑定 >
       // 快照第一辆车。未绑定且无参数时保持旧回退(快照第一辆)。
+      // 快照/状态/月周统计/最近行程/最近充电并发拉取 —— 冷库下 positions 大索引
+      // 首读是秒级磁盘 I/O，串行 await 会把首屏拖到 8s+（实测修复）。
       const requestedCarId = carIdFromQuery(ctx, state);
-      let boundCarId = null;
-      let car = null;
-      try { car = await getCarSnapshot(db); } catch { /* teslamate down */ }
-      boundCarId = requestedCarId ?? resolveCarId(state, car?.id ?? null);
-      if (boundCarId !== car?.id) {
-        car = await getCarSnapshot(db, { carId: boundCarId }).catch(() => car);
-      }
-      const [driving, monthStats, weekStats] = await Promise.all([
-        getDrivingState(db, { carId: boundCarId }),
-        // 「本月」= 自然月（北京时间月初 00:00），与账本卡口径一致（v2.2 修复：原为 30 天滚动窗口导致里程/电费/省钱数互相对不上）
-        getMonthStats(db, monthStartIso(), boundCarId),
-        getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), boundCarId)
+      const prefetchCarId = requestedCarId ?? resolveCarId(state, null);
+      const [car0, driving0, monthStats, weekStats, driveRows, recentCharges] = await Promise.all([
+        getCarSnapshot(db).catch(() => null),
+        getDrivingState(db, { carId: prefetchCarId }).catch(() => null),
+        getMonthStats(db, monthStartIso(new Date(), instanceTimezone(state)), prefetchCarId).catch(() => null),
+        getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), prefetchCarId).catch(() => null),
+        (async () => {
+          const { sql, params } = listDrivesSql({ carId: prefetchCarId });
+          return db.query(sql, [...params, 5, 0]).catch(() => []);
+        })(),
+        recentChargesViews(5, prefetchCarId).catch(() => [])
       ]);
-      const { sql, params } = listDrivesSql({ carId: boundCarId });
-      const driveRows = await db.query(sql, [...params, 5, 0]);
+      // 解析链以快照首车收口：与并发预估不一致时按最终车补拉（未绑定的多车库）
+      const boundCarId = requestedCarId ?? resolveCarId(state, car0?.id ?? null);
+      let car = car0;
+      let driving = driving0;
+      if (boundCarId !== prefetchCarId) {
+        [car, driving] = await Promise.all([
+          getCarSnapshot(db, { carId: boundCarId }).catch(() => car0),
+          getDrivingState(db, { carId: boundCarId }).catch(() => driving0)
+        ]);
+      }
       const recentTrips = await computeTripViews(db, driveRows, {
-        defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history,
+        state,
         carId: boundCarId
       });
-      const recentCharges = await recentChargesViews(5, boundCarId);
 
       // energy + cost for month/week from drive views over the same windows
-      const { sql: monthSql, params: monthParams } = listDrivesSql({
-        from: monthStartIso(), carId: boundCarId
+      // （分页取全量：LIMIT 200 会在高频用车月静默截断月度电费）
+      const monthDrives = await fetchAllDrivesInWindow(db, {
+        from: monthStartIso(new Date(), instanceTimezone(state)), carId: boundCarId
       });
-      const monthDrives = await db.query(monthSql, [...monthParams, 200, 0]);
       const monthViews = await computeTripViews(db, monthDrives, {
-        defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history
+        state,
+        carId: boundCarId
       });
       const monthEnergy = monthViews.reduce((total, view) => total + (view.energyKWh ?? 0), 0);
       const monthCost = monthViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
 
-      const { sql: weekSql, params: weekParams } = listDrivesSql({
+      const weekDrives = await fetchAllDrivesInWindow(db, {
         from: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), carId: boundCarId
       });
-      const weekDrives = await db.query(weekSql, [...weekParams, 200, 0]);
       const weekViews = await computeTripViews(db, weekDrives, {
-        defaultRate: state.pricing.defaultRateCnyPerKwh,
-        history: state.pricing.history
+        state,
+        carId: boundCarId
       });
       const weekEnergy = weekViews.reduce((total, view) => total + (view.energyKWh ?? 0), 0);
       const weekCost = weekViews.reduce((total, view) => total + (view.costCny ?? 0), 0);

@@ -28,6 +28,8 @@ services:
     environment:
       PORT: 18500
       TZ: ${TZ:-Asia/Shanghai}
+      # 容器内监听 0.0.0.0（宿主侧仍只绑 127.0.0.1）
+      HOST: 0.0.0.0
       # 可留空：推荐首次打开 /setup 向导配置（自动建只读账号）；此处预设则跳过向导该步
       DB_URL: ${DB_URL:-}
       MQTT_URL: ${MQTT_URL:-}

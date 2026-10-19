@@ -176,6 +176,15 @@ function tripsFakeDb() {
         efficiency: 150, ideal_used_km: 20, rated_used_km: 22
       }];
     }
+    if (/ideal_used_km/.test(sql) && /FROM drives/.test(sql)) {
+      // FIFO 回放轻量分页（无坐标 LATERAL）
+      return [{
+        id: 3241, car_id: 1,
+        start_at: "2026-10-13 02:11:40", end_at: "2026-10-13 02:58:09",
+        distance_km: 21.5, duration_min: 47,
+        efficiency: 150, ideal_used_km: 20, rated_used_km: 22
+      }];
+    }
     if (/count\(\*\)::int AS total/.test(sql) && /FROM drives/.test(sql)) return [{ total: 3023 }];
     if (/FROM addresses/.test(sql)) {
       return [
@@ -185,8 +194,12 @@ function tripsFakeDb() {
     }
     if (/FROM charging_processes/.test(sql) && /geofence_name/.test(sql)) {
       return [{
-        id: 490, end_date: "2026-10-12 20:00", charge_energy_added: 25.3, cost: 38.0,
-        geofence_name: "CND", geofence_cost_per_unit: 1.8, address_name: null
+        id: 490, car_id: 1, start_date: "2026-10-12 19:00", end_date: "2026-10-12 20:00",
+        charge_energy_added: 25.3, cost: 38.0,
+        geofence_name: "CND", geofence_cost_per_unit: 1.8, address_name: null,
+        start_ideal_range_km: null, end_ideal_range_km: null,
+        start_rated_range_km: null, end_rated_range_km: null,
+        start_battery_level: 20, end_battery_level: 80
       }];
     }
     if (/FROM positions/.test(sql)) {

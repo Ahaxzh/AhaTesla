@@ -125,8 +125,8 @@
 
 ## 8. 计价规则（核心，v1.3 评审后定稿）
 
-1. 充电会话费用优先级（**四层回退**）：① AhaTesla 本地手动录入（SQLite `charge_cost_overrides`）→ ② `charging_processes.cost` 非空 → ③ geofence 单价（支持**分时电价**：谷段时段+两档价，按充电起止跨时段比例计价）→ ④ 默认价（变更仅对未来生效）
-2. **FIFO 批次入池公式（含充损闭合）**：批次可用电量 = `charge_energy_added`（电池净吸收）；批次折算单价 = 实付总额 ÷ `charge_energy_added`。批次耗尽时分摊总和 ≡ 实付总额（账本闭合）；行程耗电 = `(start_rated_range_km − end_rated_range_km) × cars.efficiency`（ideal 回退同式）
+1. 充电会话费用优先级（**四层回退**）：① AhaTesla 本地手动录入（SQLite `charge_cost_overrides`）→ ② `charging_processes.cost` 非空 → ③ geofence 单价（支持**分时电价**：谷段时段+两档价，按充电起止跨时段比例计价；**时段按实例时区墙钟解释**，如 23:00-07:00 指北京时间夜里，TeslaMate naive-UTC 时刻先换算再归类）→ ④ 默认价（变更仅对未来生效；首条变更之前的行程按该条 `from` 旧价回溯）
+2. **FIFO 批次入池公式（含充损闭合）**：批次可用电量 = `charge_energy_added`（电池净吸收）；批次折算单价 = 实付总额 ÷ `charge_energy_added`。批次耗尽时分摊总和 ≡ 实付总额（账本闭合）；行程耗电 = `(start_rated_range_km − end_rated_range_km) × cars.efficiency`（ideal 回退同式）。**回放口径**：所有计价路径（trips 列表/详情、dashboard、月度汇总、推送富化、报表）共用同一次「全量行程 + 驻车损耗按时间序回放」的批次扣减结果（进程内缓存，水位+计价版本失效）——任意一处的每公里成本一致
 3. **驻车损耗（AC-7.5）**：事件驱动——每次新行程/充电开始时对比上一事件结束的表显电量，差值 >0.5 kWh 立即冲抵 FIFO（含负损耗过滤 BMS 温漂）
 4. **修正窗口（AC-7.6）**：推送小结=不可变快照；7 天内补录费用（PUT /charging/:id/cost，存 charge_cost_overrides）触发异步重算，UI 标注校准
 5. **历史重算**：`POST /api/ledger/recalculate` {from?, to?|all} → {jobId}（P6【重算历史账本】，进度可查）

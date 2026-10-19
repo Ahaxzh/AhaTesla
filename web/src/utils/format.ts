@@ -1,12 +1,24 @@
 /** 数字/日期格式化工具 */
+
+// 实例货币符号（settings.currency.symbol）：由 AppLayout 拉到设置后注入。
+// 修复：货币单位设置此前保存后从未被任何格式化路径消费，全站硬编码 ¥。
+let currencySymbol = '¥'
+export function setCurrencySymbol(symbol: string | null | undefined) {
+  currencySymbol = symbol && symbol.trim() ? symbol.trim() : '¥'
+}
+export function getCurrencySymbol() {
+  return currencySymbol
+}
+
+/** 金额（带货币符号；fmtCny 保留原名避免全站改名面） */
+export function fmtCny(v: number | null | undefined, digits = 2): string {
+  if (v == null || Number.isNaN(v)) return '--'
+  return `${currencySymbol}${v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
+
 export function fmtKm(v: number | null | undefined, digits = 1): string {
   if (v == null || Number.isNaN(v)) return '--'
   return v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
-}
-
-export function fmtCny(v: number | null | undefined, digits = 2): string {
-  if (v == null || Number.isNaN(v)) return '--'
-  return `¥${v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 
 /** 单价 3~4 位小数（PRD §7.3 精度规范） */

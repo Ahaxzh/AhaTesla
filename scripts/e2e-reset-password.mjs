@@ -32,7 +32,12 @@ import { openStore, migrateStateJsonIntoStore } from "../server/src/core/store.m
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, "..");
-const DATA_DIR = join(repoRoot, "server", "data");
+// AHA_DATA_DIR 可覆盖（run-e2e.sh 的隔离实例用临时数据目录注入凭据）
+const DATA_DIR = process.env.AHA_DATA_DIR
+  ? (process.env.AHA_DATA_DIR.startsWith("/")
+    ? process.env.AHA_DATA_DIR
+    : join(repoRoot, process.env.AHA_DATA_DIR))
+  : join(repoRoot, "server", "data");
 const DB_PATH = join(DATA_DIR, "ahatesla.db");
 const STATE_JSON = join(DATA_DIR, "state.json");
 const BACKUP_PATH = join(DATA_DIR, "e2e-account-backup.json");
@@ -121,9 +126,13 @@ async function inject(password, source) {
     );
   }
   if (!existsSync(DB_PATH) && !existsSync(STATE_JSON)) {
-    die(
-      "未找到 server/data/ahatesla.db 或 state.json。请先启动一次 server 让它初始化状态，再执行本脚本。"
-    );
+    // 隔离实例（AHA_DATA_DIR 指向临时目录）本就没有历史库 —— 创建全新账号；
+    // 常驻目录缺库仍视为异常（避免误把未初始化的正式实例当成可注入对象）
+    if (!process.env.AHA_DATA_DIR) {
+      die(
+        "未找到 server/data/ahatesla.db 或 state.json。请先启动一次 server 让它初始化状态，再执行本脚本。"
+      );
+    }
   }
 
   const store = openStoreWithMigration();

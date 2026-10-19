@@ -4,7 +4,7 @@ import { ArrowLeft, BatteryCharging, Coins, Route as RouteIcon, TrendingDown } f
 import { api } from '@/api/client'
 import { StatCard } from '@/components/StatCard'
 import { useI18n } from '@/i18n'
-import { fmtCny, fmtKm, fmtKwh } from '@/utils/format'
+import { fmtCny, fmtKm, fmtKwh, getCurrencySymbol } from '@/utils/format'
 
 /** P5 报告详情（/reports/:id）：KPI 四宫格 + 主跑路线 TOP3 + 账本结语 */
 export default function ReportDetailPage() {
@@ -50,7 +50,7 @@ export default function ReportDetailPage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="report-kpi">
         <StatCard icon={RouteIcon} label={t('rep.detail.kpi.distance', '总里程')} value={`${fmtKm(kpi.distanceKm)} km`} hint={`${kpi.driveCount} ${t('dash.tripsUnit', '趟')}`} />
         <StatCard icon={BatteryCharging} label={t('rep.detail.kpi.charge', '总充电量')} value={fmtKwh(kpi.chargeKwh)} hint={fmtKwh(kpi.energyKwh)} />
-        <StatCard icon={Coins} label={t('rep.detail.kpi.cost', '总电费')} value={fmtCny(kpi.totalCost)} accent hint={kpi.costPerKm != null ? `¥${kpi.costPerKm.toFixed(3)}/km` : undefined} />
+        <StatCard icon={Coins} label={t('rep.detail.kpi.cost', '总电费')} value={fmtCny(kpi.totalCost)} accent hint={kpi.costPerKm != null ? `${getCurrencySymbol()}${kpi.costPerKm.toFixed(3)}/km` : undefined} />
         <StatCard
           icon={TrendingDown}
           label={t('rep.detail.kpi.saved', '较油车节省')}

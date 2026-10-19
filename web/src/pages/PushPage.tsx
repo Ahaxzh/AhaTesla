@@ -1,20 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell, BellRing, CheckCircle2, Link2, Lock, MessageSquare, RefreshCw, Send, Smartphone, XCircle } from 'lucide-react'
-import { api } from '@/api/client'
+import { api, subscribeWebPush } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
 import { timeAgo } from '@/utils/format'
-
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const raw = atob(base64)
-  const output = new Uint8Array(raw.length)
-  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i)
-  return output
-}
 
 /** PWA 环境探测:iOS Safari 判定(含 iPadOS 13+ 伪装 Mac 触点暴露)+ 是否已从主屏幕独立打开 */
 function detectPwaEnv(): { isIOS: boolean; isStandalone: boolean } {
@@ -44,24 +35,8 @@ function WebPushCard({ https }: { https: boolean }) {
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
   )
 
-  /** 订阅本设备并上报(手动开启与静默自愈共用) */
-  const subscribeDevice = async () => {
-    // 1) 确保 VAPID 密钥存在（后端生成，私钥加密落库）
-    const vapid = await api.webpushInitVapid()
-    // 2) 浏览器订阅
-    const reg = await navigator.serviceWorker.ready
-    const key = urlBase64ToUint8Array(vapid.publicKey)
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: key.buffer as ArrayBuffer,
-    })
-    const json = sub.toJSON()
-    // 3) 上报订阅
-    return api.webpushSubscribe({
-      endpoint: String(json.endpoint),
-      keys: { p256dh: String(json.keys?.p256dh ?? ''), auth: String(json.keys?.auth ?? '') },
-    })
-  }
+  /** 订阅本设备并上报(手动开启与静默自愈共用；与向导 Step4 共享实现) */
+  const subscribeDevice = subscribeWebPush
 
   const enablePush = useMutation({
     mutationFn: subscribeDevice,
@@ -70,6 +45,11 @@ function WebPushCard({ https }: { https: boolean }) {
       void queryClient.invalidateQueries({ queryKey: ['channels'] })
     },
     onError: (err) => toast(err.message, 'error'),
+    // 用户在浏览器弹窗点了"阻止"后 Notification.permission 已变 —— 同步刷新，
+    // 立即展示"去系统设置恢复"引导（此前要刷新页面才出现）
+    onSettled: () => {
+      if (typeof Notification !== 'undefined') setPermission(Notification.permission)
+    },
   })
 
   // 静默自愈:权限已授予但本地订阅缺失/过期(浏览器会淘汰旧订阅)时自动重订,不打扰用户
