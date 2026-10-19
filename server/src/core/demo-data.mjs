@@ -376,6 +376,42 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
       const offset = Number(params[2]) || 0;
       return rows.slice(offset, offset + limit).map((d) => ({ ...d }));
     }
+    // FIFO 回放轻量分页（listDrivesLightSql：特征列 ideal_used_km + JOIN cars，ASC；
+    // 排除富化查询 —— 它也含 ideal_used_km，由下方 id = ANY 处理器负责）
+    if (s.includes("ideal_used_km") && s.includes("FROM drives d") && !s.includes("id = ANY")) {
+      const fromMs = isoLit(sql, "d.end_date >=");
+      const toMs = isoLit(sql, "d.end_date <=");
+      const want = carIdParam(params[0]);
+      const rows = dataset.drivesByEndDesc
+        .filter((d) => inRange(d.end_at, fromMs, toMs) && (want == null || d.car_id === want))
+        .sort((a, b) => new Date(a.end_at) - new Date(b.end_at));
+      const limit = Number(params[1]) || 1000;
+      const offset = Number(params[2]) || 0;
+      return rows.slice(offset, offset + limit).map((d) => ({ ...d }));
+    }
+    // 回放水位（max id + max end_date；demo 给真实值 → 回放缓存可用）
+    if (s.includes("max(end_date)") && s.includes("FROM drives")) {
+      const rows = [...dataset.drives].sort((a, b) => a.id - b.id);
+      const last = rows[rows.length - 1];
+      return [{ max_id: last?.id ?? 0, max_end: last?.end_at ?? null }];
+    }
+    if (s.includes("max(end_date)") && s.includes("FROM charging_processes")) {
+      const rows = [...dataset.charges].sort((a, b) => a.id - b.id);
+      const last = rows[rows.length - 1];
+      return [{ max_id: last?.id ?? 0, max_end: last?.end_at ?? null }];
+    }
+    // getActiveDrives（按车活跃行程；demo 全部已结算 → 空）
+    if (s.includes("d.end_date IS NULL") && s.includes("d.car_id")) {
+      return [];
+    }
+    // carsListCached（index.mjs 车辆标记缓存：SELECT id, name FROM cars ORDER BY id ASC）
+    if (s.includes("FROM cars ORDER BY id ASC")) {
+      return dataset.cars.map((c) => ({ id: c.id, name: c.name }));
+    }
+    // 回放效率表（fifo-ledger：SELECT id, efficiency FROM cars）
+    if (s.includes("SELECT id, efficiency FROM cars")) {
+      return dataset.cars.map((c) => ({ id: c.id, efficiency: c.efficiency }));
+    }
     if (s.includes("count(*)::int AS total FROM drives")) {
       const fromMs = isoLit(sql, "d.end_date >=");
       const toMs = isoLit(sql, "d.end_date <=");
