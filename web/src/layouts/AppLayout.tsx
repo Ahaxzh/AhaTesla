@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import {
   BatteryCharging,
@@ -36,12 +36,15 @@ export const NAV_ITEMS = [
 /** 桌面侧栏主导航（电价/推送/系统已并入设置页分区） */
 export const SIDEBAR_ITEMS = NAV_ITEMS
 
-function NavItem({ to, label, labelKey, icon: Icon, testid, onClick }: {
+function NavItem({ to, label, labelKey, icon: Icon, testid, pending, onFeedback, onClick }: {
   to: string
   label: string
   labelKey?: string
   icon: typeof Gauge
   testid: string
+  /** 该项是挂起中的导航目标(chunk 加载中):立即给视觉反馈,避免"点了没反应" */
+  pending?: boolean
+  onFeedback?: (to: string) => void
   onClick?: () => void
 }) {
   const { t } = useI18n()
@@ -51,13 +54,16 @@ function NavItem({ to, label, labelKey, icon: Icon, testid, onClick }: {
       to={to}
       end={to === '/'}
       data-testid={testid}
-      onClick={onClick}
+      onClick={() => {
+        onFeedback?.(to)
+        onClick?.()
+      }}
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition ${
           isActive
             ? 'bg-tesla/[0.12] font-medium text-tesla'
             : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200'
-        }`
+        } ${pending ? 'animate-pulse text-tesla-soft' : ''}`
       }
     >
       <Icon className="h-[18px] w-[18px] shrink-0" />
@@ -435,6 +441,20 @@ export function AppLayout() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const { t } = useI18n()
+  // 挂起中的导航目标:页面 chunk 加载期间高亮所点导航项(路由级分割下首访需拉 chunk,
+  // 导航挂起时界面无反馈,弱网下像"点了没反应")。用本地状态而非 useNavigation ——
+  // 后者要求 data router,本项目是声明式 <BrowserRouter>。
+  // 清除时机:路由实际变化(切换完成)或 8s 超时(chunk 加载失败被 ErrorBoundary 兜底时)。
+  const location = useLocation()
+  const [pendingPath, setPendingPath] = useState<string | undefined>()
+  useEffect(() => {
+    setPendingPath(undefined)
+  }, [location.pathname])
+  const navFeedback = (to: string) => {
+    if (to === location.pathname) return
+    setPendingPath(to)
+    window.setTimeout(() => setPendingPath((cur) => (cur === to ? undefined : cur)), 8000)
+  }
 
   // 实例货币符号注入格式化层（修复：货币设置保存后从未被消费，全站硬编码 ¥）
   const { data: instanceSettings } = useQuery({
@@ -469,7 +489,7 @@ export function AppLayout() {
         <SidebarCarCard />
         <nav className="flex-1 space-y-1 overflow-y-auto px-3" aria-label="主导航">
           {SIDEBAR_ITEMS.map((item) => (
-            <NavItem key={item.to} {...item} />
+            <NavItem key={item.to} {...item} pending={pendingPath === item.to} onFeedback={navFeedback} />
           ))}
         </nav>
         <div className="border-t border-white/[0.06] p-3">
@@ -501,10 +521,11 @@ export function AppLayout() {
                 to={item.to}
                 end={item.to === '/'}
                 data-testid={`${item.testid}-mobile`}
+                onClick={() => navFeedback(item.to)}
                 className={({ isActive }) =>
                   `flex flex-col items-center gap-1 rounded-lg py-2 text-[11px] transition ${
                     isActive ? 'text-tesla' : 'text-slate-400'
-                  }`
+                  } ${pendingPath === item.to ? 'animate-pulse text-tesla-soft' : ''}`
                 }
               >
                 <item.icon className="h-5 w-5" />

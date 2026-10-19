@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './layouts/AppLayout'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
@@ -25,6 +25,47 @@ function PageFallback() {
       <div className="skeleton h-8 w-8 rounded-full" />
     </div>
   )
+}
+
+// ---- 空闲预载全路由 chunk ------------------------------------------------------
+// 为什么必须预载:React Router v7 把导航包在 startTransition 里,chunk 挂起期间
+// Suspense 骨架不显示、界面停在旧页 —— 弱网下点 tab 毫无反馈,像"点了没反应"。
+// 本项目是自托管单用户 PWA,全部路由 chunk 合计 ~100KB gzip:首屏空闲时按序拉齐,
+// 之后切 tab 全部内存级即时切换。失败静默(下次导航时 Suspense 仍兜底)。
+const ROUTE_PRELOADS: Array<() => Promise<unknown>> = [
+  () => import('./pages/LoginPage'),
+  () => import('./pages/SetupPage'),
+  () => import('./pages/DashboardPage'),
+  () => import('./pages/TripsPage'),
+  () => import('./pages/TripDetailPage'),
+  () => import('./pages/ChargingPage'),
+  () => import('./pages/PushPage'),
+  () => import('./pages/ReportsPage'),
+  () => import('./pages/ReportDetailPage'),
+  () => import('./pages/SettingsPage'),
+  // leaflet 轨迹图(行程详情二级懒加载)
+  () => import('@/components/RouteMap'),
+]
+
+function useIdlePreloadRoutes() {
+  useEffect(() => {
+    let cancelled = false
+    const run = () => {
+      // 串行拉取:不与首屏数据请求抢带宽,SW 逐个入缓存
+      ROUTE_PRELOADS.reduce(
+        (chain, load) => chain.then(() => { if (!cancelled) load().catch(() => {}) }),
+        Promise.resolve(),
+      )
+    }
+    // iOS Safari 17 前无 requestIdleCallback,回退 setTimeout
+    const ric = 'requestIdleCallback' in window ? window.requestIdleCallback.bind(window) : null
+    const id = ric ? ric(run, { timeout: 4000 }) : window.setTimeout(run, 2000)
+    return () => {
+      cancelled = true
+      if (ric) window.cancelIdleCallback(id)
+      else window.clearTimeout(id)
+    }
+  }, [])
 }
 
 function Protected({ children }: { children: ReactNode }) {
@@ -54,6 +95,7 @@ function Page({ path, children }: { path: string; children: ReactNode }) {
 }
 
 export default function App() {
+  useIdlePreloadRoutes()
   return (
     <AuthProvider>
       <Suspense fallback={<PageFallback />}>
