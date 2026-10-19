@@ -118,19 +118,36 @@ export function createAuthRoutes({ state, getSecret, saveStateFn = saveState, ev
       return { username: state.username, initialized: Boolean(state.passwordHash) };
     },
 
+    // POST /api/auth/change-password —— 账户更新：改密和/或改用户名。
+    // body: { oldPassword, newPassword?, newUsername? }（任一可选，验当前密码恒必需）
     async changePassword(ctx) {
-      const { oldPassword, newPassword } = ctx.body || {};
-      if (!oldPassword || !newPassword) throw new HttpError(400, "bad_request", "oldPassword and newPassword required");
-      if (String(newPassword).length < 8) throw new HttpError(400, "weak_password", "new password must be at least 8 characters");
+      const { oldPassword, newPassword, newUsername } = ctx.body || {};
+      if (!oldPassword) throw new HttpError(400, "bad_request", "oldPassword required");
+      // 恒验当前密码（改用户名也验 —— 防会话被劫后悄悄改名）
       const ok = await verifyPassword(oldPassword, state.passwordHash);
       if (!ok) throw new HttpError(401, "invalid_credentials", "old password is incorrect");
-      state.passwordHash = await hashPassword(newPassword);
+      let renamed = false;
+      if (newUsername !== undefined && newUsername !== null && String(newUsername) !== state.username) {
+        const name = String(newUsername).trim();
+        if (name.length < 3) throw new HttpError(400, "bad_request", "username must be at least 3 characters");
+        if (name.length > 32) throw new HttpError(400, "bad_request", "username must be at most 32 characters");
+        renamed = true;
+        state.username = name;
+      }
+      let passwordChanged = false;
+      if (newPassword !== undefined && newPassword !== null && String(newPassword) !== "") {
+        if (String(newPassword).length < 8) throw new HttpError(400, "weak_password", "new password must be at least 8 characters");
+        state.passwordHash = await hashPassword(newPassword);
+        passwordChanged = true;
+      }
+      if (!renamed && !passwordChanged) throw new HttpError(400, "bad_request", "nothing to change (newPassword or newUsername required)");
       saveStateFn(state);
-      // AC-3.2：吊销其他会话（epoch +1，旧 refresh 全失效），当前会话续发
-      bumpRefreshEpoch();
-      eventLog?.log("auth.password_changed", { username: state.username });
+      // AC-3.2：改密吊销其他会话（epoch +1，旧 refresh 全失效），当前会话续发；
+      // 仅改名不吊销（其他设备 token 仍有效，重新登录后显示新名）
+      if (passwordChanged) bumpRefreshEpoch();
+      eventLog?.log(passwordChanged ? "auth.password_changed" : "auth.username_changed", { username: state.username });
       issueTokens(ctx);
-      return { ok: true };
+      return { ok: true, user: { username: state.username } };
     },
 
     // POST /api/auth/sessions/revoke-all（AC-3.2 手动吊销）

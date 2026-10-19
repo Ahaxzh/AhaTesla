@@ -52,9 +52,9 @@ function bjDayStart(ms) {
 
 // ---- 数据集 -------------------------------------------------------------------
 const GEOFENCES = [
-  { id: 1, name: "家", price_per_unit: 0.3, session_fee: null, billing_type: "kwh", lat: 31.226, lng: 121.446 },
-  { id: 2, name: "公司", price_per_unit: null, session_fee: null, billing_type: "kwh", lat: 31.298, lng: 121.544 },
-  { id: 3, name: "超充站(Demo)", price_per_unit: 1.8, session_fee: 0, billing_type: "kwh", lat: 31.144, lng: 121.502 },
+  { id: 1, name: "家", price_per_unit: 0.3, session_fee: null, billing_type: "kwh", lat: 31.226, lng: 121.446, radius: 192 },
+  { id: 2, name: "公司", price_per_unit: null, session_fee: null, billing_type: "kwh", lat: 31.298, lng: 121.544, radius: 150 },
+  { id: 3, name: "超充站(Demo)", price_per_unit: 1.8, session_fee: 0, billing_type: "kwh", lat: 31.144, lng: 121.502, radius: 217 },
 ];
 const ADDRESSES = [
   { id: 11, display_name: "家(静安区某路)", name: "家", road: "某路 88 号", city: "上海市", neighbourhood: "静安区" },

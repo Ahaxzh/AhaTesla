@@ -130,6 +130,9 @@ export const api = {
     post<{ token: string; user: User }>('/api/auth/login', { username, password }),
   logout: () => post<{ ok: boolean }>('/api/auth/logout'),
   me: () => get<User>('/api/auth/me'),
+  /** 账户更新：改密和/或改用户名（当前密码恒必需） */
+  changeAccount: (payload: { oldPassword: string; newPassword?: string; newUsername?: string }) =>
+    post<{ ok: boolean; user: { username: string } }>('/api/auth/change-password', payload),
   changePassword: (oldPassword: string, newPassword: string) =>
     post<{ ok: boolean }>('/api/auth/change-password', { oldPassword, newPassword }),
 

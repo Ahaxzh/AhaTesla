@@ -110,20 +110,28 @@ test("设置页：修改密码表单存在并可取消", async ({ page }) => {
   await expect(page.locator("input[type='password']").first()).toBeVisible();
 });
 
-test("头像菜单：修改密码跳到设置页安全分区并滚动到位", async ({ page }) => {
+test("头像菜单：账户面板内联可改用户名/密码，含主题语言快捷开关", async ({ page }) => {
   await login(page);
-  await navigate(page, "trips"); // 从其他页进入，验证跨路由跳转
-  // 头像菜单只在桌面侧栏；移动端无此入口（改密入口在设置页内）
+  await navigate(page, "trips"); // 从其他页进入验证不依赖路由
+  // 头像菜单只在桌面侧栏；移动端无此入口（账户入口在设置页内）
   const menuBtn = page.getByTestId("user-menu-button");
   if (!(await menuBtn.isVisible().catch(() => false))) {
     test.skip(true, "移动端无头像菜单");
     return;
   }
   await menuBtn.click();
+  // Discord 式弹层：主题/语言快捷开关 + 账户设置内联面板
+  await expect(page.getByTestId("user-menu-theme")).toBeVisible();
+  await expect(page.getByTestId("user-menu-lang")).toBeVisible();
   await page.getByTestId("user-menu-password").click();
-  await expect(page).toHaveURL(/settings/, { timeout: 8000 });
-  // 滚动后安全分区进入视口（修改密码表单可见）
-  await expect(page.getByTestId("change-password-card")).toBeVisible({ timeout: 5000 });
+  const panel = page.getByTestId("user-menu-account-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator("#menu-acc-username")).toHaveValue(/.+/, { timeout: 5000 }); // 预填当前用户名
+  await expect(panel.locator("#menu-acc-old")).toBeVisible();
+  await expect(panel.locator("#menu-acc-new")).toBeVisible();
+  // 取消收起面板
+  await panel.getByRole("button", { name: /取消|Cancel/ }).click();
+  await expect(page.getByTestId("user-menu-account-panel")).toHaveCount(0);
 });
 
 test("登出后回到登录页且受保护页 401 跳转", async ({ page }) => {

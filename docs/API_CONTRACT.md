@@ -41,7 +41,7 @@
 - `POST /api/auth/refresh` → {ok}（Refresh cookie 续 Access；失效则 401 重登）
 - `POST /api/auth/logout` → {ok}
 - `GET /api/auth/me` → {username, initialized}
-- `POST /api/auth/change-password` {oldPassword, newPassword} → {ok}（吊销其他会话）
+- `POST /api/auth/change-password`（账户更新）{oldPassword, newPassword?, newUsername?} → {ok, user:{username}}（改密吊销其他会话；仅改名不吊销；任一可选但至少其一，当前密码恒必需）
 - `POST /api/auth/sessions/revoke-all`（管理员）→ {ok}（AC-3.2 手动吊销）
 
 ## 3. 仪表盘与行程（v1 演进）

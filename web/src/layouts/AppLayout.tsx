@@ -3,10 +3,14 @@ import { useEffect, useRef, useState } from 'react'
 import {
   BatteryCharging,
   Gauge,
-  KeyRound,
+  Languages,
   LogOut,
+  Monitor,
+  Moon,
   Route,
   Settings,
+  Sun,
+  UserCog,
   FileBarChart,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -16,6 +20,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCar } from '@/contexts/CarContext'
 import { setApiHandlers, api } from '@/api/client'
 import { useToast } from '@/components/Toast'
+import { useTheme, type ThemeSetting } from '@/contexts/ThemeContext'
 import { HealthBanner } from '@/components/HealthBanner'
 import { useI18n } from '@/i18n'
 
@@ -142,31 +147,50 @@ function SidebarCarCard() {
 
 /** 跳转设置页锚点并滚动到位：react-router 不会自动滚 hash，需手动找元素；
     路由切换有渲染时差，rAF 重试若干帧（分区骨架同步渲染，通常 1~2 帧内命中） */
-function goToSettingsAnchor(navigate: (to: string) => void, section: string) {
-  navigate(`/settings#settings-${section}`)
-  let tries = 0
-  const scroll = () => {
-    const el = document.getElementById(`settings-${section}`)
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    else if (++tries < 30) requestAnimationFrame(scroll)
-  }
-  requestAnimationFrame(scroll)
-}
-
-/** 左下角头像菜单：用户信息 / 修改密码（跳设置） / 退出登录 */
+/** 左下角头像菜单（Discord 式）：用户信息 / 主题·语言快捷开关 /
+ *  账户设置（用户名+密码,内联面板,不再跳设置页） / 退出登录 */
 function UserMenu() {
-  const { user, logout } = useAuth()
+  const { user, logout, refresh } = useAuth()
   const navigate = useNavigate()
   const { t } = useI18n()
+  const { lang, setLang } = useI18n()
+  const { theme, setTheme } = useTheme()
+  const { toast } = useToast()
   const [open, setOpen] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+  // 账户表单（打开面板时预填；不做 user→表单 的持续同步 ——
+  // 否则 /api/auth/me 晚到会把用户正在输入的用户名打回旧值）
+  const [username, setUsername] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [accountError, setAccountError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const openAccountPanel = () => {
+    setAccountError('')
+    setOldPassword('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setUsername(user?.username ?? '')
+    setAccountOpen(true)
+  }
 
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+        setAccountOpen(false)
+      }
     }
-    const onEsc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setAccountOpen(false)
+      }
+    }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onEsc)
     return () => {
@@ -179,6 +203,58 @@ function UserMenu() {
     setOpen(false)
     await logout()
     navigate('/login', { replace: true })
+  }
+
+  const themeCycle: Record<ThemeSetting, { next: ThemeSetting; icon: typeof Sun; label: string }> = {
+    dark: { next: 'light', icon: Moon, label: t('menu.theme.dark', '深色') },
+    light: { next: 'system', icon: Sun, label: t('menu.theme.light', '浅色') },
+    system: { next: 'dark', icon: Monitor, label: t('menu.theme.system', '跟随系统') },
+  }
+  const tc = themeCycle[theme] ?? themeCycle.system
+
+  const submitAccount = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAccountError('')
+    const name = username.trim()
+    const nameChanged = name !== (user?.username ?? '')
+    if (nameChanged && name.length < 3) {
+      setAccountError(t('menu.account.nameTooShort', '用户名至少 3 个字符'))
+      return
+    }
+    if (newPassword && newPassword.length < 8) {
+      setAccountError(t('menu.account.pwTooShort', '新密码至少 8 位'))
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setAccountError(t('menu.account.pwMismatch', '两次输入的新密码不一致'))
+      return
+    }
+    if (!nameChanged && !newPassword) {
+      setAccountError(t('menu.account.noChange', '没有需要保存的修改'))
+      return
+    }
+    if (!oldPassword) {
+      setAccountError(t('menu.account.needOldPw', '请输入当前密码以确认'))
+      return
+    }
+    setSaving(true)
+    try {
+      await api.changeAccount({
+        oldPassword,
+        newPassword: newPassword || undefined,
+        newUsername: nameChanged ? name : undefined,
+      })
+      await refresh()
+      toast(t('menu.account.saved', '账户已更新'), 'success')
+      setAccountOpen(false)
+      setOldPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : t('menu.account.failed', '保存失败'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -206,29 +282,139 @@ function UserMenu() {
         </svg>
       </button>
 
-      {/* 下拉菜单 */}
+      {/* 下拉菜单（w-72 允许内联表单铺开） */}
       {open && (
         <div
           role="menu"
           data-testid="user-menu"
-          className="absolute bottom-full left-0 right-0 z-40 mb-2 overflow-hidden rounded-xl border border-white/[0.08] bg-base-800/95 shadow-[0_8px_24px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+          className="absolute bottom-full left-0 z-40 mb-2 w-72 overflow-hidden rounded-xl border border-white/[0.08] bg-base-800/95 shadow-[0_8px_24px_rgba(0,0,0,0.5)] backdrop-blur-xl"
         >
           <div className="border-b border-white/[0.06] px-3.5 py-2.5">
             <div className="truncate text-sm font-medium text-slate-200">{user?.username}</div>
             <div className="mt-0.5 text-[11px] text-slate-400">{t('menu.role', '管理员 · 单用户模式')}</div>
           </div>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              goToSettingsAnchor(navigate, 'security')
-            }}
-            data-testid="user-menu-password"
-            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
-          >
-            <KeyRound className="h-4 w-4 text-slate-500" />
-            {t('menu.password', '修改密码')}
-          </button>
+
+          {/* 快捷开关：主题（三态循环）+ 语言 */}
+          <div className="flex items-center gap-2 px-3.5 py-2.5" data-testid="user-menu-quick">
+            <button
+              type="button"
+              onClick={() => setTheme(tc.next)}
+              title={t('menu.theme.title', '切换明暗主题')}
+              aria-label={t('menu.theme.title', '切换明暗主题')}
+              data-testid="user-menu-theme"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/[0.09]"
+            >
+              <tc.icon className="h-3.5 w-3.5" />
+              {tc.label}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+              title={t('menu.lang.title', '切换语言')}
+              aria-label={t('menu.lang.title', '切换语言')}
+              data-testid="user-menu-lang"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/[0.09]"
+            >
+              <Languages className="h-3.5 w-3.5" />
+              {lang === 'zh' ? 'English' : '中文'}
+            </button>
+          </div>
+
+          {/* 账户设置：内联面板（用户名 + 密码，Discord 式不跳页） */}
+          {!accountOpen ? (
+            <button
+              role="menuitem"
+              onClick={openAccountPanel}
+              data-testid="user-menu-password"
+              className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+            >
+              <UserCog className="h-4 w-4 text-slate-500" />
+              {t('menu.account', '账户设置')}
+              <span className="ml-auto text-[10px] text-slate-500">{t('menu.account.hint', '用户名 · 密码')}</span>
+            </button>
+          ) : (
+            <form
+              onSubmit={submitAccount}
+              className="space-y-2.5 border-t border-white/[0.06] px-3.5 py-3"
+              data-testid="user-menu-account-panel"
+              noValidate
+            >
+              <div className="text-[11px] font-medium text-slate-400">{t('menu.account', '账户设置')}</div>
+              <div>
+                <label htmlFor="menu-acc-username" className="mb-1 block text-[10px] text-slate-500">{t('menu.account.username', '用户名')}</label>
+                <input
+                  id="menu-acc-username"
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[13px] text-slate-200 outline-none transition focus:border-tesla/50"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                />
+              </div>
+              <div>
+                <label htmlFor="menu-acc-old" className="mb-1 block text-[10px] text-slate-500">{t('settings.pw.old', '当前密码')}</label>
+                <input
+                  id="menu-acc-old"
+                  type="password"
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[13px] text-slate-200 outline-none transition focus:border-tesla/50"
+                  value={oldPassword}
+                  onChange={(e) => setOldPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+              <div>
+                <label htmlFor="menu-acc-new" className="mb-1 block text-[10px] text-slate-500">{t('settings.pw.new', '新密码')}</label>
+                <input
+                  id="menu-acc-new"
+                  type="password"
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[13px] text-slate-200 outline-none transition focus:border-tesla/50"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                  placeholder={t('menu.account.pwOptional', '留空 = 只改用户名')}
+                />
+              </div>
+              <div>
+                <label htmlFor="menu-acc-confirm" className="mb-1 block text-[10px] text-slate-500">{t('settings.pw.confirm', '确认新密码')}</label>
+                <input
+                  id="menu-acc-confirm"
+                  type="password"
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1.5 text-[13px] text-slate-200 outline-none transition focus:border-tesla/50"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+              {accountError && (
+                <div role="alert" className="rounded-lg border border-tesla/30 bg-tesla/10 px-2.5 py-1.5 text-[11px] text-tesla-soft">
+                  {accountError}
+                </div>
+              )}
+              <div className="flex gap-2 pt-0.5">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  data-testid="user-menu-account-save"
+                  className="flex-1 rounded-lg bg-tesla px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-tesla/85 disabled:opacity-50"
+                >
+                  {saving ? t('common.working', '处理中…') : t('common.save', '保存')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountOpen(false)
+                    setAccountError('')
+                    setOldPassword('')
+                    setNewPassword('')
+                    setConfirmPassword('')
+                  }}
+                  className="rounded-lg border border-white/[0.08] px-3 py-1.5 text-[12px] text-slate-400 transition hover:bg-white/[0.05]"
+                >
+                  {t('common.cancel', '取消')}
+                </button>
+              </div>
+            </form>
+          )}
+
           <button
             role="menuitem"
             onClick={handleLogout}

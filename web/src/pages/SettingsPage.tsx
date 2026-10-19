@@ -275,21 +275,29 @@ export default function SettingsPage() {
     onError: (err) => toast(err.message, 'error'),
   })
 
-  // ---- 修改密码 ----
+  // ---- 账户（用户名 + 密码） ----
+  const [username, setUsername] = useState('')
+  const [usernameTouched, setUsernameTouched] = useState(false)
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // 仅在用户未编辑过时同步外部用户名（me 晚到不打断输入）
+  useEffect(() => {
+    if (!usernameTouched && user?.username) setUsername(user.username)
+  }, [user?.username, usernameTouched])
 
   const onSubmitPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (!oldPassword || !newPassword) {
-      setError('请填写完整')
+    const name = username.trim()
+    const nameChanged = name !== (user?.username ?? '')
+    if (nameChanged && name.length < 3) {
+      setError('用户名至少 3 个字符')
       return
     }
-    if (newPassword.length < 8) {
+    if (newPassword && newPassword.length < 8) {
       setError('新密码至少 8 位')
       return
     }
@@ -297,10 +305,18 @@ export default function SettingsPage() {
       setError('两次输入的新密码不一致')
       return
     }
+    if (!nameChanged && !newPassword) {
+      setError('没有需要保存的修改')
+      return
+    }
     setSubmitting(true)
     try {
-      await api.changePassword(oldPassword, newPassword)
-      toast('密码已修改', 'success')
+      await api.changeAccount({
+        oldPassword,
+        newPassword: newPassword || undefined,
+        newUsername: nameChanged ? name : undefined,
+      })
+      toast('账户已更新', 'success')
       setOldPassword('')
       setNewPassword('')
       setConfirmPassword('')
@@ -705,8 +721,12 @@ export default function SettingsPage() {
             <h2 className="section-title">
               <KeyRound className="h-4 w-4 text-tesla" /> {t('settings.nav.security', '账户安全')}
             </h2>
-            <p className="section-desc mt-1">{t('settings.security.desc', '修改密码后其他已登录会话将被吊销')}</p>
+            <p className="section-desc mt-1">{t('settings.security.desc', '修改用户名或密码；修改密码后其他已登录会话将被吊销')}</p>
             <form onSubmit={onSubmitPassword} className="mt-4 max-w-sm space-y-3.5" noValidate>
+              <div>
+                <label htmlFor="account-username" className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.pw.username', '用户名')}</label>
+                <input id="account-username" className="input-dark" autoComplete="username" value={username} onChange={(e) => { setUsernameTouched(true); setUsername(e.target.value) }} data-testid="account-username" />
+              </div>
               <div>
                 <label htmlFor="old-password" className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.pw.old', '当前密码')}</label>
                 <input id="old-password" type="password" className="input-dark" autoComplete="current-password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} />

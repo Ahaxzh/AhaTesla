@@ -2,7 +2,7 @@
 import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
 import { getFifoLedger } from "../core/fifo-ledger.mjs";
-import { listDrivesSql, getRoutePoints, getAddresses, getGeofences } from "../core/teslamate-queries.mjs";
+import { listDrivesSql, getRoutePoints, getAddresses, getGeofences, geofenceLabelFor } from "../core/teslamate-queries.mjs";
 import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
 
 function addressLabel(address) {
@@ -12,30 +12,10 @@ function addressLabel(address) {
     || null;
 }
 
-/** 距离²（粗略平面近似，仅用于最近邻排序，无需 haversine 精度） */
-function sqDist(lat1, lng1, lat2, lng2) {
-  const dLat = lat1 - lat2;
-  const dLng = (lng1 - lng2) * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
-  return dLat * dLat + dLng * dLng;
-}
-
-/** 第三级地点兜底：轨迹端点坐标 vs geofences 表中心点最近邻（≤300m 才认）。
- *  纯本地 SQLite/PG 内已有数据计算，不调用任何外部逆地理 API（红线）。 */
+/** 第三级地点兜底：半径感知三级标签（围栏内→确定名；1.5km→"XX 附近"；更远→null）。
+ *  纯本地数据计算，不调用任何外部逆地理 API（红线）。与推送富化同口径。 */
 function nearestGeofenceName(geofenceRows, lat, lng) {
-  if (lat == null || lng == null || !Array.isArray(geofenceRows)) return null;
-  let best = null;
-  let bestDist = Infinity;
-  for (const g of geofenceRows) {
-    if (g.lat == null || g.lng == null) continue;
-    const d = sqDist(Number(lat), Number(lng), Number(g.lat), Number(g.lng));
-    if (d < bestDist) { bestDist = d; best = g; }
-  }
-  if (!best) return null;
-  // 500m 阈值：geofence 自带半径（默认约 100~200m），加上 GPS 漂移余量；
-  // 超出则认为不在任何已知围栏附近
-  const dLatDeg = Math.sqrt(bestDist) || 0;
-  if (dLatDeg > 0.005) return null;
-  return best.name;
+  return geofenceLabelFor(geofenceRows, lat, lng);
 }
 
 function routeKey(drive, addressMap, geofenceMap, geofenceRows) {

@@ -161,7 +161,7 @@ describe('SettingsPage', () => {
     await user.type(screen.getByLabelText('新密码'), 'newpass99')
     await user.type(screen.getByLabelText('确认新密码'), 'newpass99')
     await user.click(screen.getByTestId('password-submit'))
-    expect(await screen.findByText('密码已修改')).toBeInTheDocument()
+    expect(await screen.findByText('账户已更新')).toBeInTheDocument()
     await waitFor(() => expect((screen.getByLabelText('新密码') as HTMLInputElement).value).toBe(''))
   })
 })

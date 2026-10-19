@@ -311,6 +311,33 @@ export async function getAddresses(db, ids) {
   return map;
 }
 
+/** 近似米距（纬度 1°≈111.3km，经度按 cos 缩放） */
+export function metersBetween(lat1, lng1, lat2, lng2) {
+  const dLat = (lat1 - lat2) * 111_320;
+  const dLng = (lng1 - lng2) * 111_320 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
+  return Math.hypot(dLat, dLng);
+}
+
+/** 端点围栏标签（半径感知三级，替代旧"550m 内武断取最近"）：
+ *  ① 点在围栏内（r×1.2 容差，最小 150m）→ 确定名（"HOME"）
+ *  ② 1.5km 内最近围栏 → 近似名（"HOME 附近"，诚实标注不武断）
+ *  ③ 更远 → null（调用方显示"未知位置"）
+ *  未开反向地理编码的库（addresses 空）全靠这条链出标签。 */
+export function geofenceLabelFor(geofenceRows, lat, lng) {
+  if (lat == null || lng == null || !Array.isArray(geofenceRows)) return null;
+  let best = null;
+  let bestD = Infinity;
+  for (const g of geofenceRows) {
+    if (g.lat == null || g.lng == null) continue;
+    const d = metersBetween(Number(lat), Number(lng), Number(g.lat), Number(g.lng));
+    if (d < bestD) { bestD = d; best = g; }
+  }
+  if (!best) return null;
+  if (bestD <= Math.max((Number(best.radius) || 0) * 1.2, 150)) return best.name;
+  if (bestD <= 1500) return `${best.name} 附近`;
+  return null;
+}
+
 export async function getGeofences(db) {
   return db.query(`
     SELECT g.id, g.name,
