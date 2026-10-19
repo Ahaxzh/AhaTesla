@@ -88,6 +88,12 @@ export const EN: Record<string, string> = {
   // 通用
   'common.cancel': 'Cancel',
   'common.close': 'Close',
+  'common.retry': 'Retry',
+  'common.working': 'Working…',
+  'common.loadError.title': 'Failed to load',
+  'common.loadError.desc': 'Data source connection issue — your data is safe',
+  'dash.loadError': 'Failed to load — check the TeslaMate data source connection',
+  'settings.push.openChannelPage': 'Open channel settings →',
 
   // 总览页
   'dash.title': 'Overview',
