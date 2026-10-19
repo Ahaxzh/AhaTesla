@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
@@ -15,7 +16,8 @@ import {
   Zap,
 } from 'lucide-react'
 import { api } from '@/api/client'
-import { RouteMap } from '@/components/RouteMap'
+// leaflet(轨迹图)二级懒加载:不阻塞行程详情首屏,轨迹区渲染时才拉 map chunk
+const RouteMap = lazy(() => import('@/components/RouteMap').then((m) => ({ default: m.RouteMap })))
 import { ElevationProfile } from '@/components/ElevationProfile'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
@@ -101,7 +103,9 @@ export default function TripDetailPage() {
           </div>
 
           {/* 模块2：路线轨迹（速度着色 + 悬停速度提示） */}
-          <RouteMap points={trip.route ?? []} />
+          <Suspense fallback={<div className="skeleton h-72 w-full rounded-xl" data-testid="route-map-fallback" />}>
+            <RouteMap points={trip.route ?? []} />
+          </Suspense>
           <div className="mt-3">
             <ElevationProfile points={trip.route ?? []} />
           </div>
