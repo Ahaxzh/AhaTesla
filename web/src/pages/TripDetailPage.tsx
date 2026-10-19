@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { RouteMap } from '@/components/RouteMap'
+import { ElevationProfile } from '@/components/ElevationProfile'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
@@ -101,6 +102,9 @@ export default function TripDetailPage() {
 
           {/* 模块2：路线轨迹（速度着色 + 悬停速度提示） */}
           <RouteMap points={trip.route ?? []} />
+          <div className="mt-3">
+            <ElevationProfile points={trip.route ?? []} />
+          </div>
 
           {/* 模块3：环境剖析微卡片 */}
           {trip.environment && (

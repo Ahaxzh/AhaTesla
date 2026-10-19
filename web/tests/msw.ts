@@ -13,6 +13,26 @@ import type {
 
 export const mockUser = { username: 'aha', initialized: true }
 
+export const mockBatteryHealth = {
+  sampleCount: 117,
+  insufficient: false,
+  healthPct: 98.2,
+  baselineMaxRangeKm: 398.8,
+  currentMaxRangeKm: 391.4,
+  capacityKwh: 50.7,
+  cycles: 56.3,
+  rechargeEfficiency: 92.6,
+  totalAddedKwh: 2854.9,
+  trend: [
+    { month: '2026-05', maxRangeKm: 392.5 },
+    { month: '2026-06', maxRangeKm: 391.7 },
+    { month: '2026-07', maxRangeKm: 385.1 },
+    { month: '2026-08', maxRangeKm: 390.8 },
+    { month: '2026-09', maxRangeKm: 391.2 },
+    { month: '2026-10', maxRangeKm: 391.4 },
+  ],
+}
+
 export const mockTrip: Trip = {
   id: 101,
   startAt: '2026-10-10T08:30:00+08:00',
@@ -208,9 +228,9 @@ export const defaultHandlers = [
       ...mockTrip,
       id: Number(params.id),
       route: [
-        { t: '2026-10-13T09:00:00Z', lat: 31.22, lng: 121.4, speed: 32 },
-        { t: '2026-10-13T09:20:00Z', lat: 31.23, lng: 121.42, speed: 75 },
-        { t: '2026-10-13T09:40:00Z', lat: 31.25, lng: 121.45, speed: 105 },
+        { t: '2026-10-13T09:00:00Z', lat: 31.22, lng: 121.4, speed: 32, elevation: 12 },
+        { t: '2026-10-13T09:20:00Z', lat: 31.23, lng: 121.42, speed: 75, elevation: 28 },
+        { t: '2026-10-13T09:40:00Z', lat: 31.25, lng: 121.45, speed: 105, elevation: 8 },
       ],
       positionCount: 3,
       fifo: {
@@ -237,7 +257,21 @@ export const defaultHandlers = [
         { name: '家庭充电桩', count: 20, kwh: 820, cost: 410, pricePerUnit: 0.5 },
         { name: '超充 上海站', count: 3, kwh: 95, cost: 175.8, pricePerUnit: 1.85 },
       ],
+      byType: {
+        ac: { kwh: 820, cost: 410, count: 20 },
+        super: { kwh: 95, cost: 175.8, count: 3 },
+        dc: { kwh: 12, cost: 20.4, count: 1 },
+      },
+      freeKwh: 8.5,
+      monthly: [
+        { month: '2026-08', kwh: 70, cost: 42 },
+        { month: '2026-09', kwh: 88, cost: 51.2 },
+        { month: '2026-10', kwh: 65.1, cost: 75.2 },
+      ],
     }),
+  ),
+  http.get('/api/battery-health', () =>
+    HttpResponse.json(mockBatteryHealth),
   ),
   http.get('/api/pricing', () => HttpResponse.json(mockPricing)),
   http.put('/api/pricing/default', async ({ request }) => {

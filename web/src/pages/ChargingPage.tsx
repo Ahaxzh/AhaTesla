@@ -166,6 +166,57 @@ export default function ChargingPage() {
         )}
       </div>
 
+      {/* 成本构成三分 + 免费充电 + 月度趋势（Grafana charging-costs-stats 提炼） */}
+      {stats && stats.byType && (stats.byType.ac.count + stats.byType.super.count + stats.byType.dc.count) > 0 && (
+        <section className="glass-card-flat mb-4 p-5" data-testid="cost-composition">
+          <h2 className="mb-3 text-sm font-medium text-slate-200">{t('charging.composition.title', '充电成本构成')}</h2>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            {([
+              { key: 'ac', label: t('charging.composition.ac', '家充/交流'), cls: 'from-emerald-500/25 to-emerald-400/70' },
+              { key: 'super', label: t('charging.composition.super', '特斯拉超充'), cls: 'from-tesla/25 to-tesla/70' },
+              { key: 'dc', label: t('charging.composition.dc', '其他快充'), cls: 'from-sky-500/25 to-sky-400/70' },
+            ] as const).map(({ key, label, cls }) => {
+              const g = stats.byType[key]
+              return (
+                <div key={key} data-testid={`cost-type-${key}`}>
+                  <div className="text-[11px] text-slate-400">{label}</div>
+                  <div className="num mt-1 text-lg font-semibold text-slate-100">{fmtCny(g.cost)}</div>
+                  <div className="num mt-0.5 text-[11px] text-slate-500">{fmtKwh(g.kwh)} · {g.count} {t('charging.chart.countUnit', '次')}</div>
+                  <div className={`mt-2 h-1.5 rounded-full bg-gradient-to-r ${cls}`} style={{ width: '100%', opacity: 0.8 }} role="presentation" />
+                </div>
+              )
+            })}
+          </div>
+          {stats.freeKwh > 0.5 && (
+            <div className="mt-3 text-[11px] text-emerald-400" data-testid="free-charged">
+              🎁 {t('charging.composition.free', '免费充电')} {stats.freeKwh.toFixed(1)} kWh
+            </div>
+          )}
+          {stats.monthly.length >= 2 && (
+            <div className="mt-4">
+              <div className="mb-2 text-[11px] text-slate-500">{t('charging.composition.monthly', '月度电费趋势')}</div>
+              <div className="flex h-16 items-end gap-1" data-testid="monthly-cost-chart">
+                {stats.monthly.map((m) => {
+                  const max = Math.max(...stats.monthly.map((x) => x.cost), 1)
+                  return (
+                    <div
+                      key={m.month}
+                      className="flex-1 rounded-t bg-gradient-to-t from-tesla/20 to-tesla/60"
+                      style={{ height: `${Math.max((m.cost / max) * 100, 4)}%` }}
+                      title={`${m.month} · ${fmtCny(m.cost)} · ${m.kwh} kWh`}
+                    />
+                  )
+                })}
+              </div>
+              <div className="mt-1 flex justify-between text-[10px] text-slate-600 num">
+                <span>{stats.monthly[0].month}</span>
+                <span>{stats.monthly[stats.monthly.length - 1].month}</span>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* 按地点统计条形图（纯 CSS） */}
       <section className="glass-card-flat mb-4 p-5" data-testid="location-chart">
         <h2 className="mb-4 text-sm font-medium text-slate-200">{t('charging.chart.title', '按地点统计（本月）')}</h2>

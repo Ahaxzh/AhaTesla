@@ -136,6 +136,10 @@ export function buildDemoDataset(anchorMs = Date.now()) {
       end_at: new Date(endMs).toISOString(),
       charge_energy_added: kwh,
       charge_energy_used: round(kwh * 1.08, 2),
+      start_rated_range_km: round(startBatt * 4.05, 1),
+      end_rated_range_km: round(Math.min(100, startBatt + Math.round(kwh * 1.35)) * 4.05, 1),
+      start_ideal_range_km: round(startBatt * 4.05, 1),
+      end_ideal_range_km: round(Math.min(100, startBatt + Math.round(kwh * 1.35)) * 4.05, 1),
       cost: null, // 让账本按 geofence 单价计价
       duration_min: Math.round(hours * 60),
       start_battery_level: startBatt,
@@ -165,6 +169,10 @@ export function buildDemoDataset(anchorMs = Date.now()) {
       end_at: new Date(endMs).toISOString(),
       charge_energy_added: kwh,
       charge_energy_used: round(kwh * 1.1, 2),
+      start_rated_range_km: round(startBatt * 4.05, 1),
+      end_rated_range_km: round(Math.min(92, startBatt + Math.round(kwh * 1.3)) * 4.05, 1),
+      start_ideal_range_km: round(startBatt * 4.05, 1),
+      end_ideal_range_km: round(Math.min(92, startBatt + Math.round(kwh * 1.3)) * 4.05, 1),
       cost: null,
       duration_min: minutes,
       start_battery_level: startBatt,
@@ -388,6 +396,15 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
       const limit = Number(params[1]) || 1000;
       const offset = Number(params[2]) || 0;
       return rows.slice(offset, offset + limit).map((d) => ({ ...d }));
+    }
+    // battery-health(充电会话起止 SOC/续航/能耗;特征列 end_rated_range_km)
+    if (s.includes("end_rated_range_km") && s.includes("charging_processes")) {
+      return dataset.charges.map((c) => ({
+        end_date: c.end_at, charge_energy_added: c.charge_energy_added, charge_energy_used: c.charge_energy_used,
+        start_battery_level: c.start_battery_level, end_battery_level: c.end_battery_level,
+        start_rated_range_km: c.start_rated_range_km, end_rated_range_km: c.end_rated_range_km,
+        start_ideal_range_km: c.start_ideal_range_km, end_ideal_range_km: c.end_ideal_range_km
+      }));
     }
     // 回放水位（max id + max end_date；demo 给真实值 → 回放缓存可用）
     if (s.includes("max(end_date)") && s.includes("FROM drives")) {

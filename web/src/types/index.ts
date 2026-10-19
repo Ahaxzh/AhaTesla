@@ -60,7 +60,7 @@ export interface Trip {
 
 export interface TripDetail extends Trip {
   /** 路线点集 {t, lat, lng, speed}[]（LTTB ≤300 点，speed km/h 供速度着色） */
-  route?: { t: string; lat: number; lng: number; speed?: number | null }[]
+  route?: { t: string; lat: number; lng: number; speed?: number | null; elevation?: number | null }[]
   positionCount?: number
   /** FIFO 扣减明细（P3 模块4） */
   fifo?: {
@@ -143,7 +143,7 @@ export interface Paged<T> {
   items: T[]
 }
 
-export interface ChargingStats {
+export interface ChargingStats extends ChargingStatsV2 {
   totalKWh: number
   totalCostCny: number
   avgPricePerKWh: number
@@ -245,6 +245,27 @@ export interface InstanceSettings {
   carAliases?: Record<string, string>
   /** 可选高德逆地理("未知"点位地名补全,默认关;key 密文存后端只回 hasKey) */
   geocoding?: { enabled: boolean; hasKey: boolean; keyAlias?: string | null }
+}
+
+/** GET /api/battery-health → 电池健康快照(样本不足时 insufficient,UI 隐藏) */
+export interface BatteryHealth {
+  sampleCount: number
+  insufficient: boolean
+  healthPct?: number | null
+  baselineMaxRangeKm?: number | null
+  currentMaxRangeKm?: number | null
+  capacityKwh?: number | null
+  cycles?: number | null
+  rechargeEfficiency?: number | null
+  totalAddedKwh?: number | null
+  trend?: { month: string; maxRangeKm: number }[]
+}
+
+/** 充电 stats 扩展:成本三分 + 免费充电 + 月度趋势 */
+export interface ChargingStatsV2 {
+  byType: { ac: { kwh: number; cost: number; count: number }; super: { kwh: number; cost: number; count: number }; dc: { kwh: number; cost: number; count: number } }
+  freeKwh: number
+  monthly: { month: string; kwh: number; cost: number }[]
 }
 
 /** m4e:GET /api/cars → 车辆清单(name 来自 TeslaMate,alias/isPrimary 来自本地设置) */

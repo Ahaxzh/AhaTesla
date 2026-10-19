@@ -25,3 +25,16 @@ describe('ChargingPage', () => {
     expect(items[0]).toHaveTextContent('85%')
   })
 })
+
+/** 成本构成三分 + 月度趋势(Grafana charging-costs-stats 提炼) */
+describe('充电成本构成', () => {
+  it('渲染 AC/超充/其他快充三分与月度柱图', async () => {
+    renderWithProviders(<ChargingPage />)
+    const section = await screen.findByTestId('cost-composition')
+    expect(section.textContent).toContain('家充/交流')
+    expect(section.textContent).toContain('特斯拉超充')
+    expect(section.textContent).toContain('其他快充')
+    expect(await screen.findByTestId('monthly-cost-chart')).toBeInTheDocument()
+    expect(await screen.findByTestId('free-charged')).toBeInTheDocument()
+  })
+})

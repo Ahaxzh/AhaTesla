@@ -19,6 +19,7 @@ import { SkeletonCards, SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { EmptyState } from '@/components/EmptyState'
 import { Timeline24h } from '@/components/Timeline24h'
+import { BatteryHealthCard } from '@/components/BatteryHealthCard'
 import { HeatmapCalendar } from '@/components/HeatmapCalendar'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
@@ -142,6 +143,7 @@ export default function DashboardPage() {
 
           {/* P2 模块2：24h 状态时间轴 */}
           {timeline && <Timeline24h data={timeline} />}
+          <BatteryHealthCard />
 
           {/* P2 模块4：用车日历热力图 */}
           {heatmap && <HeatmapCalendar data={heatmap} onDaysChange={setHeatmapDays} />}

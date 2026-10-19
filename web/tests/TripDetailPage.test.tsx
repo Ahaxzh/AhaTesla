@@ -51,3 +51,18 @@ describe('TripDetailPage', () => {
     expect(screen.getByTestId('environment-card')).toHaveTextContent('18.5')
   })
 })
+
+
+/** 海拔剖面(Grafana trip.json Elevation 提炼) */
+describe('海拔剖面', () => {
+  it('渲染海拔面积图与高差信息', async () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/trips/:id" element={<TripDetailPage />} />
+      </Routes>,
+      { route: '/trips/101' },
+    )
+    expect(await screen.findByTestId('elevation-profile')).toBeInTheDocument()
+    expect(await screen.findByTestId('elevation-profile')).toHaveTextContent("8–28 m")
+  })
+})

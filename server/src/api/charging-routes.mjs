@@ -138,9 +138,25 @@ export function createChargingRoutes({ db, state, getStore }) {
       }
       const options = await pricingOptions();
       const rows = await listChargingForStats(db, { sinceIso, untilIso, carId: carIdFromQuery(ctx, state) });
+      // DC/AC 判定(Grafana charging-costs 同思路): 任一采样 fast_charger_present → DC;
+      // 名称含 supercharger/超充 → 超充,其余 DC → 其他快充
+      const fastIds = new Set();
+      try {
+        const fast = await db.query(`
+          SELECT DISTINCT c.charging_process_id AS id
+          FROM charges c
+          WHERE c.fast_charger_present IS TRUE
+        `);
+        for (const r of fast) fastIds.add(Number(r.id));
+      } catch { /* charges 表不可达 → 全按 AC */ }
+      const isSuperName = (row) => /supercharger|超充|super charger/i.test(String(row.geofence_name || "") + String(row.address_name || ""));
+
       let totalKwh = 0;
       let totalCost = 0;
       let pricedSessions = 0;
+      let freeKwh = 0;
+      const byType = { ac: { kwh: 0, cost: 0, count: 0 }, super: { kwh: 0, cost: 0, count: 0 }, dc: { kwh: 0, cost: 0, count: 0 } };
+      const byMonth = new Map();
       const byLocation = new Map();
       for (const row of rows) {
         const priced = priceChargingSession(row, defaultRate(), options);
@@ -149,6 +165,20 @@ export function createChargingRoutes({ db, state, getStore }) {
         if (priced.costCny !== null) {
           totalCost += priced.costCny;
           pricedSessions += 1;
+        } else if (priced.source === "unknown" && row.cost != null && Number(row.cost) === 0) {
+          freeKwh += energy; // 明确 cost=0(免费桩/家充无计量),而非"无法计价"
+        }
+        const type = fastIds.has(Number(row.id)) ? (isSuperName(row) ? "super" : "dc") : "ac";
+        byType[type].kwh += energy;
+        byType[type].count += 1;
+        if (priced.costCny !== null) byType[type].cost += priced.costCny;
+        const endIso = isoFromTeslaMate(row.end_date ?? row.end_at);
+        if (endIso) {
+          const month = endIso.slice(0, 7);
+          const mb = byMonth.get(month) || { month, kwh: 0, cost: 0 };
+          mb.kwh += energy;
+          if (priced.costCny !== null) mb.cost += priced.costCny;
+          byMonth.set(month, mb);
         }
         const name = row.geofence_name || row.address_name || "未知地点";
         const bucket = byLocation.get(name) || { name, count: 0, kwh: 0, cost: 0, pricedCount: 0 };
@@ -173,7 +203,16 @@ export function createChargingRoutes({ db, state, getStore }) {
         totalKWh: round(totalKwh, 2),
         totalCostCny: round(totalCost, 2),
         avgPricePerKWh: totalKwh > 0 && pricedSessions > 0 ? round(totalCost / totalKwh, 4) : null,
-        byLocation: locations
+        byLocation: locations,
+        // Grafana charging-costs-stats 提炼:充电成本三分 + 免费充电 + 月度趋势
+        byType: {
+          ac: { kwh: round(byType.ac.kwh, 1), cost: round(byType.ac.cost, 2), count: byType.ac.count },
+          super: { kwh: round(byType.super.kwh, 1), cost: round(byType.super.cost, 2), count: byType.super.count },
+          dc: { kwh: round(byType.dc.kwh, 1), cost: round(byType.dc.cost, 2), count: byType.dc.count }
+        },
+        freeKwh: round(freeKwh, 1),
+        monthly: [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)).slice(-12)
+          .map((m) => ({ month: m.month, kwh: round(m.kwh, 1), cost: round(m.cost, 2) }))
       };
     }
   };

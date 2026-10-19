@@ -246,13 +246,13 @@ export function createTripsRoutes({ db, state }) {
       // 路线点（LTTB ≤300，GA-26）
       const points = await getRoutePoints(db, drive.id, 1200);
       const poly = points
-        .map((p) => ({ x: new Date(String(p.date).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(p.date)) ? p.date : `${p.date}Z`).getTime() || 0, y: p.lat, lat: p.lat, lng: p.lng, speed: p.speed ?? null }))
+        .map((p) => ({ x: new Date(String(p.date).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(p.date)) ? p.date : `${p.date}Z`).getTime() || 0, y: p.lat, lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null }))
         .filter((p) => Number.isFinite(p.x));
-      const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng, speed: p.speed ?? null }));
+      const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null }));
 
       return {
         ...view,
-        route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng, speed: p.speed ?? null })),
+        route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null })),
         positionCount: points.length,
         fifo: {
           batches: fifoBatches,

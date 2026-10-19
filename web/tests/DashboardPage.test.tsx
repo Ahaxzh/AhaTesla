@@ -55,3 +55,16 @@ describe('DashboardPage', () => {
     expect(await screen.findAllByTestId('empty-state').then((els) => els.length)).toBeGreaterThanOrEqual(2)
   })
 })
+
+/** 电池健康卡(Grafana BatteryHealthV2 提炼) */
+describe('BatteryHealthCard', () => {
+  it('渲染健康度/容量/循环/效率与月度趋势条', async () => {
+    renderWithProviders(<DashboardPage />)
+    const card = await screen.findByTestId('battery-health-card')
+    expect(card.textContent).toContain('98.2')
+    expect(card.textContent).toContain('50.7')
+    expect(card.textContent).toContain('56')
+    expect(card.textContent).toContain('92.6')
+    expect(await screen.findAllByTestId('battery-trend')).toHaveLength(1)
+  })
+})

@@ -1,4 +1,5 @@
 /** 统一 API 客户端：credentials include、401 → refresh → 重试（B3）、错误 toast */
+import type { BatteryHealth } from '@/types'
 import type {
   CarDiscoveryResult,
   ChargeDetail,
@@ -185,6 +186,7 @@ export const api = {
   // ---- v2.1：时间轴 / 热力图 / 设置 / 账本 / 推送 / 报告 ----
   timeline: (carId?: number) => get<TimelineData>(withCar('/api/dashboard/timeline', carId)),
   heatmap: (days = 90, carId?: number) => get<HeatmapData>(withCar(`/api/dashboard/heatmap?days=${days}`, carId)),
+  batteryHealth: (carId?: number | null) => get<BatteryHealth>(`/api/battery-health${carId ? `?carId=${carId}` : ''}`),
   settings: () => get<InstanceSettings>('/api/settings'),
   saveSettings: (payload: Omit<Partial<InstanceSettings>, 'geocoding'> & { geocoding?: { enabled: boolean; amapKey?: string } }) => put<{ ok: boolean; settings: InstanceSettings }>('/api/settings', payload),
   ledgerSummary: (month?: string, carId?: number) =>

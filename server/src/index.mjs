@@ -27,6 +27,7 @@ import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
 import { startMqttBridge } from "./core/mqtt-bridge.mjs";
 import { createNotifier, createTelegramChannel, createWebPushChannel, createWecomChannel, createNtfyChannel, createBarkChannel } from "./core/push-channels.mjs";
 import { startReportScheduler } from "./core/report-engine.mjs";
+import { getBatteryHealth } from "./core/battery-health.mjs";
 import { recordProbe, createOutageWatcher } from "./core/health.mjs";
 import { checkTirePressure } from "./core/alerts.mjs";
 import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
@@ -139,6 +140,7 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/dashboard", requireAuth, (ctx) => dashboard.dashboard(ctx));
   app.get("/api/cars", requireAuth, (ctx) => dashboard.cars(ctx));
   app.get("/api/dashboard/timeline", requireAuth, (ctx) => dashboardExtra.timeline(ctx));
+  app.get("/api/battery-health", requireAuth, async (ctx) => getBatteryHealth(db, { carId: carIdFromQuery(ctx, state) }));
   app.get("/api/dashboard/heatmap", requireAuth, (ctx) => dashboardExtra.heatmap(ctx));
   app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
