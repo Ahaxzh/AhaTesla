@@ -131,7 +131,7 @@
 4. **修正窗口（AC-7.6）**：推送小结=不可变快照；7 天内补录费用（PUT /charging/:id/cost，存 charge_cost_overrides）触发异步重算，UI 标注校准
 5. **历史重算**：`POST /api/ledger/recalculate` {from?, to?|all} → {jobId}（P6【重算历史账本】，进度可查）
 6. **冷启动水线**：首次接入数据源时记录最大 drives.id / charging_processes.id 为通知游标，水线前历史数据仅静默建档不推送（AC-12.1b）
-7. 地点名称一律 JOIN TeslaMate `addresses` 表（county/city/road），**严禁调用外部逆地理编码 API**
+7. 地点名称优先 JOIN TeslaMate `addresses` 表（county/city/road）；第④级**可选高德逆地理**（默认关，settings.geocoding，Key 密文落库）：仅围栏三级标签全未命中的端点，坐标纠偏后请求高德 regeo，结果 kv 缓存（`geo:amap:<lat>,<lng>`）；开启即视为用户授权该坐标外发
 
 ## 9. BREAKING 变更清单（v1 → v2）
 

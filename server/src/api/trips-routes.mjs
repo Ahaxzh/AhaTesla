@@ -2,6 +2,7 @@
 import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
 import { getFifoLedger } from "../core/fifo-ledger.mjs";
+import { resolveAmapLabels } from "../core/geo-geocode.mjs";
 import { listDrivesSql, getRoutePoints, getAddresses, getGeofences, geofenceLabelFor } from "../core/teslamate-queries.mjs";
 import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
 
@@ -18,11 +19,12 @@ function nearestGeofenceName(geofenceRows, lat, lng) {
   return geofenceLabelFor(geofenceRows, lat, lng);
 }
 
-function routeKey(drive, addressMap, geofenceMap, geofenceRows) {
+function routeKey(drive, addressMap, geofenceMap, geofenceRows, amapLabels) {
   const start = drive.start_address_id ? addressMap[drive.start_address_id] : null;
   const end = drive.end_address_id ? addressMap[drive.end_address_id] : null;
-  const a = addressLabel(start) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || "未知";
-  const b = addressLabel(end) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || "未知";
+  const amap = (lat, lng) => (lat == null || lng == null ? null : amapLabels?.get(`${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`) ?? null);
+  const a = addressLabel(start) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amap(drive.start_lat, drive.start_lng) || "未知";
+  const b = addressLabel(end) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amap(drive.end_lat, drive.end_lng) || "未知";
   return a === b ? a : `${a} → ${b}`;
 }
 
@@ -53,6 +55,27 @@ export async function computeTripViews(db, drives, { defaultRate, history, state
     pricing: { defaultRateCnyPerKwh: defaultRate, history: history ?? [] }
   };
   const ledger = await getFifoLedger(db, ledgerState, carId);
+
+  // 第④级（可选，默认关）：三级标签全未命中的端点 → 高德逆地理批量解析
+  // （同网格去重并发；未启用/失败静默回退"未知"）
+  const unknownPoints = [];
+  for (const drive of drives) {
+    const endpoints = [
+      { gf: drive.start_geofence_id, addr: drive.start_address_id, lat: drive.start_lat, lng: drive.start_lng },
+      { gf: drive.end_geofence_id, addr: drive.end_address_id, lat: drive.end_lat, lng: drive.end_lng }
+    ];
+    for (const ep of endpoints) {
+      if (ep.lat == null || ep.lng == null) continue;
+      if (ep.addr != null || ep.gf != null || geofenceLabelFor(geofenceRows, ep.lat, ep.lng) != null) continue;
+      unknownPoints.push({ lat: ep.lat, lng: ep.lng });
+    }
+  }
+  let amapLabels = new Map();
+  if (unknownPoints.length) {
+    try { amapLabels = await resolveAmapLabels(unknownPoints); } catch { /* 保持未知 */ }
+  }
+  const amapOf = (lat, lng) => (lat == null || lng == null ? null : amapLabels.get(`${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`) ?? null);
+
   return drives.map((drive) => {
     const allocation = ledger.byDriveId.get(String(drive.id));
     const energy = allocation?.energy_kwh ?? null;
@@ -65,10 +88,10 @@ export async function computeTripViews(db, drives, { defaultRate, history, state
       durationMin: Number(drive.duration_min) || 0,
       energyKWh: energy,
       costCny: allocation?.cost_cny ?? null,
-      startAddress: addressLabel(addressMap[drive.start_address_id] || null) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || null,
-      endAddress: addressLabel(addressMap[drive.end_address_id] || null) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || null,
+      startAddress: addressLabel(addressMap[drive.start_address_id] || null) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amapOf(drive.start_lat, drive.start_lng) || null,
+      endAddress: addressLabel(addressMap[drive.end_address_id] || null) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amapOf(drive.end_lat, drive.end_lng) || null,
       kwhPer100km: energy !== null && distance > 0 ? round(energy / distance * 100, 2) : null,
-      routeKey: routeKey(drive, addressMap, geofenceMap, geofenceRows)
+      routeKey: routeKey(drive, addressMap, geofenceMap, geofenceRows, amapLabels)
     };
   });
 }

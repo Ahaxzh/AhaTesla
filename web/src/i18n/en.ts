@@ -112,6 +112,12 @@ export const EN: Record<string, string> = {
   'menu.account.noChange': 'Nothing to save',
   'menu.account.needOldPw': 'Enter current password to confirm',
   'settings.pw.username': 'Username',
+  'settings.geo.title': 'Place names (for unnamed points)',
+  'settings.geo.desc': 'When a trip endpoint is >1.5km from any geofence, its coordinates (converted WGS84→GCJ02) are sent to AMap reverse geocoding to resolve a place name (e.g. a store), cached locally. Off by default; enabling means you consent to sending those coordinates.',
+  'settings.geo.keyPlaceholder': 'AMap Web Service key (free at lbs.amap.com)',
+  'settings.geo.keyKeep': 'Saved (leave blank to keep)',
+  'settings.geo.needKey': 'A key is required before enabling takes effect',
+  'settings.geo.saved': 'Place-name settings saved',
 
   // 总览页
   'dash.title': 'Overview',

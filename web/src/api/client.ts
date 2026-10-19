@@ -186,7 +186,7 @@ export const api = {
   timeline: (carId?: number) => get<TimelineData>(withCar('/api/dashboard/timeline', carId)),
   heatmap: (days = 90, carId?: number) => get<HeatmapData>(withCar(`/api/dashboard/heatmap?days=${days}`, carId)),
   settings: () => get<InstanceSettings>('/api/settings'),
-  saveSettings: (payload: Partial<InstanceSettings>) => put<{ ok: boolean; settings: InstanceSettings }>('/api/settings', payload),
+  saveSettings: (payload: Omit<Partial<InstanceSettings>, 'geocoding'> & { geocoding?: { enabled: boolean; amapKey?: string } }) => put<{ ok: boolean; settings: InstanceSettings }>('/api/settings', payload),
   ledgerSummary: (month?: string, carId?: number) =>
     post<LedgerSummary>(withCar(`/api/ledger/summary${month ? `?month=${month}` : ''}`, carId), {}),
   startRecalculate: (payload: { all?: boolean; from?: string; to?: string }) =>

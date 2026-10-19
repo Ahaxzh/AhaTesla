@@ -243,6 +243,8 @@ export interface InstanceSettings {
   /** m4e 多车:主车(缺省 carId 时后端用);别名覆盖 TeslaMate 车名 */
   primaryCarId?: number
   carAliases?: Record<string, string>
+  /** 可选高德逆地理("未知"点位地名补全,默认关;key 密文存后端只回 hasKey) */
+  geocoding?: { enabled: boolean; hasKey: boolean; keyAlias?: string | null }
 }
 
 /** m4e:GET /api/cars → 车辆清单(name 来自 TeslaMate,alias/isPrimary 来自本地设置) */

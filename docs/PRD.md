@@ -389,7 +389,7 @@ Docker 部署 → 打开 Web → 注册首个账号（即管理员）
 - ~~Q1：油车费用对比的默认基数？~~ → **已决策**：默认百公里油耗 8.0L × 8.20 元/L（≈0.656 元/公里），设置中可自定义，报告注明基准（AC-7.4）。英文版发布时转为地区预设。
 - ~~Q2：connect 模式连接方案？~~ → **已决策**：主推 ① 同机 Docker external network 直连 ② 跨机局域网 IP 直连；socat 雪藏至高级附录（§7.1）。
 - ~~Q3：Telegram Bot 指引展示？~~ → **已决策**：向导内 3 步纯文本提示（@BotFather 取 Token → @userinfobot 取 ChatID → 填入），详细图文放外部文档链接。
-- ~~Q4：月报"主跑路线 TOP"定义？~~ → **已决策**：按"起点 geofence 名 → 终点 geofence 名"聚合（如"家→公司"）；无命名围栏时**直接 JOIN TeslaMate `addresses` 表**（drives.start/end_address_id 关联，取 county/city/road 字段）聚合行政区/道路名，取月频次 TOP 3。**AhaTesla 绝不自行调用外部逆地理编码 API**（隐私红线：GPS 不出内网）
+- ~~Q4：月报"主跑路线 TOP"定义？~~ → **已决策**：按"起点 geofence 名 → 终点 geofence 名"聚合（如"家→公司"）；无命名围栏时**直接 JOIN TeslaMate `addresses` 表**（drives.start/end_address_id 关联，取 county/city/road 字段）聚合行政区/道路名，取月频次 TOP 3。**AhaTesla 绝不在未经用户显式授权时调用外部逆地理编码 API**（2026-10-19 修订：默认关闭；用户在设置中开启「地点识别」并填入自己的高德 Key 即视为授权 —— 仅三级围栏标签全未命中的"未知"级坐标外发，WGS84→GCJ02 纠偏后请求，结果按 ~11m 网格本地缓存，同地点只发一次）
 - ~~Q5：compose 版本锁定策略？~~ → **已决策**：TeslaMate 锁定大版本号（如 `teslamate:1.30`，禁用 latest）；AhaTesla 用发布 tag（`ahatesla:1.0.0`）+ `latest` 供尝鲜。
 - ~~Q6：是否迁移独立 GitHub 组织？~~ → **已决策**：建立独立组织（如 `github.com/ahatesla`）。⚠️ 待办：需 Ahaxzh 本人执行建组织与仓库迁移（产品侧无法代办）。
 

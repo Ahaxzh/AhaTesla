@@ -3,9 +3,12 @@
  * 结构：整体状态总览横幅（版本 pill）· 状态瓦片 ×3（DB 延迟 / MQTT / 服务运行时长）·
  * 只读安全盾 · 事件日志（等级筛选 chips + 色点 + 相对时间）
  */
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Database, HardDrive, Radio, ScrollText, ShieldCheck } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, Database, HardDrive, MapPin, Radio, ScrollText, ShieldCheck } from 'lucide-react'
+import { useToast } from '@/components/Toast'
+import { Toggle } from '@/components/Toggle'
+import { useI18n } from '@/i18n'
 import { api } from '@/api/client'
 import { EmptyState } from '@/components/EmptyState'
 import { fmtDateTime, timeAgo } from '@/utils/format'
@@ -61,7 +64,28 @@ const LEVEL_META: Record<SystemEvent['level'], { dot: string; label: string }> =
 type LevelFilter = 'all' | SystemEvent['level']
 
 export function SystemSection() {
+  const { toast } = useToast()
+  const { t } = useI18n()
+  const queryClient = useQueryClient()
   const { data: status, isLoading } = useQuery({ queryKey: ['system-status-full'], queryFn: api.systemStatus, refetchInterval: 60_000 })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings, retry: false })
+
+  // ---- 地点识别（可选高德逆地理,默认关） ----
+  const [geoEnabled, setGeoEnabled] = useState(false)
+  const [geoKey, setGeoKey] = useState('')
+  useEffect(() => {
+    setGeoEnabled(Boolean(settings?.geocoding?.enabled))
+  }, [settings?.geocoding?.enabled])
+  const saveGeo = useMutation({
+    mutationFn: () => api.saveSettings({ geocoding: { enabled: geoEnabled, ...(geoKey.trim() ? { amapKey: geoKey.trim() } : {}) } }),
+    onSuccess: () => {
+      toast(t('settings.geo.saved', '地点识别设置已保存'), 'success')
+      setGeoKey('')
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+      void queryClient.invalidateQueries({ queryKey: ['trips'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
   const { data: events, isLoading: eventsLoading } = useQuery({ queryKey: ['events'], queryFn: () => api.systemEvents(50), refetchInterval: 30_000 })
 
   // ---- 整体健康判定（MQTT 未配置视为正常基线） ----
@@ -77,6 +101,46 @@ export function SystemSection() {
 
   return (
     <div className="space-y-5">
+      {/* ===== 地点识别（可选高德逆地理,默认关） ===== */}
+      <div className="glass-card-flat p-4" data-testid="settings-geocoding">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <MapPin className="h-4 w-4 shrink-0 text-tesla" />
+            <span className="truncate text-[13px] font-medium text-slate-200">{t('settings.geo.title', '地点识别（未知点位地名）')}</span>
+            {settings?.geocoding?.hasKey ? (
+              <span className="rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-400">Key ····{settings.geocoding.keyAlias ?? '****'}</span>
+            ) : null}
+          </div>
+          <Toggle checked={geoEnabled} onChange={setGeoEnabled} aria-label={t('settings.geo.title', '地点识别')} />
+        </div>
+        <p className="mt-2 text-[11px] leading-5 text-slate-500">
+          {t('settings.geo.desc', '起终点不在任何围栏 1.5km 内时，将坐标（WGS84→GCJ02 纠偏后）发送高德逆地理服务换取地名（如"山姆会员商店"），结果本地缓存。默认关闭；开启即视为你授权该坐标外发。')}
+        </p>
+        <div className="mt-3 flex gap-2">
+          <input
+            type="password"
+            className="input-dark flex-1"
+            placeholder={settings?.geocoding?.hasKey ? t('settings.geo.keyKeep', '已保存（留空保持不变）') : t('settings.geo.keyPlaceholder', '高德 Web 服务 Key（lbs.amap.com 免费申请）')}
+            value={geoKey}
+            onChange={(e) => setGeoKey(e.target.value)}
+            data-testid="geocoding-key"
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            className="btn-primary px-4"
+            disabled={saveGeo.isPending}
+            onClick={() => saveGeo.mutate()}
+            data-testid="geocoding-save"
+          >
+            {saveGeo.isPending ? t('common.working', '处理中…') : t('common.save', '保存')}
+          </button>
+        </div>
+        {geoEnabled && !settings?.geocoding?.hasKey && !geoKey.trim() ? (
+          <p className="mt-2 text-[11px] text-amber-400">{t('settings.geo.needKey', '开启需要先填入高德 Key，否则不会生效')}</p>
+        ) : null}
+      </div>
+
       {/* 整体状态总览横幅 */}
       <div
         data-testid="system-overview"

@@ -1,6 +1,7 @@
 // dashboard-extra-routes.mjs — P2 模块2/4（24h 时间轴 + 用车热力图），
 // /api/settings（GA-36），/api/system/health-lite（GA-32 匿名探活）。
 import { healthState } from "../core/health.mjs";
+import { getGeocodingConfig, saveGeocodingConfig } from "../core/geo-geocode.mjs";
 import { HttpError } from "./http-kit.mjs";
 import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
 import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
@@ -151,10 +152,23 @@ export function createSettingsRoutes({ state, getStore }) {
 
   return {
     async get(ctx) {
-      return current();
+      return { ...current(), geocoding: getGeocodingConfig() };
     },
     async put(ctx) {
       const body = ctx.body || {};
+      // geocoding（可选高德逆地理）单走渠道表（key 密文），不进 settings kv
+      if (body.geocoding !== undefined) {
+        const g = body.geocoding || {};
+        if (typeof g !== "object") throw new HttpError(400, "bad_request", "geocoding must be object");
+        if (g.amapKey !== undefined && g.amapKey !== null && typeof g.amapKey !== "string") {
+          throw new HttpError(400, "bad_request", "geocoding.amapKey must be string");
+        }
+        if (g.amapKey) {
+          const key = g.amapKey.trim();
+          if (key.length < 8 || key.length > 64) throw new HttpError(400, "bad_request", "amapKey length must be 8-64");
+        }
+        saveGeocodingConfig({ enabled: Boolean(g.enabled), amapKey: g.amapKey });
+      }
       const s = { ...(state.settings || {}) };
       if (body.currency !== undefined) {
         const symbols = ["¥", "$", "€", "£"];

@@ -17,6 +17,7 @@ import { getAddresses } from "./teslamate-queries.mjs";
 import { listChargingForStats } from "./teslamate-queries.mjs";
 import { priceChargingSession } from "./pricing-ledger.mjs";
 import { getFifoLedger } from "./fifo-ledger.mjs";
+import { resolveAmapLabel } from "./geo-geocode.mjs";
 import { pricingOptionsFor } from "./pricing-options.mjs";
 
 function finite(v) {
@@ -150,14 +151,17 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
   };
   const first = rows[0];
   const last = rows[rows.length - 1];
+  // 第④级（可选，默认关）：三级全未命中 → 高德逆地理（与 Web 端行程页同口径）
   const startLabel = addrLabel(addresses[first.start_address_id])
     || gfById.get(first.start_geofence_id)?.name
     || nearestGf(first.start_lat, first.start_lng)
+    || await resolveAmapLabel(first.start_lat, first.start_lng).catch(() => null)
     || await nearestAddr(first.start_lat, first.start_lng)
     || null;
   const endLabel = addrLabel(addresses[last.end_address_id])
     || gfById.get(last.end_geofence_id)?.name
     || nearestGf(last.end_lat, last.end_lng)
+    || await resolveAmapLabel(last.end_lat, last.end_lng).catch(() => null)
     || await nearestAddr(last.end_lat, last.end_lng)
     || null;
 
