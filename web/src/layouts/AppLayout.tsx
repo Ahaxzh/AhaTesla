@@ -485,9 +485,11 @@ export function AppLayout() {
         </main>
       </div>
 
-      {/* 移动端底部 TabBar（§6.1：4 项 概览/行程/充电/设置） */}
-      <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="border-t border-white/[0.06] bg-base-900/90 backdrop-blur-xl">
+      {/* 移动端底部 TabBar（§6.1：4 项 概览/行程/充电/设置）。
+          安全区 padding 必须在带背景的内层：iOS 主屏独立模式下 env(safe-area-inset-bottom)≈34px，
+          若垫在外层透明容器上，背景只铺到导航内容底部，栏会悬浮在透明缝上（内容穿缝而过） */}
+      <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
+        <div className="border-t border-white/[0.06] bg-base-900/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
           <nav
             data-testid="mobile-tabbar"
             className="mx-auto grid max-w-md grid-cols-5 px-2 pt-1"
