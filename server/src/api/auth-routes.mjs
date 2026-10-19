@@ -19,7 +19,18 @@ export function resetLoginLockoutForTest() {
   loginFailures.clear();
 }
 
+// 反代后所有对端共享同一 origin IP,纯 socket 地址会让按 IP 限速退化回全局桶。
+// 仅当显式声明信任反代(TRUST_PROXY=1)才取 X-Forwarded-For 最右侧(最近一跳
+// 可信代理追加的客户端地址);不声明时绝不信任可伪造的 XFF 头。
+const TRUST_PROXY = process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true";
 function clientIp(ctx) {
+  if (TRUST_PROXY) {
+    const xff = String(ctx.req?.headers?.["x-forwarded-for"] || "").trim();
+    if (xff) {
+      const parts = xff.split(",").map((x) => x.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1];
+    }
+  }
   return String(ctx.req?.socket?.remoteAddress || "unknown");
 }
 

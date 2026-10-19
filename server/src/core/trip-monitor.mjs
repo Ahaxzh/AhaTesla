@@ -553,8 +553,14 @@ export function startTripMonitorLoop({ monitor, db, pollMs = MONITOR_DEFAULTS.po
 // charging_closed_rows = 已结算行（done 候选，done 游标——open→close 的行 id 不变，
 // 必须单独增量扫描）。
 async function incrementalSnapshot(db, monitor) {
+  // min 时排除 "null" 桶:真实数据恒带 car_id,init 灌进 null 桶的水线永不前进,
+  // 若计入 min 会把增量起点永久钉死在初始水线 → 水线后第 51 条起永远取不到
+  // (B1 游标饥饿回归)。null 桶自身的行由其桶内游标独立去重。
   const minCursor = (map) => {
-    const values = Object.values(map || {}).map(Number).filter(Number.isFinite);
+    const values = Object.entries(map || {})
+      .filter(([key]) => key !== "null")
+      .map(([, value]) => Number(value))
+      .filter(Number.isFinite);
     return values.length ? Math.min(...values) : 0;
   };
   const completed = await getDrivesIncremental(db, minCursor(monitor.state.drive_cursors));
@@ -573,3 +579,6 @@ async function incrementalSnapshot(db, monitor) {
     charging_closed_rows: chargingClosedRows
   };
 }
+
+// 测试钩子（仅测试引用；不参与生产路径）
+export const __testIncrementalSnapshot = incrementalSnapshot;

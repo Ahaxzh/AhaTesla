@@ -2,10 +2,11 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 /** 单页渲染异常兜底：任何一条脏数据（如 null.toFixed）只熄灭当前页，
  *  TabBar/导航保持可用，可一键重试 —— 不再整站白屏（CLAUDE.md 禁白屏）。
- *  路由级包裹（App.tsx 每个 element 各套一层）。 */
+ *  注意：resetKey 变化只清除错误态（子树不强制 remount），恢复依赖新路由
+ *  自行拉取新数据；"重试"按钮同样只清错误态。 */
 interface Props {
   children: ReactNode
-  /** 用于重试后强制 remount 的外部键（路由 path） */
+  /** 错误态复位键（路由 path 变化时清除错误） */
   resetKey?: string
 }
 

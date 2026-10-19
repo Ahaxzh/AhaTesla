@@ -376,9 +376,9 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
       const offset = Number(params[2]) || 0;
       return rows.slice(offset, offset + limit).map((d) => ({ ...d }));
     }
-    // FIFO 回放轻量分页（listDrivesLightSql：特征列 ideal_used_km + JOIN cars，ASC；
-    // 排除富化查询 —— 它也含 ideal_used_km，由下方 id = ANY 处理器负责）
-    if (s.includes("ideal_used_km") && s.includes("FROM drives d") && !s.includes("id = ANY")) {
+    // FIFO 回放轻量分页（listDrivesLightSql）：指纹用 ORDER BY d.end_date ASC 精确锁定
+    // —— 重型列表是 DESC、getDrive 详情无 ORDER BY、富化查询是 id = ANY，均不会误中
+    if (s.includes("ideal_used_km") && s.includes("ORDER BY d.end_date ASC")) {
       const fromMs = isoLit(sql, "d.end_date >=");
       const toMs = isoLit(sql, "d.end_date <=");
       const want = carIdParam(params[0]);

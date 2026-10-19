@@ -260,3 +260,41 @@ test("H4 多车充电乱序结算：B 的 done 不得吞掉 A 的晚结算充电
   const dones = events.filter((e) => e.type === "charging_done");
   assert.equal(dones.length, 2, `A(600) 与 B(601) 各自 charging_done，实际 ${dones.length}`);
 });
+
+// ---- B1 回归：null 桶水线不得钉死增量查询起点（游标饥饿） ----------------------
+// init 把全局 max id 灌进所有桶（含 null）；真实数据恒带 car_id → null 桶永不
+// 前进。若增量查询取全桶 min，起点永久钉在初始水线 → 水线后第 51 条起饿死。
+test("B1 游标饥饿：50 条窗口外的新行程仍被发现（incrementalSnapshot min 排除 null 桶）", async () => {
+  const { TripMonitor, __testIncrementalSnapshot } = await import("../src/core/trip-monitor.mjs");
+  const events = [];
+  const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
+  monitor.reconcile({ completed: [], actives: [], max_drive_id: 1000, latest_charging_id: 500, latest_charging_done_id: 500 }, "t0");
+  assert.equal(monitor.state.drive_cursors.null, 1000); // 水线灌入 null 桶（不回放）
+
+  // 造 60 条水线之后的完成行程（LIMIT 50 一帧装不下）
+  const rows = Array.from({ length: 60 }, (_, i) => ({
+    id: 1001 + i, car_id: 1, start_at: `2026-10-${String((i % 28) + 1).padStart(2, "0")} 08:00`, end_at: `2026-10-${String((i % 28) + 1).padStart(2, "0")} 08:30`
+  }));
+  let fetched = null;
+  const db = {
+    query: async (sql, params) => {
+      const s = String(sql);
+      if (s.includes("FROM drives d") && s.includes("d.id > $1")) {
+        fetched = { since: Number(params[0]) || 0 };
+        return rows.filter((r) => r.id > (Number(params[0]) || 0)).slice(0, 50);
+      }
+      if (s.includes("end_date IS NULL")) return [];
+      if (s.includes("charging_processes") && s.includes("cp.id > $1")) return [];
+      return [];
+    }
+  };
+  // 逐帧轮询直到不再有新行（模拟真实 30s 循环多帧）
+  for (let frame = 0; frame < 5; frame++) {
+    const snap = await __testIncrementalSnapshot(db, monitor);
+    monitor.reconcile({ ...snap, actives: snap.actives }, `t${frame + 1}`);
+    if (snap.completed.length === 0) break;
+  }
+  const seen = monitor.state.drive_cursors["1"];
+  assert.equal(seen, 1060, `车 1 的游标应推进到 1060（60 条全部吸收），实际 ${seen}`);
+  assert.ok((fetched?.since ?? 0) > 1000, `增量起点必须越过初始水线 1000（B1 修复前被 null 桶钉死），实际 ${fetched?.since}`);
+});

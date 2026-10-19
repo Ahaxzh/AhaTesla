@@ -352,6 +352,21 @@ async function main() {
     logger: (msg) => log("report:", msg)
   });
 
+  // ---- m4e 多车:推送事件的车辆标记(60s 车辆缓存) --------------------------
+  // 声明须早于下方"启动补发"块 —— dispatchPush 虽是提升的函数声明,但它引用的
+  // carsCache(let)若尚未执行会 TDZ,被 catch 吞掉后补发事件全都不带车名后缀
+  let carsCache = { at: 0, list: null };
+  async function carsListCached() {
+    if (carsCache.list && Date.now() - carsCache.at < 60_000) return carsCache.list;
+    try {
+      const rows = await db.query("SELECT id, name FROM cars ORDER BY id ASC");
+      carsCache = { at: Date.now(), list: rows };
+    } catch {
+      carsCache = { at: Date.now(), list: carsCache.list || [] }; // 查询失败沿用旧缓存
+    }
+    return carsCache.list;
+  }
+
   // M2 修复：崩溃/重启时未完成投递的 pending 事件在此补发（最多 20 条、
   // 7 天内的才补 —— dedupe 保证同 key 不重推；过期事件直接丢弃并记日志）。
   {
@@ -376,18 +391,6 @@ async function main() {
 
   const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
 
-  // ---- m4e 多车:推送事件的车辆标记(60s 车辆缓存) --------------------------
-  let carsCache = { at: 0, list: null };
-  async function carsListCached() {
-    if (carsCache.list && Date.now() - carsCache.at < 60_000) return carsCache.list;
-    try {
-      const rows = await db.query("SELECT id, name FROM cars ORDER BY id ASC");
-      carsCache = { at: Date.now(), list: rows };
-    } catch {
-      carsCache = { at: Date.now(), list: carsCache.list || [] }; // 查询失败沿用旧缓存
-    }
-    return carsCache.list;
-  }
   async function carIdOfEvent(event) {
     try {
       if (event.type === "trip_end" && Array.isArray(event.segment_ids) && event.segment_ids.length) {
