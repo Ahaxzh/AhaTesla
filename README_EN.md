@@ -1,17 +1,15 @@
 <div align="center">
 
 [![CI](https://github.com/Ahaxzh/AhaTesla/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahaxzh/AhaTesla/actions/workflows/ci.yml)
-<!-- ghcr badge: uncomment once an image is published
-[![ghcr](https://img.shields.io/badge/ghcr-ahatesla-blue)](https://github.com/Ahaxzh/AhaTesla/pkgs/container/ahatesla)
- -->
+[![Docker](https://github.com/Ahaxzh/AhaTesla/actions/workflows/docker.yml/badge.svg)](https://github.com/Ahaxzh/AhaTesla/actions/workflows/docker.yml)
+[![ghcr](https://img.shields.io/badge/ghcr-ahaxzh%2Fahatesla-blue)](https://github.com/Ahaxzh/AhaTesla/pkgs/container/ahatesla)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 # AhaTesla
 
 **Self-hosted Tesla companion — trips, charging costs & a real FIFO energy ledger, with multi-channel push**
 
 [中文](./README.md)
-
-Trip/charging-ledger design inspiration from [tesla-butler](https://github.com/manwithshit/tesla-butler)
 
 </div>
 
@@ -23,7 +21,7 @@ Trip/charging-ledger design inspiration from [tesla-butler](https://github.com/m
 - 💰 **Monthly bill** — mileage vs. electricity vs. gas, sentry/parking drain, driving vs. parked cost split
 - 📊 **Dashboard** — 24h state timeline, usage heatmap, semantic state cards (driving / charging / sentry / asleep)
 - 📄 **Reports** — **daily digest** (yesterday + same-day-last-week comparison + anomaly notes), weekly & monthly reports (immutable archived snapshots)
-- 🔔 **Push, your way** — Web Push (works from an **iPhone home-screen PWA**), Telegram, Feishu, WeCom, ntfy and Bark — a 6-event × 6-channel matrix; optionally plug in your own OpenAI-compatible model to polish the copy (off by default; full templates with no model)
+- 🔔 **Push, your way** — Web Push (works from an **iPhone home-screen PWA**), Telegram, Feishu — a 6-event × 3-channel matrix; optionally plug in your own OpenAI-compatible model to polish the copy (off by default; full templates with no model)
 - 🌓 **Look & feel** — light/dark/system theme, English & Chinese UI
 - 📱 **Web / PWA** — install to your home screen, mobile-first dark UI
 - 🔐 **Auth** — single-user JWT with access + refresh tokens, httpOnly cookie, scrypt hashing, lockout on failures
@@ -139,9 +137,6 @@ e2e/     Playwright      scripts/ tooling
 
 ## Security posture
 Read-only teslamate access · no vehicle commands · VIN/GPS/tokens never in logs or Git · secrets AES-GCM encrypted at rest · no public backend, no telemetry. See [SECURITY.md](SECURITY.md).
-
-## Credits
-The trip-boundary state machine and per-batch pricing ledger were inspired by [manwithshit/tesla-butler](https://github.com/manwithshit/tesla-butler). This implementation was written independently to its own spec (`docs/PRD.md` / `docs/API_CONTRACT.md`); no upstream code was copied.
 
 ## License
 [MIT](LICENSE)

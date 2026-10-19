@@ -1,0 +1,24 @@
+# 定期清理旧镜像(GHCR):每次 push main 都会产生 sha-* 标签,不清理会无限累积占用配额
+# 需要一次性配置:创建 PAT(classic,勾选 delete:packages)并添加为仓库 Secret `PAT_TOKEN`
+# (GITHUB_TOKEN 默认无删除权限,故与 AhaSlit 一致走 PAT)
+name: Cleanup Old GHCR Images
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 每天 UTC 2:00
+  workflow_dispatch:
+
+jobs:
+  clean-ghcr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old ahatesla images
+        uses: snok/container-retention-policy@v3.0.0
+        with:
+          account: user
+          image-names: ahatesla
+          image-tags: '*'
+          cut-off: 2 weeks
+          keep-at-least: 5
+          skip-tags: latest
+          token: ${{ secrets.PAT_TOKEN }}

@@ -117,6 +117,8 @@ services:
 
   # ---------- AhaTesla ----------
   ahatesla:
+    # 预构建镜像(GHCR,多架构);本地改动想生效用 `up -d --build`
+    image: ghcr.io/ahaxzh/ahatesla:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile
