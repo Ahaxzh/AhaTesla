@@ -146,6 +146,13 @@ export class TripMonitor {
 
   // ---- session lifecycle（m4e 按车分桶） --------------------------------------
 
+  /** 桶有效水线：max(本桶, 无主桶底线) */
+  bucketFloor(map, key) {
+    const own = Number(map?.[key]) || 0;
+    const floor = Number(map?.null) || 0;
+    return Math.max(own, floor);
+  }
+
   sessionFor(carId, createAt = null) {
     const key = carKey(carId);
     if (!this.state.sessions[key] && createAt !== null) {
@@ -196,7 +203,7 @@ export class TripMonitor {
   absorbCompletedDrive(drive, at) {
     const id = Number(drive.id) || 0;
     const key = carKey(drive.car_id);
-    const cursor = this.state.drive_cursors[key] || 0;
+    const cursor = this.bucketFloor(this.state.drive_cursors, key);
     if (id <= cursor) return; // already seen this poll or earlier（按车游标）
 
     if (this.boundaryBefore(drive)) {
@@ -363,10 +370,11 @@ export class TripMonitor {
   // Dedup key `charging-start-<id>` guards against the same id being observed
   // twice (e.g. MQTT fast-path + later poll of the same row — AC-12.1b 双源一致).
   // m4e：游标按车分桶 —— 另一辆车的新充电不得推高本车的 start 游标。
+  // 桶内判重取 max(本桶, 无主桶底线)：防旧版迁移态把历史行当新事件。
   observeChargingStarted(charging, at = this.clock()) {
     const id = Number(charging?.id) || 0;
     const key = carKey(charging?.car_id);
-    if (id <= 0 || id <= (this.state.charge_cursors[key] || 0)) return false;
+    if (id <= 0 || id <= this.bucketFloor(this.state.charge_cursors, key)) return false;
     this.state.charge_cursors[key] = id;
 
     const session = this.sessionFor(charging?.car_id);
@@ -396,7 +404,7 @@ export class TripMonitor {
   observeChargingDone(charging, at = this.clock()) {
     const id = Number(charging?.id) || 0;
     const key = carKey(charging?.car_id);
-    if (id <= 0 || id <= (this.state.done_cursors[key] || 0)) return null;
+    if (id <= 0 || id <= this.bucketFloor(this.state.done_cursors, key)) return null;
     if (isChargingSessionOpen(charging)) return null; // 未结算行不构成 charging_done
     this.state.done_cursors[key] = id;
     // 已结算行整体已知晓：同步推进该桶 start 游标，保持「两游标 ≥ 已处理行」不变量
@@ -553,15 +561,17 @@ export function startTripMonitorLoop({ monitor, db, pollMs = MONITOR_DEFAULTS.po
 // charging_closed_rows = 已结算行（done 候选，done 游标——open→close 的行 id 不变，
 // 必须单独增量扫描）。
 async function incrementalSnapshot(db, monitor) {
-  // min 时排除 "null" 桶:真实数据恒带 car_id,init 灌进 null 桶的水线永不前进,
-  // 若计入 min 会把增量起点永久钉死在初始水线 → 水线后第 51 条起永远取不到
-  // (B1 游标饥饿回归)。null 桶自身的行由其桶内游标独立去重。
+  // 有效游标 = max(本桶, 无主桶底线)，再对各桶取 min 作为全局增量起点：
+  // ① 旧版 v1 迁移(底线只在 null 桶,车桶空) → 起点取底线,绝不重放历史
+  //   (只排除 null 的做法曾导致游标归零,历史充电被当新事件全部重推)
+  // ② B1 饿死(底线钉死在初始水线,车桶已前进) → 取车桶,新行照常取到
+  // ③ 车桶意外落后于底线 → 自动抬回,自愈
   const minCursor = (map) => {
-    const values = Object.entries(map || {})
-      .filter(([key]) => key !== "null")
-      .map(([, value]) => Number(value))
-      .filter(Number.isFinite);
-    return values.length ? Math.min(...values) : 0;
+    const entries = Object.entries(map || {}).map(([key, value]) => [key, Number(value)]);
+    const floor = entries.find(([key]) => key === "null")?.[1] ?? 0;
+    const carValues = entries.filter(([key]) => key !== "null").map(([, v]) => v).filter(Number.isFinite);
+    if (!carValues.length) return Number.isFinite(floor) ? floor : 0;
+    return Math.min(...carValues.map((v) => Math.max(v, floor)));
   };
   const completed = await getDrivesIncremental(db, minCursor(monitor.state.drive_cursors));
   const actives = await getActiveDrives(db);

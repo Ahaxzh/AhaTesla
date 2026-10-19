@@ -14,14 +14,11 @@ export function createDb(dbUrl = DEFAULT_DB_URL) {
     max: 10,
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
-    statement_timeout: 15_000
-  });
-
-  // 红线 1 深度防御（契约 §1）：每个新会话强制只读。此前只有 setup 探测池做了，
-  // 运行池没有 —— 若 DB_URL 误配成可写账号（如全栈模式的 teslamate 超级用户），
-  // 应用层将无任何写入阻断。SET 失败（权限不足等）不致命：角色权限仍是主防线。
-  pool.on("connect", (client) => {
-    client.query("SET default_transaction_read_only = on").catch(() => {});
+    statement_timeout: 15_000,
+    // 红线 1 深度防御（契约 §1）：每个新会话强制只读（经启动参数下发，无竞态）。
+    // 此前只有 setup 探测池做了 —— 若 DB_URL 误配成可写账号（如全栈模式的
+    // teslamate 超级用户），应用层将无任何写入阻断。
+    options: "-c default_transaction_read_only=on"
   });
 
   async function query(sql, params = []) {

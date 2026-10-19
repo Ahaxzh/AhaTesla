@@ -223,17 +223,17 @@ test("H4 多车乱序结算：B 车新行程不得推高 A 车游标，A 晚结�
   const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
   monitor.reconcile({ completed: [], actives: [], max_drive_id: 100, latest_charging_id: 500, latest_charging_done_id: 500 }, "t0");
 
-  // B 车（id 101）先结算；A 车（id 100 ≤ 全局 max，但 > A 桶游标）后结算
+  // 真实交错：水线 100 之上，B 车（101）先结算、A 车（103）晚结算
+  // （id ≤ 水线的行生产中不会进增量查询 —— id 游标只向前扫）
   monitor.reconcile({ completed: [{ id: 101, car_id: 2, start_at: "2026-10-10 10:00", end_at: "2026-10-10 10:20" }], actives: [] }, "t1");
-  monitor.reconcile({ completed: [{ id: 100, car_id: 1, start_at: "2026-10-10 09:00", end_at: "2026-10-10 09:30" }], actives: [] }, "t2");
+  monitor.reconcile({ completed: [{ id: 103, car_id: 1, start_at: "2026-10-10 09:00", end_at: "2026-10-10 09:30" }], actives: [] }, "t2");
 
-  // 两车各自 30 分钟闲置超时 → 两个独立 trip_end（此前全局会话会合并成 1 个，
-  // 且 A 的 100 因 id ≤ 全局游标被吞）
+  // 两车各自 30 分钟闲置超时 → 两个独立 trip_end（此前全局会话会合并成 1 个）
   const t3 = "2026-10-10 23:00";
   monitor.reconcile({ completed: [], actives: [] }, t3);
   const tripEnds = events.filter((e) => e.type === "trip_end");
   assert.equal(tripEnds.length, 2, `应有两车各自 trip_end，实际 ${tripEnds.length}`);
-  assert.ok(tripEnds.some((e) => e.segment_ids.includes(100)));
+  assert.ok(tripEnds.some((e) => e.segment_ids.includes(103)));
   assert.ok(tripEnds.some((e) => e.segment_ids.includes(101)));
 });
 
@@ -254,11 +254,12 @@ test("H4 多车充电乱序结算：B 的 done 不得吞掉 A 的晚结算充电
   const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
   monitor.reconcile({ completed: [], actives: [], max_drive_id: 0, latest_charging_id: 600, latest_charging_done_id: 600 }, "t0");
 
+  // 真实交错：水线 600 之上，B(601) 先结算、A(602) 晚结算
   monitor.reconcileChargingClosed([{ id: 601, car_id: 2, start_at: "2026-10-10 12:00", end_at: "2026-10-10 13:00" }], "t1");
-  monitor.reconcileChargingClosed([{ id: 600, car_id: 1, start_at: "2026-10-10 11:00", end_at: "2026-10-10 11:30" }], "t2");
+  monitor.reconcileChargingClosed([{ id: 602, car_id: 1, start_at: "2026-10-10 11:00", end_at: "2026-10-10 11:30" }], "t2");
 
   const dones = events.filter((e) => e.type === "charging_done");
-  assert.equal(dones.length, 2, `A(600) 与 B(601) 各自 charging_done，实际 ${dones.length}`);
+  assert.equal(dones.length, 2, `A(602) 与 B(601) 各自 charging_done，实际 ${dones.length}`);
 });
 
 // ---- B1 回归：null 桶水线不得钉死增量查询起点（游标饥饿） ----------------------
@@ -297,4 +298,53 @@ test("B1 游标饥饿：50 条窗口外的新行程仍被发现（incrementalSna
   const seen = monitor.state.drive_cursors["1"];
   assert.equal(seen, 1060, `车 1 的游标应推进到 1060（60 条全部吸收），实际 ${seen}`);
   assert.ok((fetched?.since ?? 0) > 1000, `增量起点必须越过初始水线 1000（B1 修复前被 null 桶钉死），实际 ${fetched?.since}`);
+});
+
+// ---- 游标两难回归：饿死(B1) vs 历史重放(事故) 必须同时防住 ---------------------
+// 有效游标 = max(本桶, 无主桶底线)。两个方向各钉一条:
+//   重放: v1 迁移态(底线只在 null 桶,车桶为空/落后) → 增量起点必须是底线,
+//         绝不能归零重放历史(生产事故:历史充电被当新事件推送数百条)
+//   饿死: 底线钉死而车桶已前进 → 起点必须跟上车桶,新行不能取不到
+test("游标防重放:迁移态(底线仅在 null 桶)增量起点=底线,历史行不产生任何事件", async () => {
+  const { TripMonitor, __testIncrementalSnapshot } = await import("../src/core/trip-monitor.mjs");
+  const events = [];
+  // 模拟 v1 迁移:全局水线在 null 桶,车 1 桶为空(生产事故形态),历史行 id < 底线
+  const monitor = new TripMonitor({
+    state: { version: 1, initialized: true, last_charging_id: 494, last_charging_done_id: 493, session: null },
+    onEvent: (e) => events.push(e)
+  });
+  assert.equal(monitor.state.charge_cursors.null, 494); // 迁移落底线
+  let queriedSince = null;
+  const db = {
+    query: async (sql, params) => {
+      const s = String(sql);
+      if (s.includes("charging_processes") && s.includes("cp.id > $1")) {
+        queriedSince = Number(params[0]) || 0;
+        return []; // 生产库里此处会返回历史行 —— 只要起点=494,就一行都不会被当增量
+      }
+      if (s.includes("FROM drives d") && s.includes("d.id > $1")) { queriedSince = Number(params[0]) || 0; return []; }
+      return [];
+    }
+  };
+  const snap = await __testIncrementalSnapshot(db, monitor);
+  monitor.reconcile({ ...snap, actives: [] }, "t1");
+  assert.ok(queriedSince >= 493, `增量起点必须 ≥ 底线 493,实际 ${queriedSince}(0 = 会重放全部历史)`);
+  assert.equal(events.length, 0, "迁移态首帧不得产生任何事件");
+});
+
+test("游标防重放(桶内守卫):车桶落后于底线时,底线之下的行不算新事件", async () => {
+  const { TripMonitor } = await import("../src/core/trip-monitor.mjs");
+  const events = [];
+  const monitor = new TripMonitor({ onEvent: (e) => events.push(e) });
+  // 污染态形态:车 1 桶 107 < null 底线 3262(事故后修复前的真实状态)
+  monitor.state.drive_cursors.null = 3262;
+  monitor.state.drive_cursors["1"] = 107;
+  monitor.state.done_cursors.null = 493;
+  monitor.state.done_cursors["1"] = 154;
+  monitor.reconcile({
+    completed: [{ id: 200, car_id: 1, start_at: "2026-01-01 08:00", end_at: "2026-01-01 08:30" }],
+    actives: [],
+    charging_rows: [{ id: 300, car_id: 1, start_at: "2026-01-01 09:00", end_at: "2026-01-01 10:00" }]
+  }, "t1");
+  assert.equal(events.length, 0, "底线之下的历史行(200<3262, 300<493)不得触发任何事件");
 });
