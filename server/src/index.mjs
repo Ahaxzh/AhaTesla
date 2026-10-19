@@ -28,6 +28,7 @@ import { startMqttBridge } from "./core/mqtt-bridge.mjs";
 import { createNotifier, createTelegramChannel, createWebPushChannel, createWecomChannel, createNtfyChannel, createBarkChannel } from "./core/push-channels.mjs";
 import { startReportScheduler } from "./core/report-engine.mjs";
 import { getBatteryHealth } from "./core/battery-health.mjs";
+import { carIdFromQuery } from "./api/car-scope.mjs";
 import { recordProbe, createOutageWatcher } from "./core/health.mjs";
 import { checkTirePressure } from "./core/alerts.mjs";
 import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
