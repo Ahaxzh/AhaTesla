@@ -232,7 +232,15 @@ export const api = {
   aiTest: () => post<{ ok: boolean; preview?: string; error?: string }>('/api/ai/test'),
   reports: (carId?: number) => get<{ items: ReportListItem[] }>(withCar('/api/reports', carId)),
   reportDetail: (id: number | string) => get<ReportDetail>(`/api/reports/${id}`),
-  generateReport: (type: 'weekly' | 'monthly') => post<{ ok: boolean; id: number }>('/api/reports/generate', { type }),
+  generateReport: (type: 'daily' | 'weekly' | 'monthly') =>
+    post<{
+      ok: boolean
+      id?: number
+      deduplicated?: boolean
+      type?: 'daily'
+      periodLabel?: string
+      results?: Record<string, { sent: boolean; reason?: string }>
+    }>('/api/reports/generate', { type }),
   healthLite: () => get<HealthLite>('/api/system/health-lite'),
   saveFeishu: (payload: { enabled: boolean; appId: string; appSecret?: string }) =>
     put<{ ok: boolean; connected: boolean }>('/api/channels/feishu', payload),

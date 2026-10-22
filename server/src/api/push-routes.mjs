@@ -4,7 +4,7 @@
 // 矩阵（B4）：5 事件 × 3 渠道，替换 v1 每事件单 bool。
 // 报告（GA-11/18）：列表/详情/手动生成。
 import { HttpError } from "./http-kit.mjs";
-import { saveChannelConfig, loadChannelConfig, PUSH_EVENTS, PUSH_CHANNELS } from "../core/push-channels.mjs";
+import { saveChannelConfig, loadChannelConfig, PUSH_EVENTS, PUSH_CHANNELS, matrixFromRules } from "../core/push-channels.mjs";
 import { buildReport, startReportScheduler } from "../core/report-engine.mjs";
 import { saveState } from "../core/state.mjs";
 import { randomBytes } from "node:crypto";
@@ -216,6 +216,15 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
             clean[ev][ch] = Boolean(row?.[ch]);
           }
         }
+        // 变更审计：记录改了哪些格子（排障盲区 —— 谁在何时改矩阵此前无处可查）
+        const before = matrixFromRules({ matrix: state.pushRules?.matrix ?? {} });
+        const changed = [];
+        for (const ev of PUSH_EVENTS) {
+          for (const ch of PUSH_CHANNELS) {
+            if (before[ev]?.[ch] !== clean[ev][ch]) changed.push(`${ev}.${ch}`);
+          }
+        }
+        if (changed.length) eventLog?.log?.("push.rules_updated", { changed });
         state.pushRules.matrix = clean;
       }
       if (body.weeklyReportDay !== undefined) {
@@ -275,8 +284,19 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
     },
 
     async generateReport(ctx) {
-      const type = ctx.body?.type === "monthly" ? "monthly" : "weekly";
+      const type = ["daily", "weekly", "monthly"].includes(ctx.body?.type) ? ctx.body.type : "weekly";
       if (!reportScheduler) throw new HttpError(500, "internal", "report engine unavailable");
+      // 日报手动触发 = 立即重发（绕过当日去重；不消费昨夜 backlog，那是定时早报的职责）。
+      // 日报不落归档 → 返回各通道送达结果而非快照 id；昨日无数据 → 409 report_empty。
+      if (type === "daily") {
+        const result = await reportScheduler.runKind("daily", { force: true, manual: true });
+        if (!result) throw new HttpError(409, "report_empty", "昨日无行程且无充电，日报已跳过");
+        return {
+          ok: true, type: "daily",
+          periodLabel: result.report.periodLabel ?? null,
+          results: result.results ?? {}
+        };
+      }
       const result = await reportScheduler.runKind(type);
       // runKind 对"同周期已有快照"返回 null（幂等防重）——返回已存在的那份而非报错
       if (!result) {

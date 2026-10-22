@@ -108,7 +108,9 @@
 ### 报告（v2 新增）
 - `GET /api/reports` → {items:[{id, type:"weekly"|"monthly", periodLabel, distanceKm, totalCost, saved}]}
 - `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）
-- `POST /api/reports/generate` {type} → {ok}（手动触发，调试用）
+- `POST /api/reports/generate` {type:"daily"|"weekly"|"monthly"}（手动触发，调试用）
+  - weekly/monthly：同期幂等（已有快照则返回既有 id，`deduplicated:true`）→ {ok, id, deduplicated?}
+  - daily：立即重发昨日日报（绕过当日去重；不消费昨夜静音 backlog）→ {ok, type:"daily", periodLabel, results:{渠道:{sent,reason?}}}；昨日无行程且无充电 → 409 `report_empty`
 
 ### AI 助手（m4c-c3，BYO 模型）
 - `GET /api/ai/config` → {enabled, baseUrl, model, hasKey, keyAlias}（绝不回明文 key；keyAlias 为 sha256 指纹前 4 位）

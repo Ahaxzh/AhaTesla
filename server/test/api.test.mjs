@@ -11,6 +11,8 @@ import { createTripsRoutes } from "../src/api/trips-routes.mjs";
 import { createChargingRoutes } from "../src/api/charging-routes.mjs";
 import { createPricingRoutes } from "../src/api/pricing-routes.mjs";
 import { createChannelRoutes } from "../src/api/channel-routes.mjs";
+import { createPushRoutes } from "../src/api/push-routes.mjs";
+import { matrixFromRules } from "../src/core/push-channels.mjs";
 import { createDashboardRoutes, createSystemRoutes } from "../src/api/dashboard-routes.mjs";
 import { createFeishuChannel } from "../src/core/feishu.mjs";
 import { createEventLog } from "../src/core/events.mjs";
@@ -517,4 +519,62 @@ test("路由抛内部错误 → 500 {error:{code:'internal'}}", async () => {
   const res = await fetchApp(app, "GET", "/api/trips", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 500);
   assert.equal(res.json.error.code, "internal");
+});
+
+// ---- 日报手动重发 + 推送矩阵变更审计（push-routes） --------------------------
+
+test("POST /api/reports/generate daily：重发返回逐通道结果；昨日无数据 409 report_empty", async () => {
+  const state = baseState();
+  let emptyMode = false;
+  const scheduler = {
+    // 路由语义：daily 手动触发 = force 重发 + 不消费昨夜 backlog
+    runKind: async (kind, opts = {}) => {
+      if (kind !== "daily") return null;
+      if (emptyMode || opts.force !== true || opts.manual !== true) return null;
+      return {
+        id: null, report: { periodLabel: "10/21 日报" }, deliveryMs: 3,
+        results: { telegram: { sent: true }, feishu: { sent: false, reason: "auth_failed: ..." } }
+      };
+    }
+  };
+  const notifier = { channels: {}, matrix: () => ({ daily: {} }) };
+  const push = createPushRoutes({ state, notifier, eventLog: createEventLog(), store: null, reportScheduler: scheduler, buildDeps: () => ({}) });
+  const app = createApp();
+  const requireAuth = createJwtMiddleware({ getSecret: () => SECRET });
+  app.post("/api/reports/generate", requireAuth, (ctx) => push.generateReport(ctx));
+  const cookie = `ahatesla_token=${tokenFor()}`;
+
+  const res = await fetchApp(app, "POST", "/api/reports/generate", { cookie, body: { type: "daily" } });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.type, "daily");
+  assert.equal(res.json.periodLabel, "10/21 日报");
+  assert.equal(res.json.results.telegram.sent, true);
+  assert.equal(res.json.results.feishu.sent, false);
+
+  emptyMode = true;
+  const empty = await fetchApp(app, "POST", "/api/reports/generate", { cookie, body: { type: "daily" } });
+  assert.equal(empty.status, 409);
+  assert.equal(empty.json.error.code, "report_empty");
+});
+
+test("PUT /api/push-rules 矩阵变更 → push.rules_updated 事件记录变更格子", async () => {
+  const state = baseState();
+  const eventLog = createEventLog();
+  const notifier = { channels: {}, matrix: () => matrixFromRules(state.pushRules) };
+  const push = createPushRoutes({ state, notifier, eventLog, store: null, reportScheduler: null, buildDeps: () => ({}) });
+  const app = createApp();
+  const requireAuth = createJwtMiddleware({ getSecret: () => SECRET });
+  app.put("/api/push-rules", requireAuth, (ctx) => push.putPushRules(ctx));
+
+  // 全新矩阵 daily.telegram 默认 false → 开启应记录在案
+  const res = await fetchApp(app, "PUT", "/api/push-rules", {
+    cookie: `ahatesla_token=${tokenFor()}`,
+    body: { matrix: { daily: { webpush: true, telegram: true, feishu: true } } }
+  });
+  assert.equal(res.status, 200);
+  const hit = eventLog.list().find((e) => e.type === "push.rules_updated");
+  assert.ok(hit, "矩阵变更必须留审计事件");
+  assert.ok(hit.changed.includes("daily.telegram"));
+  assert.ok(hit.changed.includes("daily.webpush"));
+  assert.ok(!hit.changed.includes("daily.feishu"), "未变的格子不记录");
 });

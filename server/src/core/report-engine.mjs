@@ -420,7 +420,10 @@ export function startReportScheduler({
   let stopped = false;
   const timers = [];
 
-  async function runKind(kind) {
+  // opts.force：绕过当日去重（手动补发）。opts.manual：不消费昨夜 backlog
+  // （那是定时早报的职责），也不做纯为其服务的状态持久化。
+  async function runKind(kind, opts = {}) {
+    const { force = false, manual = false } = opts;
     const t0 = Date.now();
     try {
       const report = await buildReport({ kind, now: new Date(), tz, deps: buildDeps() });
@@ -436,26 +439,32 @@ export function startReportScheduler({
         // M1 修复：去重键走 SQLite kv —— saveState 的白名单会静默丢弃
         // state.dailyLastRun，重启后同日日报会重发一遍。
         const lastRun = store.kvGet?.("report:dailyLastRun");
-        if (lastRun === dayKey) {
+        if (!force && lastRun === dayKey) {
           logger(`report daily ${dayKey} already sent, skip`);
           return null;
         }
         store.kvPut?.("report:dailyLastRun", dayKey);
         // P1-a 静音消费：backlog 里的昨夜行程并入早报「昨夜」段，投递后清空
-        const quietTrips = Array.isArray(state.pushRules?.quietBacklog) ? state.pushRules.quietBacklog.slice() : [];
-        try { saveState(state); } catch { /* 状态持久化失败不阻断推送 */ }
+        // （手动补发 manual 不碰 backlog —— 留给明早定时早报消费）
+        const quietTrips = manual ? [] : (Array.isArray(state.pushRules?.quietBacklog) ? state.pushRules.quietBacklog.slice() : []);
+        if (!manual) {
+          try { saveState(state); } catch { /* 状态持久化失败不阻断推送 */ }
+        }
         const dispatchResult = await notifier.dispatch(
           dailyEvent(report, quietTrips, tz),
           { matrix: matrixForReport(state, kind) }
         );
-        if (quietTrips.length) {
+        if (!manual && quietTrips.length) {
           state.pushRules.quietBacklog = [];
           try { saveState(state); } catch { /* 同上 */ }
           eventLog?.log("report.daily.quiet_merged", { count: quietTrips.length });
         }
         const deliveryMs = Date.now() - t0;
-        eventLog?.log("report.daily", { periodLabel: report.periodLabel, deliveryMs, results: dispatchResult.results });
-        return { id: null, report, deliveryMs };
+        eventLog?.log("report.daily", {
+          periodLabel: report.periodLabel, deliveryMs, results: dispatchResult.results,
+          ...(force ? { forced: true } : {})
+        });
+        return { id: null, report, deliveryMs, results: dispatchResult.results };
       }
 
       const id = store.addReportSnapshot({

@@ -118,6 +118,10 @@ export function createFeishuChannel(state, { fetchImpl = globalThis.fetch, logge
       };
     },
     async sendCard(title, elements, targetOpenId) {
+      // 凭据失败先于收件人解析：token 都拿不到时提示"给机器人发消息"纯属误导排障
+      if (!(await accessToken().catch(() => null))) {
+        return { sent: false, reason: "auth_failed: 飞书 App ID/Secret 无效或已过期（token 获取失败）" };
+      }
       const openId = targetOpenId || config().openId || await resolveOpenId();
       if (!openId) return { sent: false, reason: "no_recipient: 先在飞书里给机器人发一条消息（任意内容）后重试" };
       return sendMessage({
@@ -127,6 +131,9 @@ export function createFeishuChannel(state, { fetchImpl = globalThis.fetch, logge
       });
     },
     async sendText(text, targetOpenId) {
+      if (!(await accessToken().catch(() => null))) {
+        return { sent: false, reason: "auth_failed: 飞书 App ID/Secret 无效或已过期（token 获取失败）" };
+      }
       const openId = targetOpenId || config().openId || await resolveOpenId();
       if (!openId) return { sent: false, reason: "no_recipient" };
       return sendMessage({

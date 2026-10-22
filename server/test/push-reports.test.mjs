@@ -493,6 +493,16 @@ test("report 调度器 daily：空日跳过 + 有数据投递 + 跨重启去重 
   const dup = await scheduler2.runKind("daily");
   assert.equal(dup, null);
   assert.equal(pushes.length, 1);
+
+  // 手动补发（force+manual）：绕过当日去重重发；不消费昨夜 backlog；返回逐通道结果
+  state.pushRules = { quietBacklog: [{ eventKey: "trip-x", route: "家 → 公司", km: 8 }] };
+  const resent = await scheduler2.runKind("daily", { force: true, manual: true });
+  assert.ok(resent && resent.id === null);
+  assert.deepEqual(resent.results, { feishu: { sent: true } }); // 路由层据此展示各通道送达
+  assert.equal(pushes.length, 2);
+  assert.deepEqual(pushes[1].quietTrips, []); // manual 不并入「昨夜」段
+  assert.equal(state.pushRules.quietBacklog.length, 1); // backlog 原样留给定时早报
+  assert.ok(events.some((e) => e.type === "report.daily" && e.extra?.forced === true));
 });
 
 test("matrix + Notifier daily：六事件矩阵往返 + 日报标题正文渲染（核心行/对比/异常）", async () => {

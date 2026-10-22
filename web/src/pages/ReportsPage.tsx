@@ -20,10 +20,20 @@ export default function ReportsPage() {
   const { data, isLoading } = useQuery({ queryKey: ['reports', currentCarId], queryFn: () => api.reports(currentCarId) })
 
   const generate = useMutation({
-    mutationFn: (type: 'weekly' | 'monthly') => api.generateReport(type),
-    onSuccess: () => {
-      toast(t('rep.toast.generated', '报告已生成'), 'success')
-      void queryClient.invalidateQueries({ queryKey: ['reports'] })
+    mutationFn: (type: 'daily' | 'weekly' | 'monthly') => api.generateReport(type),
+    onSuccess: (res, type) => {
+      // 日报不落归档、送达即全部 → 逐通道汇报结果（排障时一眼看出挂在哪个渠道）
+      if (type === 'daily' && res.results) {
+        const CHANNEL_LABELS: Record<string, string> = { feishu: '飞书', telegram: 'Telegram', webpush: 'WebPush', wecom: '企微', ntfy: 'Ntfy', bark: 'Bark' }
+        const parts = Object.entries(res.results).map(
+          ([ch, r]) => `${CHANNEL_LABELS[ch] ?? ch} ${r.sent ? '✓' : '✗'}`,
+        )
+        const anySent = Object.values(res.results).some((r) => r.sent)
+        toast(`${t('rep.toast.dailySent', '日报已推送')}${parts.length ? `：${parts.join(' · ')}` : ''}`, anySent ? 'success' : 'error')
+      } else {
+        toast(t('rep.toast.generated', '报告已生成'), 'success')
+        void queryClient.invalidateQueries({ queryKey: ['reports'] })
+      }
     },
     onError: (err) => toast(err.message, 'error'),
   })
@@ -56,6 +66,15 @@ export default function ReportsPage() {
           ))}
         </div>
         <div className="flex gap-2">
+          <button
+            className="btn-ghost !px-3 !py-1.5 text-xs"
+            onClick={() => generate.mutate('daily')}
+            disabled={generate.isPending}
+            data-testid="generate-daily"
+          >
+            <Play className="h-3.5 w-3.5" />
+            {t('rep.gen.daily', '重发昨日日报')}
+          </button>
           <button
             className="btn-ghost !px-3 !py-1.5 text-xs"
             onClick={() => generate.mutate('weekly')}
