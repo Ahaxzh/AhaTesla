@@ -452,7 +452,7 @@ export function startReportScheduler({
         }
         const dispatchResult = await notifier.dispatch(
           dailyEvent(report, quietTrips, tz),
-          { matrix: matrixForReport(state, kind) }
+          { matrix: matrixForReport(state) }
         );
         if (!manual && quietTrips.length) {
           state.pushRules.quietBacklog = [];
@@ -484,7 +484,7 @@ export function startReportScheduler({
       }
       const dispatchResult = await notifier.dispatch(
         { type: kind, summary: report.closing },
-        { matrix: matrixForReport(state, kind) }
+        { matrix: matrixForReport(state) }
       );
       const deliveryMs = Date.now() - t0;
       eventLog?.log(`report.${kind}`, {
@@ -498,10 +498,12 @@ export function startReportScheduler({
     }
   }
 
-  function matrixForReport(state, kind) {
-    const key = kind; // weekly/monthly/daily → 同名矩阵键直接复用
-    const notifier = state.pushRules;
-    return notifier?.matrix ? { matrix: notifier.matrix } : undefined;
+  /** 报告投递矩阵：直接返回矩阵本体（dispatch 的 {matrix} 选项消费）。
+   *  回归警示：此处若再包一层 {matrix:…}，dispatch 解构后得到双层嵌套，
+   *  matrixFromRules 找不到任何事件行 → 全事件回落默认矩阵（日报=仅飞书），
+   *  2026-10-15~22「日报从未送达」事故即源于此（行程推送不传 matrix 故幸免）。 */
+  function matrixForReport(state) {
+    return state.pushRules?.matrix ?? undefined;
   }
 
   function schedule(kind) {

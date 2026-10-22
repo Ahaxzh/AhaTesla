@@ -543,3 +543,33 @@ test("matrix + Notifier daily：六事件矩阵往返 + 日报标题正文渲染
   // 正文行数约束（~10 行内）
   assert.ok(body.split("\n").length <= 10, `body lines = ${body.split("\n").length}`);
 });
+
+test("回归：报告投递必须用真实矩阵行（双层包装会让全事件回落默认矩阵）", async () => {
+  useMemoryStore();
+  const store = openStore({ file: ":memory:" });
+  const eventLog = { log() {} };
+  const sent = [];
+  // 矩阵指定：日报只发 telegram。若 dispatch 拿到错误矩阵（回落默认=仅飞书），
+  // 会发 feishu 而非 telegram —— 此断言即失效。
+  const feishu = { enabled: () => true, status: async () => ({}), send: async (m) => { sent.push(["feishu", m]); return { sent: true }; } };
+  const telegram = { enabled: () => true, status: async () => ({}), send: async (m) => { sent.push(["telegram", m]); return { sent: true }; } };
+  const state = { pushRules: { matrix: { daily: { webpush: false, telegram: true, feishu: false } } } };
+  const notifier = createNotifier({ state, feishu, telegram });
+  const deps = () => ({
+    db: makeFakeDb([
+      { match: (sql) => sql.includes("FROM drives d WHERE"), rows: [{ avg_temp: 20, idle_ratio: 0.05, tire_min: 3.0 }] },
+      { match: (sql) => sql.includes("charging_processes"), rows: [] },
+      { match: (sql) => sql.includes("FROM drives"), rows: [{ id: 1, distance_km: 30, duration_min: 50, cost: 2 }] },
+      { match: (sql) => sql.includes("FROM geofences"), rows: [] }
+    ]),
+    state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] } },
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost, routeKey: "家 → 公司" })),
+    listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
+    listChargingForStats: async () => []
+  });
+  const scheduler = startReportScheduler({ store, buildDeps: deps, notifier, eventLog, state, setTimeoutImpl: () => 0 });
+  scheduler.stop();
+  const r = await scheduler.runKind("daily");
+  assert.ok(r, "有数据的日报应正常投递");
+  assert.deepEqual(sent.map(([ch]) => ch), ["telegram"], "日报必须投矩阵指定的 telegram，而非默认矩阵的 feishu");
+});
