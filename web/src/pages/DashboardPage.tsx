@@ -149,8 +149,9 @@ export default function DashboardPage() {
           {heatmap && <HeatmapCalendar data={heatmap} onDaysChange={setHeatmapDays} />}
 
           {/* P2 模块5：最近活动流（行程/充电混合） */}
-          <div className="grid gap-4 lg:grid-cols-2">
-            <section className="glass-card p-4" data-testid="recent-trips">
+          {/* min-w-0：grid item 默认 min-width:auto，长地址 nowrap 文本会撑开轨道导致整页横向滚动 */}
+          <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+            <section className="glass-card min-w-0 p-4" data-testid="recent-trips">
               <div className="mb-2 flex items-center justify-between px-1">
                 <h2 className="flex items-center gap-2 text-sm font-medium text-slate-200">
                   <Route className="h-4 w-4 text-tesla" /> {t('dash.recentTrips', '最近行程')}
@@ -170,7 +171,7 @@ export default function DashboardPage() {
               )}
             </section>
 
-            <section className="glass-card p-4" data-testid="recent-charges">
+            <section className="glass-card min-w-0 p-4" data-testid="recent-charges">
               <div className="mb-2 flex items-center justify-between px-1">
                 <h2 className="flex items-center gap-2 text-sm font-medium text-slate-200">
                   <Flame className="h-4 w-4 text-tesla" /> {t('dash.recentCharges', '最近充电')}

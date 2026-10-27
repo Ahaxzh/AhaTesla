@@ -22,7 +22,8 @@ describe('SystemSection', () => {
     expect(screen.getByText('MQTT 正常')).toBeInTheDocument()
     expect(screen.getByTestId('system-status')).toBeInTheDocument()
     expect(screen.getByTestId('db-latency')).toBeInTheDocument()
-    expect(screen.getByText(/3 天/)).toBeInTheDocument()
+    // 精确匹配：宽泛的 /3 天/ 会同时命中「最近行车 13 天前」
+    expect(screen.getByText('3 天 1 小时')).toBeInTheDocument()
   })
 
   it('渲染事件日志并支持等级筛选', async () => {
