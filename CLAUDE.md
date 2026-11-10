@@ -9,7 +9,7 @@
 ## 技术栈
 | 层 | 技术 | 端口 |
 |---|---|---|
-| 后端 | Node 22+ ESM · 手写路由(零框架) · pg · mqtt | 18500 |
+| 后端 | Node 22+ ESM(镜像/CI 已升 26 LTS) · 手写路由(零框架) · pg · mqtt | 18500 |
 | 前端 | React 19 · Vite · TS · Tailwind · Lucide · PWA | dev 5173 |
 | 测试 | node --test / vitest / Playwright | — |
 
