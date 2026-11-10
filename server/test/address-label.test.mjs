@@ -44,3 +44,10 @@ test("短串（geofence 名等）原样返回", () => {
   assert.equal(shortAddressLabel(null), null);
   assert.equal(shortRouteLabel("未知", "未知"), "未知（往返）"); // routeKey 层对 未知/未知 有特判
 });
+
+test("shortRouteLabel：同区行程 → 区段也去重（用户实测 trips/3350）", () => {
+  assert.equal(
+    shortRouteLabel("后溪镇, 集美区, 厦门市, 福建省, 361021, 中国", "杏林街道, 集美区, 厦门市, 福建省, 361021, 中国"),
+    "后溪镇 → 杏林街道",
+  );
+});

@@ -22,19 +22,19 @@ function joinSegs(segs, max = 2) {
   return segs.slice(0, max).join(" ");
 }
 
-/** 行程两端标签：同城去重（两市段相同则都不显示）、每端 2 级、往返合并。 */
+/** 行程两端标签：同城/同区去重（两端的市、区县段相同则都不显示）、每端 2 级、往返合并。 */
 export function shortRouteLabel(startDisplay, endDisplay) {
-  const a = compressAddressParts(startDisplay);
-  const b = compressAddressParts(endDisplay);
+  let a = compressAddressParts(startDisplay);
+  let b = compressAddressParts(endDisplay);
   if (a.length === 0 && b.length === 0) return null;
-  // 同城市段（≤5 字且以「市」结尾）两端都有 → 从两侧移除（同城行程不重复城市名）
-  const cityOf = (segs) => segs.find((p) => p.endsWith("市") && p.length <= 5) || null;
-  const ca = cityOf(a);
-  const cb = cityOf(b);
-  if (ca && ca === cb) {
-    const drop = (segs) => segs.filter((p) => p !== ca);
-    return pairLabel(joinSegs(drop(a)), joinSegs(drop(b)));
-  }
+  // 行政段去重：两端都含同一「市」或同一「区/县」段 → 从两侧移除（同区行程不重复前缀）
+  const adminOf = (segs, re) => segs.find((p) => re.test(p) && p.length <= 5) || null;
+  const cityA = adminOf(a, /市$/);
+  const cityB = adminOf(b, /市$/);
+  if (cityA && cityA === cityB) [a, b] = [a.filter((p) => p !== cityA), b.filter((p) => p !== cityB)];
+  const distA = adminOf(a, /[区县]$/);
+  const distB = adminOf(b, /[区县]$/);
+  if (distA && distA === distB) [a, b] = [a.filter((p) => p !== distA), b.filter((p) => p !== distB)];
   return pairLabel(joinSegs(a), joinSegs(b));
 }
 
