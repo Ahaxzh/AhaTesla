@@ -36,6 +36,12 @@ test("总览页：车辆状态卡、本月账本卡、24h时间轴、热力图",
   await page.waitForSelector("[data-testid='timeline-card']", { timeout: 10000 });
   // v2.1 P2：用车热力图
   await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
+  // 车辆位置地图卡（有定位数据的库才渲染；真 leaflet 高德瓦片）
+  const locCard = page.getByTestId("car-location-card");
+  if (await locCard.isVisible().catch(() => false)) {
+    await expect(page.getByTestId("car-location-map")).toBeVisible();
+    await expect(page.getByTestId("car-location-state")).toBeVisible();
+  }
 });
 
 test("行程页：列表加载、分页、详情路线", async ({ page }) => {
@@ -110,7 +116,7 @@ test("设置页：修改密码表单存在并可取消", async ({ page }) => {
   await expect(page.locator("input[type='password']").first()).toBeVisible();
 });
 
-test("头像菜单：账户面板内联可改用户名/密码，含主题语言快捷开关", async ({ page }) => {
+test("头像菜单：主题/语言快捷开关 + 账户安全跳设置页锚点 + 版本标识", async ({ page }) => {
   await login(page);
   await navigate(page, "trips"); // 从其他页进入验证不依赖路由
   // 头像菜单只在桌面侧栏；移动端无此入口（账户入口在设置页内）
@@ -120,18 +126,14 @@ test("头像菜单：账户面板内联可改用户名/密码，含主题语言�
     return;
   }
   await menuBtn.click();
-  // Discord 式弹层：主题/语言快捷开关 + 账户设置内联面板
+  // Discord 式弹层：主题/语言快捷开关 + 账户安全入口（完整编辑唯一入口在设置页）
   await expect(page.getByTestId("user-menu-theme")).toBeVisible();
   await expect(page.getByTestId("user-menu-lang")).toBeVisible();
-  await page.getByTestId("user-menu-password").click();
-  const panel = page.getByTestId("user-menu-account-panel");
-  await expect(panel).toBeVisible();
-  await expect(panel.locator("#menu-acc-username")).toHaveValue(/.+/, { timeout: 5000 }); // 预填当前用户名
-  await expect(panel.locator("#menu-acc-old")).toBeVisible();
-  await expect(panel.locator("#menu-acc-new")).toBeVisible();
-  // 取消收起面板
-  await panel.getByRole("button", { name: /取消|Cancel/ }).click();
-  await expect(page.getByTestId("user-menu-account-panel")).toHaveCount(0);
+  await expect(page.getByTestId("user-menu-version")).toContainText(/v\d/); // 版本标识（"我到底在跑哪版"）
+  await page.getByTestId("user-menu-account-link").click();
+  // 跳转设置页账户安全锚点，密码表单可见
+  await expect(page).toHaveURL(/settings#settings-security/, { timeout: 8000 });
+  await expect(page.getByTestId("change-password-card")).toBeVisible();
 });
 
 test("登出后回到登录页且受保护页 401 跳转", async ({ page }) => {

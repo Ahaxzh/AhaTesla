@@ -452,7 +452,7 @@ test("GET /api/system/events 返回事件日志", async () => {
 function dashboardFakeDb() {
   return createFakeDb((sql) => {
     if (/position_at/.test(sql)) {
-      return [{ id: 1, name: "My Tesla", current_battery: 55, range_km: 220.5, odometer_km: 30021, position_at: "2026-10-13 03:00:00", last_drive_at: "2026-10-13 02:58:09" }];
+      return [{ id: 1, name: "My Tesla", current_battery: 55, range_km: 220.5, odometer_km: 30021, position_at: "2026-10-13 03:00:00", last_drive_at: "2026-10-13 02:58:09", lat: 24.4896, lng: 118.1046 }];
     }
     if (/driving/.test(sql)) return [{ state: "asleep_or_parked" }];
     if (/drive_minutes/.test(sql)) return [{ distance_km: 800.2, drive_count: 40, drive_minutes: 1200 }];
@@ -476,6 +476,8 @@ test("GET /api/dashboard 汇总", async () => {
   const res = await fetchApp(app, "GET", "/api/dashboard", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 200);
   assert.equal(res.json.car.name, "My Tesla");
+  // 车辆位置（地图卡）：经纬度 + ISO 时间；缺坐标时为 null → 前端整卡隐藏
+  assert.deepEqual(res.json.car.position, { lat: 24.4896, lng: 118.1046, at: "2026-10-13T03:00:00.000Z" });
   assert.equal(res.json.car.currentBattery, 55);
   assert.equal(res.json.car.state, "asleep_or_parked");
   assert.equal(res.json.monthStats.driveCount, 40);

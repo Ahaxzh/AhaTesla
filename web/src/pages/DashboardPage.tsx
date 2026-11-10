@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { BatteryRing } from '@/components/BatteryRing'
+import { CarLocationCard } from '@/components/CarLocationCard'
 import { PageHeader } from '@/components/PageHeader'
 import { SkeletonCards, SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
@@ -116,6 +117,9 @@ export default function DashboardPage() {
               {car && <div className="text-[11px] text-slate-500">{t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}</div>}
             </div>
           </section>
+
+          {/* 车辆位置地图卡（有定位数据才渲染；仿 TeslaMate 主页） */}
+          <CarLocationCard position={car?.position ?? null} state={car?.state ?? 'unknown'} />
 
           {/* P2 模块3：本月账本汇总（构成小字：含行驶 ¥X · 驻车/哨兵 ¥Y） */}
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="month-stats">

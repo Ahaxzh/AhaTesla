@@ -124,6 +124,8 @@ export interface DashboardData {
     rangeKm: number
     state: string
     odometerKm: number
+    /** 最新定位（车辆位置地图卡）；无定位数据时为 null → 整卡不渲染 */
+    position?: { lat: number; lng: number; at: string | null } | null
     /** 充电实时信息（state === 'charging' 时有值） */
     charging?: { batteryLevel: number | null; powerKw: number | null } | null
   }

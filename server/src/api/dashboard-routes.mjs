@@ -132,6 +132,12 @@ export function createDashboardRoutes({ db, state }) {
           rangeKm: finiteNumber(car?.range_km),
           state: driving?.state || "unknown",
           odometerKm: finiteNumber(car?.odometer_km),
+          // 最新位置（仪表盘车辆位置地图卡；无定位数据时为 null → 前端整卡隐藏）
+          position: finiteNumber(car?.lat) != null && finiteNumber(car?.lng) != null ? {
+            lat: finiteNumber(car?.lat),
+            lng: finiteNumber(car?.lng),
+            at: car?.position_at ? isoFromTeslaMate(car.position_at) : null
+          } : null,
           // 充电实时信息（charging state 时有值）
           charging: driving?.state === "charging" ? {
             batteryLevel: finiteNumber(driving?.charging_battery),

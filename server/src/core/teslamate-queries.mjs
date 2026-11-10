@@ -42,7 +42,8 @@ export async function getCarSnapshot(db, { carId = null } = {}) {
     FROM cars c
     ${filter}
     LEFT JOIN LATERAL (
-      SELECT p.battery_level, p.ideal_battery_range_km, p.odometer, p.date
+      SELECT p.battery_level, p.ideal_battery_range_km, p.odometer, p.date,
+             p.latitude::float8 AS lat, p.longitude::float8 AS lng
       FROM positions p
       WHERE p.car_id = c.id
       ORDER BY p.id DESC
