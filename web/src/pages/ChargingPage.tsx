@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BatteryCharging, Coins, MapPin, Pencil, X, Zap } from 'lucide-react'
 import { api } from '@/api/client'
@@ -72,6 +72,19 @@ export default function ChargingPage() {
   const { t } = useI18n()
   const [page, setPage] = useState(1)
   const [month, setMonth] = useState('')
+  // 最近 18 个月选项（value 与后端 month 参数格式一致：YYYY-MM）
+  const monthOptions = useMemo(() => {
+    const out: { value: string; label: string }[] = []
+    const now = new Date()
+    for (let i = 0; i < 18; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      out.push({
+        value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: t('charging.monthLabel', '{y} 年 {m} 月').replace('{y}', String(d.getFullYear())).replace('{m}', String(d.getMonth() + 1)),
+      })
+    }
+    return out
+  }, [t])
   const [detailId, setDetailId] = useState<number | null>(null)
   const [costInput, setCostInput] = useState('')
   const { toast } = useToast()
@@ -133,17 +146,22 @@ export default function ChargingPage() {
     <div>
       <PageHeader icon={BatteryCharging} title={t('charging.title', '充电')} subtitle={t('charging.subtitle', '充电账本与站点统计')} />
 
-      {/* 月份筛选（P4 DatePicker 简化为原生 month input） */}
+      {/* 月份筛选：下拉选最近 18 个月（原生 month input 桌面端是无下拉的裸输入框，
+          观感与操作都不像筛选器；select 一步到位且与全站 input-dark 风格一致） */}
       <div className="mb-4 flex items-center gap-3">
         <label htmlFor="charge-month" className="text-xs text-slate-400">{t('charging.monthFilter', '月份筛选')}</label>
-        <input
+        <select
           id="charge-month"
-          type="month"
-          className="input-dark num max-w-[170px]"
+          className="input-dark max-w-[150px]"
           value={month}
           onChange={(e) => { setMonth(e.target.value); setPage(1) }}
           data-testid="month-filter"
-        />
+        >
+          <option value="">{t('charging.allMonths', '全部月份')}</option>
+          {monthOptions.map((m) => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
+        </select>
         {month && (
           <button className="btn-ghost !py-2 text-xs" onClick={() => setMonth('')} data-testid="month-clear">
             {t('charging.clear', '清除')}

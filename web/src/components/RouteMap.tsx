@@ -235,20 +235,18 @@ export function RouteMap({
         )}
         {/* 图层切换 */}
         <div
-          className="absolute right-2 top-2 z-[1000] flex overflow-hidden rounded-xl border border-white/15 bg-[rgba(11,15,20,0.85)] text-[11px] font-medium"
+          className="map-toggle"
           role="group"
           aria-label={t('tripDetail.map.layers', '底图图层')}
         >
           <button
             aria-pressed={!satellite}
-            className={`px-3 py-1.5 transition ${!satellite ? 'bg-tesla text-white' : 'text-slate-300 hover:bg-white/[0.08]'}`}
             onClick={() => setSatellite(false)}
           >
             {t('tripDetail.map.standard', '标准')}
           </button>
           <button
             aria-pressed={satellite}
-            className={`px-3 py-1.5 transition ${satellite ? 'bg-tesla text-white' : 'text-slate-300 hover:bg-white/[0.08]'}`}
             onClick={() => setSatellite(true)}
           >
             {t('tripDetail.map.satellite', '卫星')}

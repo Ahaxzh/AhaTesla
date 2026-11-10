@@ -28,11 +28,7 @@ export function Pagination({
             <button
               onClick={() => onChange(p)}
               aria-current={p === page ? 'page' : undefined}
-              className={`num h-9 min-w-9 rounded-xl px-2 text-sm transition ${
-                p === page
-                  ? 'bg-tesla font-semibold text-white'
-                  : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
-              }`}
+              className={`page-btn ${p === page ? 'page-btn-active' : ''}`}
             >
               {p}
             </button>

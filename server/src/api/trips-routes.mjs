@@ -5,6 +5,7 @@ import { getFifoLedger } from "../core/fifo-ledger.mjs";
 import { resolveAmapLabels } from "../core/geo-geocode.mjs";
 import { listDrivesSql, getRoutePoints, getAddresses, getGeofences, geofenceLabelFor } from "../core/teslamate-queries.mjs";
 import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
+import { shortRouteLabel, shortAddressLabel } from "../core/address-label.mjs";
 
 function addressLabel(address) {
   if (!address) return null;
@@ -25,7 +26,8 @@ function routeKey(drive, addressMap, geofenceMap, geofenceRows, amapLabels) {
   const amap = (lat, lng) => (lat == null || lng == null ? null : amapLabels?.get(`${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`) ?? null);
   const a = addressLabel(start) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amap(drive.start_lat, drive.start_lng) || "未知";
   const b = addressLabel(end) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amap(drive.end_lat, drive.end_lng) || "未知";
-  return a === b ? a : `${a} → ${b}`;
+  if (a === "未知" && b === "未知") return "未知";
+  return shortRouteLabel(a, b);
 }
 
 function clampPaging(query) {
@@ -88,8 +90,8 @@ export async function computeTripViews(db, drives, { defaultRate, history, state
       durationMin: Number(drive.duration_min) || 0,
       energyKWh: energy,
       costCny: allocation?.cost_cny ?? null,
-      startAddress: addressLabel(addressMap[drive.start_address_id] || null) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amapOf(drive.start_lat, drive.start_lng) || null,
-      endAddress: addressLabel(addressMap[drive.end_address_id] || null) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amapOf(drive.end_lat, drive.end_lng) || null,
+      startAddress: shortAddressLabel(addressLabel(addressMap[drive.start_address_id] || null)) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amapOf(drive.start_lat, drive.start_lng) || null,
+      endAddress: shortAddressLabel(addressLabel(addressMap[drive.end_address_id] || null)) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amapOf(drive.end_lat, drive.end_lng) || null,
       kwhPer100km: energy !== null && distance > 0 ? round(energy / distance * 100, 2) : null,
       routeKey: routeKey(drive, addressMap, geofenceMap, geofenceRows, amapLabels)
     };

@@ -50,7 +50,7 @@ export default function DashboardPage() {
   const { currentCarId } = useCar()
   const { data, isLoading, isError, refetch } = useQuery({ queryKey: ['dashboard', currentCarId], queryFn: () => api.dashboard(currentCarId), retry: false })
   const { data: timeline } = useQuery({ queryKey: ['timeline', currentCarId], queryFn: () => api.timeline(currentCarId), retry: false })
-  const [heatmapDays, setHeatmapDays] = useState(90)
+  const [heatmapDays, setHeatmapDays] = useState(365) // 默认近一年（用车日历作为仪表盘主视觉，年视图信息密度更高）
   const { data: heatmap } = useQuery({ queryKey: ['heatmap', heatmapDays, currentCarId], queryFn: () => api.heatmap(heatmapDays, currentCarId), retry: false })
   // P2 模块3 小字：总电费 = 行驶分摊 + 驻车/哨兵（POST /api/ledger/summary）
   const { data: ledger, refetch: refetchLedger } = useQuery({
