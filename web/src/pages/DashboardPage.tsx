@@ -13,7 +13,6 @@ import {
   TrendingDown,
 } from 'lucide-react'
 import { api } from '@/api/client'
-import { BatteryRing } from '@/components/BatteryRing'
 import { CarLocationCard } from '@/components/CarLocationCard'
 import { PageHeader } from '@/components/PageHeader'
 import { SkeletonCards, SkeletonList } from '@/components/Skeletons'
@@ -65,6 +64,14 @@ export default function DashboardPage() {
   const saved = month && data ? data.fuelComparison.fuelCostCny - (ledger?.totalCost ?? month.costCny) : 0
   const car = data?.car
   const pill = statePill(car?.state ?? '')
+  // 电量横条配色（原 BatteryRing 内部同口径：≥50 绿 / ≥25 琥珀 / 其余红）
+  const batteryColor = (() => {
+    const b = car?.currentBattery
+    if (b == null) return { cls: 'bg-slate-600' }
+    if (b >= 50) return { cls: 'bg-emerald-400' }
+    if (b >= 25) return { cls: 'bg-amber-400' }
+    return { cls: 'bg-tesla' }
+  })()
 
   return (
     <div>
@@ -89,37 +96,48 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* P2 模块1：车辆状态卡（电量变色 + 状态胶囊 + 数据同步时间） */}
-          <section className="glass-card fade-up flex flex-col items-center gap-6 p-6 sm:flex-row sm:gap-10" data-testid="car-card">
-            <BatteryRing percent={car!.currentBattery} label={`${t('dash.rangePrefix', '续航约')} ${fmtKm(car!.rangeKm, 0)} km`} />
-            <div className="w-full flex-1 space-y-3">
+          {/* P2 模块1：车辆状态 + 位置一体卡（TeslaMate 概览卡式：左紧凑信息列，右地图填满；
+              电量改细横条不再占半版；无定位数据的旧库自动退化为纯信息卡） */}
+          <section className="glass-card fade-up overflow-hidden p-0 lg:grid lg:grid-cols-[240px_1fr]" data-testid="car-card">
+            <div className="flex flex-col justify-center gap-3 p-4 lg:border-r lg:border-white/[0.06]">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-sm text-slate-300">
-                  <Car className="h-4 w-4 text-tesla" />
-                  {car!.name}
+                <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
+                  <Car className="h-4 w-4 shrink-0 text-tesla" />
+                  <span className="truncate">{car!.name}</span>
                 </div>
                 <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
                   {t(pill.labelKey, pill.labelZh)}
                   {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-white/[0.04] px-3.5 py-3">
-                  <div className="text-[11px] text-slate-500">{t('dash.odometer', '总里程')}</div>
-                  <div className="num mt-1 text-lg font-semibold text-white">{fmtKm(car!.odometerKm, 0)} km</div>
+              {/* 电量：百分比 + 细横条（Tesla App 式，替代原 BatteryRing 大圆环） */}
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <span className="num text-2xl font-semibold text-white">
+                    {car!.currentBattery == null ? '--' : `${car!.currentBattery}%`}
+                  </span>
+                  <span className="text-[11px] text-slate-400">{t('dash.currentRange', '当前续航')} <span className="num text-slate-300">{fmtKm(car!.rangeKm, 0)} km</span></span>
                 </div>
-                <div className="rounded-xl bg-white/[0.04] px-3.5 py-3">
-                  <div className="text-[11px] text-slate-500">{t('dash.currentRange', '当前续航')}</div>
-                  <div className="num mt-1 text-lg font-semibold text-white">{fmtKm(car!.rangeKm, 0)} km</div>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+                  <div
+                    className={`h-full rounded-full transition-all ${batteryColor.cls}`}
+                    style={{ width: `${car!.currentBattery ?? 0}%` }}
+                    data-testid="battery-bar"
+                  />
                 </div>
               </div>
-              {/* 数据同步时间（模块1 规格） */}
+              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                <span>{t('dash.odometer', '总里程')} <span className="num text-slate-300">{fmtKm(car!.odometerKm, 0)} km</span></span>
+              </div>
               {car && <div className="text-[11px] text-slate-500">{t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}</div>}
             </div>
+            {/* 地图列：有定位才占位（lg:grid 两列布局下 null 会让信息列独占） */}
+            {car?.position ? (
+              <div className="min-h-56 lg:min-h-[224px]">
+                <CarLocationCard position={car.position} state={car.state} />
+              </div>
+            ) : null}
           </section>
-
-          {/* 车辆位置地图卡（有定位数据才渲染；仿 TeslaMate 主页） */}
-          <CarLocationCard position={car?.position ?? null} state={car?.state ?? 'unknown'} />
 
           {/* P2 模块3：本月账本汇总（构成小字：含行驶 ¥X · 驻车/哨兵 ¥Y） */}
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="month-stats">

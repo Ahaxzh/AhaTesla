@@ -20,9 +20,9 @@ afterAll(() => vi.restoreAllMocks())
 describe('CarLocationCard（车辆位置地图卡外壳）', () => {
   it('有定位 → 卡片渲染，坐标传入懒加载的地图', async () => {
     renderWithProviders(<CarLocationCard position={{ lat: 24.49, lng: 118.1, at: '2026-11-10T03:00:00Z' }} state="asleep" />)
-    const card = await screen.findByTestId('car-location-card', {}, { timeout: 3000 })
-    expect(card).toBeInTheDocument()
-    expect(screen.getByTestId('car-location-map-stub')).toHaveTextContent('24.49,118.1')
+    // testid car-location-card 现由地图实现持有（本测 mock 掉）→ 断言 stub
+    const stub = await screen.findByTestId('car-location-map-stub', {}, { timeout: 3000 })
+    expect(stub).toHaveTextContent('24.49,118.1')
   })
 
   it('无定位（旧库/无 GPS）→ 整卡不渲染', () => {

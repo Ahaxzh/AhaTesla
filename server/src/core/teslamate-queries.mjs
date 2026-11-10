@@ -38,17 +38,23 @@ export async function getCarSnapshot(db, { carId = null } = {}) {
            pos.ideal_battery_range_km AS range_km,
            pos.odometer AS odometer_km,
            pos.date AS position_at,
-           pos.lat, pos.lng,
+           pos.lat, pos.lng, pos.prev_lat, pos.prev_lng,
            (SELECT max(d.end_date) FROM drives d WHERE d.car_id = c.id AND d.end_date IS NOT NULL) AS last_drive_at
     FROM cars c
     ${filter}
     LEFT JOIN LATERAL (
-      SELECT p.battery_level, p.ideal_battery_range_km, p.odometer, p.date,
-             p.latitude::float8 AS lat, p.longitude::float8 AS lng
-      FROM positions p
-      WHERE p.car_id = c.id
-      ORDER BY p.id DESC
-      LIMIT 1
+      -- 最近 2 个位置点：首点为最新快照，次点用于计算车头朝向（bearing）——
+      -- TeslaMate 4.x schema 已无 heading 列，方向由连续两点推导（停车时保持
+      -- 最后一次行驶朝向，与 TeslaMate 停车态标记一致）
+      SELECT (array_agg(p.battery_level ORDER BY p.id DESC))[1] AS battery_level,
+             (array_agg(p.ideal_battery_range_km ORDER BY p.id DESC))[1] AS ideal_battery_range_km,
+             (array_agg(p.odometer ORDER BY p.id DESC))[1] AS odometer,
+             (array_agg(p.date ORDER BY p.id DESC))[1] AS date,
+             (array_agg(p.latitude::float8 ORDER BY p.id DESC))[1] AS lat,
+             (array_agg(p.longitude::float8 ORDER BY p.id DESC))[1] AS lng,
+             (array_agg(p.latitude::float8 ORDER BY p.id DESC))[2] AS prev_lat,
+             (array_agg(p.longitude::float8 ORDER BY p.id DESC))[2] AS prev_lng
+      FROM (SELECT * FROM positions WHERE car_id = c.id ORDER BY id DESC LIMIT 2) p
     ) pos ON true
     ORDER BY c.display_priority ASC NULLS LAST, c.id ASC
     LIMIT 1

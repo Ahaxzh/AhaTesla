@@ -3,7 +3,24 @@ import { MapPin, Navigation } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import type { DashboardData } from '@/types'
 
-/** 迷你地图实现（经 CarLocationCard 懒加载）：高德标准瓦片 + WGS84→GCJ02 纠偏定位点。 */
+/** TeslaMate 风格车头朝向箭头（SVG）：红色箭身 + 白描边，随 headingDeg 旋转。
+ *  无朝向数据（仅一个定位点）时固定朝上。 */
+function headingArrowIcon(leaflet: any, headingDeg: number | null | undefined) {
+  const rotate = headingDeg != null ? `transform: rotate(${headingDeg}deg)` : ''
+  return leaflet.divIcon({
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    html: `<div style="${rotate};width:28px;height:28px;display:flex;align-items:center;justify-content:center">
+      <svg width="28" height="28" viewBox="0 0 28 28">
+        <circle cx="14" cy="14" r="13" fill="rgba(11,15,20,0.55)"/>
+        <path d="M14 5.5 L19 20 L14 16.8 L9 20 Z" fill="#e82127" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>
+      </svg>
+    </div>`,
+  })
+}
+
+/** 迷你地图实现（经 CarLocationCard 懒加载）：高德标准瓦片 + WGS84→GCJ02 纠偏 + 朝向箭头。 */
 export default function CarLocationMap({ position, state }: { position: NonNullable<DashboardData['car']['position']>; state: string }) {
   const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
@@ -29,20 +46,14 @@ export default function CarLocationMap({ position, state }: { position: NonNulla
           maxZoom: 18,
         })
         .addTo(map)
-      leaflet.circleMarker([lat, lng], {
-        radius: 9,
-        color: '#ffffff',
-        weight: 3,
-        fillColor: '#e82127',
-        fillOpacity: 1,
-      }).addTo(map)
+      leaflet.marker([lat, lng], { icon: headingArrowIcon(leaflet, position.headingDeg) }).addTo(map)
       map.setView([lat, lng], 15)
     })()
     return () => {
       cancelled = true
       map?.remove()
     }
-  }, [position.lat, position.lng])
+  }, [position.lat, position.lng, position.headingDeg])
 
   const stateLabel =
     state === 'charging' ? t('car.state.charging', '充电中')
@@ -55,8 +66,8 @@ export default function CarLocationMap({ position, state }: { position: NonNulla
   const fixTime = position.at ? new Date(position.at).toLocaleString() : ''
 
   return (
-    <div className="relative">
-      <div ref={ref} className="h-56 w-full" data-testid="car-location-map" />
+    <div className="relative h-full min-h-56 w-full" data-testid="car-location-card">
+      <div ref={ref} className="h-full min-h-56 w-full" data-testid="car-location-map" />
       {/* 信息浮层：左下状态 + 定位时间；右下外部地图深链 */}
       <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-xl border border-white/10 bg-base-900/80 px-3 py-1.5 text-xs text-slate-200 backdrop-blur">
         <MapPin className="h-3.5 w-3.5 text-tesla" />

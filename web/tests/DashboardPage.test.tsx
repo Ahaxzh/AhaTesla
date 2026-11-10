@@ -10,11 +10,12 @@ afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
 describe('DashboardPage', () => {
-  it('渲染车辆电量环形与续航', async () => {
+  it('渲染车辆电量横条与续航（v1.2 紧凑卡：环形改细条）', async () => {
     renderWithProviders(<DashboardPage />)
-    const ring = await screen.findByTestId('battery-ring')
-    expect(ring).toHaveTextContent('72')
-    expect(ring).toHaveTextContent('358')
+    const bar = await screen.findByTestId('battery-bar')
+    expect(bar).toBeInTheDocument()
+    expect(screen.getByTestId('car-card')).toHaveTextContent('72')
+    expect(screen.getByTestId('car-card')).toHaveTextContent('358')
   })
 
   it('渲染本月统计卡（里程/能耗/电费）与油车对比', async () => {

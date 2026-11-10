@@ -2,18 +2,16 @@ import { lazy, Suspense } from 'react'
 import type { DashboardData } from '@/types'
 
 /**
- * 车辆位置地图卡（仿 TeslaMate 主页）：最新定位 + 状态胶囊 + 定位时间 + 外部地图深链。
- * leaflet 重组件随本卡懒加载（路由分割下不影响首屏）；无定位数据时整卡不渲染。
+ * 车辆位置地图（懒加载边界）：无壳裸地图，宿主（仪表盘合并卡）提供卡片容器与布局。
+ * 无定位数据时返回 null —— 合并卡自动退化为纯信息卡。
  */
 const CarLocationMap = lazy(() => import('./CarLocationMap'))
 
 export function CarLocationCard({ position, state }: { position: DashboardData['car']['position']; state: string }) {
   if (!position) return null
   return (
-    <section className="glass-card fade-up relative overflow-hidden p-0" data-testid="car-location-card">
-      <Suspense fallback={<div className="skeleton h-56 w-full" data-testid="car-location-fallback" />}>
-        <CarLocationMap position={position} state={state} />
-      </Suspense>
-    </section>
+    <Suspense fallback={<div className="skeleton h-full min-h-56 w-full" data-testid="car-location-fallback" />}>
+      <CarLocationMap position={position} state={state} />
+    </Suspense>
   )
 }

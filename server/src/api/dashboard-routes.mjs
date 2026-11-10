@@ -34,6 +34,17 @@ async function fetchAllDrivesInWindow(db, { from, to = null, carId = null }, pag
   return rows;
 }
 
+/** 两点方位角（正北 0°，顺时针）： TeslaMate 无 heading 列，由连续两点推导。 */
+function bearingDeg(lat1, lng1, lat2, lng2) {
+  const φ1 = (Number(lat1) * Math.PI) / 180, φ2 = (Number(lat2) * Math.PI) / 180;
+  const Δλ = ((Number(lng2) - Number(lng1)) * Math.PI) / 180;
+  if (!Number.isFinite(φ1) || !Number.isFinite(φ2) || !Number.isFinite(Δλ)) return null;
+  if (lat1 === lat2 && lng1 === lng2) return null;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+}
+
 export function createDashboardRoutes({ db, state }) {
   async function recentChargesViews(limit, carId = null) {
     const rows = await listCharging(db, { limit, offset: 0, carId });
@@ -136,7 +147,9 @@ export function createDashboardRoutes({ db, state }) {
           position: finiteNumber(car?.lat) != null && finiteNumber(car?.lng) != null ? {
             lat: finiteNumber(car?.lat),
             lng: finiteNumber(car?.lng),
-            at: car?.position_at ? isoFromTeslaMate(car.position_at) : null
+            at: car?.position_at ? isoFromTeslaMate(car.position_at) : null,
+            // 车头朝向（0-360°，正北为 0）：最近两点方位角；仅一点/坏点为 null
+            headingDeg: bearingDeg(car?.prev_lat, car?.prev_lng, car?.lat, car?.lng)
           } : null,
           // 充电实时信息（charging state 时有值）
           charging: driving?.state === "charging" ? {
