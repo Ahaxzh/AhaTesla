@@ -92,6 +92,10 @@ docker compose -f deploy/connect-compose.yml up -d
 
 > 两个 compose 默认拉取 GHCR 预构建镜像(`linux/amd64` + `linux/arm64`);改了本地代码想构建自己的镜像,加 `--build` 即可。
 
+### 数据备份与迁移(可选)
+
+TeslaMate 库与 AhaTesla 自有数据(电价规则/账本/推送配置)是两套存储,分开备份——完整流程含 ANALYZE、token 重新登录等实测要点见 [`docs/RESTORE.md`](docs/RESTORE.md)。
+
 ### 部署后:iPhone 收通知(可选)
 
 任意 HTTPS 反代(如 NPM)指向 18500 → Safari 打开 → 分享 → 添加到主屏幕 → 推送页开启 Web Push(iOS ≥ 16.4)。反代配置见 [`deploy/NPM-SETUP.md`](deploy/NPM-SETUP.md)。
