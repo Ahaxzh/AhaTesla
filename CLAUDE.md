@@ -23,7 +23,7 @@
 ```bash
 cd server && npm test && npm start     # :18500
 cd web && npm test && npm run build    # dist 由 server 托管
-npx playwright test                    # e2e/ 全链路
+bash scripts/run-e2e.sh               # e2e 全链路（隔离实例；勿在根目录裸跑 npx playwright test——会把 web/tests 的 vitest 文件误当用例）
 docker compose -f deploy/bridge-compose.yml up -d   # socat 桥接
 ```
 

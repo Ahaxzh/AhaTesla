@@ -14,3 +14,6 @@ server/data/state.json.corrupt-*
 coverage/
 playwright-report/
 test-results/
+
+# 本机迁移 override（机器特定，不入库）
+deploy/connect-compose.local.yml
