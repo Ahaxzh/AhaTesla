@@ -165,6 +165,8 @@ function UserMenu() {
   const [open, setOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  // 版本标识（"我到底在跑哪版"）：与 SystemSection 共用 queryKey，共享缓存零额外请求
+  const { data: sys } = useQuery({ queryKey: ['system-status-full'], queryFn: api.systemStatus, staleTime: Infinity, retry: false })
 
   // 账户表单（打开面板时预填；不做 user→表单 的持续同步 ——
   // 否则 /api/auth/me 晚到会把用户正在输入的用户名打回旧值）
@@ -430,6 +432,12 @@ function UserMenu() {
             <LogOut className="h-4 w-4 text-slate-500" />
             {t('menu.logout', '退出登录')}
           </button>
+
+          {sys?.version && (
+            <div className="border-t border-white/[0.06] px-3.5 py-2 text-center text-[10px] text-slate-600" data-testid="user-menu-version">
+              AhaTesla v{sys.version}
+            </div>
+          )}
         </div>
       )}
     </div>

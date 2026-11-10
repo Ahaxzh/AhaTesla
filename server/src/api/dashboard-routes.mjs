@@ -9,9 +9,10 @@ import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { instanceTimezone } from "../core/pricing-options.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
 import { isDemo } from "../core/demo-data.mjs";
+import { VERSION } from "../version.mjs";
 import { carIdFromQuery, carsPayload } from "./car-scope.mjs";
 
-export const VERSION = "0.1.0";
+
 export const FUEL_REFERENCE = Object.freeze({
   // 油耗对标参考：92# 油价 × 常见油车 8L/100km。来源口径为内置假设，asOf 为常量。
   fuelPriceCnyPerL: 7.8,

@@ -406,7 +406,8 @@ test("GET /api/system/status 汇报 db/mqtt/uptime/version", async () => {
   assert.deepEqual(res.json.teslamate.mqtt, { ok: true });
   assert.equal(res.json.teslamate.driveCount, 3023);
   assert.equal(res.json.teslamate.lastDriveAt, "2026-10-13T02:58:09.000Z");
-  assert.equal(res.json.version, "0.1.0");
+  // VERSION 来自 src/version.mjs（BASE + GIT_SHA 短 SHA；测试环境无 GIT_SHA → 纯基准版本）
+  assert.ok(/^1\.2\.0(\+[0-9a-f]{7}|\+local)?$/.test(res.json.version), `version 格式：${res.json.version}`);
   assert.ok(res.json.uptime >= 0);
 });
 

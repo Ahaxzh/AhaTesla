@@ -17,6 +17,8 @@ RUN npm ci --omit=dev
 
 # ---------- 阶段3：运行时 ----------
 FROM node:26-alpine AS runtime
+ARG GIT_SHA=local
+ENV GIT_SHA=${GIT_SHA}
 ENV NODE_ENV=production
 WORKDIR /app/server
 COPY --from=server-deps /app/server/node_modules ./node_modules
