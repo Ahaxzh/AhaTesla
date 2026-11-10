@@ -22,7 +22,7 @@
 
 ## 1. 初始化与数据源（v2 新增）
 
-- `GET /api/setup/status`（匿名）→ {state: "uninitialized"|"setup-locked"|"ready", https: bool, carFound: bool}
+- `GET /api/setup/status`（匿名）→ {state: "uninitialized"|"setup-locked"|"ready", https: bool, carFound: bool, deployMode: "fullstack"|"connect"|null}（deployMode 由 compose 注入 `AHATESLA_DEPLOY_MODE`，向导自动选定接入形态；裸机开发未注入为 null → 出模式选择器）
 - `POST /api/setup/admin`（仅 uninitialized）{username, password(≥8)} → {ok}（自动登录设 cookie）
 - `POST /api/setup/test-connection` {host, port=5432, database="teslamate", user, password} → {steps:[{name:"reachability"|"auth"|"readonly"|"cars", ok, detail}]}
   - readonly 步 = **元数据探测**：`SELECT has_table_privilege(current_user,'public.drives','INSERT,UPDATE,DELETE,TRUNCATE') OR has_schema_privilege(current_user,'public','CREATE')`，返回 true 即危险配置（ok:false，要求降级只读账号，AC-2.4）；**严禁 CREATE/INSERT 实写探测**；连接池每 Session 初始化强制 `SET default_transaction_read_only = on`

@@ -410,6 +410,52 @@ describe('SetupPage 向导', () => {
     expect(screen.getByTestId('auto-ro-button')).toHaveTextContent('已创建')
   })
 
+  it('deployMode 由 compose 注入 → 自动选模式并隐藏选择器（不再问用户属于哪类）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('/api/setup/status', () =>
+        HttpResponse.json({ state: 'uninitialized', https: false, carFound: false, deployMode: 'connect' }),
+      ),
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    server.use(
+      http.get('/api/auth/me', () =>
+        HttpResponse.json({ error: { code: 'UNAUTHORIZED', message: '未登录' } }, { status: 401 }),
+      ),
+    )
+    renderSetupRouter()
+    await screen.findByTestId('setup-admin-form')
+    await registerAdmin(user)
+    expect(screen.queryByTestId('setup-mode-connect')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('setup-mode-fullstack')).not.toBeInTheDocument()
+    expect(screen.getByTestId('setup-mode-detected')).toHaveTextContent('接入现有 TeslaMate')
+  })
+
+  it('deployMode=fullstack → 检测文案指向全栈，Tesla 授权引导卡可见', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('/api/setup/status', () =>
+        HttpResponse.json({ state: 'uninitialized', https: false, carFound: false, deployMode: 'fullstack' }),
+      ),
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    server.use(
+      http.get('/api/auth/me', () =>
+        HttpResponse.json({ error: { code: 'UNAUTHORIZED', message: '未登录' } }, { status: 401 }),
+      ),
+    )
+    renderSetupRouter()
+    await screen.findByTestId('setup-admin-form')
+    await registerAdmin(user)
+    expect(screen.queryByTestId('setup-mode-connect')).not.toBeInTheDocument()
+    expect(screen.getByTestId('setup-mode-detected')).toHaveTextContent('全栈')
+    // Tesla 授权引导卡 href 已由既有用例覆盖（:4000/sign_in）
+  })
+
   it('setup-locked 且已登录 → 恢复向导直接进入 Step2（数据源），不再踢回登录页', async () => {
     server.use(
       http.get('/api/setup/status', () =>
@@ -475,7 +521,7 @@ describe('SetupPage 向导', () => {
     expect(screen.getByTestId('tesla-login-guide')).toBeInTheDocument()
     expect(screen.getByTestId('tesla-login-guide')).toHaveTextContent(/不接触 Tesla 密码|自动检测到车辆/)
     const link = screen.getByTestId('tesla-login-link') as HTMLAnchorElement
-    expect(link.href).toContain(':4000/sessions/new')
+    expect(link.href).toContain(':4000/sign_in')
     expect(link.href).toContain(window.location.hostname)
     // 旧 testid 保留兼容（外层 span）
     expect(screen.getByTestId('setup-teslamate-link')).toBeInTheDocument()

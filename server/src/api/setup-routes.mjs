@@ -396,7 +396,10 @@ export function createSetupRoutes({
       return {
         state: instanceSetupState(state),
         https: ctx.req?.headers?.["x-forwarded-proto"] === "https" || String(ctx.req?.socket?.encrypted) === "true",
-        carFound: Array.isArray(state.datasource?.cars) && state.datasource.cars.length > 0
+        carFound: Array.isArray(state.datasource?.cars) && state.datasource.cars.length > 0,
+        // 部署形态由 compose 注入（fullstack/connect）：向导据此自动选定接入模式，
+        // 不再让用户自己猜「我属于哪类」——裸机开发（未注入）才出模式选择器
+        deployMode: process.env.AHATESLA_DEPLOY_MODE || null
       };
     },
 

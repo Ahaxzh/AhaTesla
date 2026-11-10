@@ -36,6 +36,8 @@ services:
       DB_URL: ${DB_URL:-}
       MQTT_URL: ${MQTT_URL:-}
       AHA_DATA_DIR: /data
+      # 向导自动识别部署形态（跳过「已有/没有 TeslaMate」选择器）
+      AHATESLA_DEPLOY_MODE: connect
     volumes:
       - ahatesla-data:/data
     ports:

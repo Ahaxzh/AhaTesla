@@ -70,6 +70,20 @@ test("GET /api/setup/status 匿名可查", async () => {
   assert.equal(res.json.carFound, false);
 });
 
+test("GET /api/setup/status 透出 AHATESLA_DEPLOY_MODE（未注入为 null）", async () => {
+  const { app } = buildSetupApp();
+  const without = await fetchApp(app, "GET", "/api/setup/status");
+  assert.equal(without.json.deployMode, null);
+  process.env.AHATESLA_DEPLOY_MODE = "fullstack";
+  try {
+    const { app: app2 } = buildSetupApp();
+    const withMode = await fetchApp(app2, "GET", "/api/setup/status");
+    assert.equal(withMode.json.deployMode, "fullstack");
+  } finally {
+    delete process.env.AHATESLA_DEPLOY_MODE;
+  }
+});
+
 // ---- 首个管理员注册（AC-1.4 / AC-3.1） -----------------------------------
 
 test("POST /api/setup/admin：uninitialized 时首注册即管理员 + 自动登录 cookie", async () => {

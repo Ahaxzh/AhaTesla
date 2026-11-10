@@ -74,7 +74,7 @@ export default function SetupPage() {
 
       <div className="mt-6 w-full max-w-md" data-testid={`setup-step-${step}`}>
         {step === 1 && <Step1Admin onDone={() => { void refresh(); goto(2) }} />}
-        {step === 2 && <Step2Datasource onDone={() => goto(3)} />}
+        {step === 2 && <Step2Datasource onDone={() => goto(3)} deployMode={statusQuery.data?.deployMode ?? null} />}
         {step === 3 && <Step3Ledger onDone={() => goto(4)} onSkip={() => goto(4)} />}
         {step === 4 && (
           <Step4Notify
@@ -204,10 +204,13 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
 
 // ---- Step 2 数据源接入（双模分支 + 四级校验 + 车辆发现）----
 
-function Step2Datasource({ onDone }: { onDone: () => void }) {
+function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMode?: 'fullstack' | 'connect' | null }) {
   const { t } = useI18n()
   const { toast } = useToast()
-  const [mode, setMode] = useState<Mode>('connect')
+  // compose 注入 AHATESLA_DEPLOY_MODE → 自动选定形态并隐藏选择器（用户不会答
+  // 「我属于哪类」——部署方式是 compose 决定的，不该问人）。裸机开发未注入才出选择器。
+  const [mode, setMode] = useState<Mode>(deployMode ?? 'connect')
+  const [modeLocked] = useState<boolean>(!!deployMode)
   const [host, setHost] = useState('')
   const [port, setPort] = useState('5432')
   const [database, setDatabase] = useState('teslamate')
@@ -400,7 +403,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
   const readyToNext = mode === 'fullstack' ? saved && discovery?.found : verified && saved
 
   // m4a 轨道A：捆绑 TeslaMate 的地址按当前访问主机推导（容器网络内同宿主可达）
-  const teslamateUrl = `http://${typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'}:4000/sessions/new`
+  const teslamateUrl = `http://${typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1'}:4000/sign_in`
 
   return (
     <div className="glass-card space-y-5 p-6" data-testid="setup-datasource">
@@ -409,28 +412,36 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
         <p className="mt-1 text-xs text-slate-500">{t('setup.s2.desc', '已有 TeslaMate？填数据库直连。新用户？用全栈部署。')}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="接入模式">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'connect'}
-          className={`rounded-xl border px-3 py-2.5 text-sm transition ${mode === 'connect' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400 hover:border-white/20 hover:text-slate-200'}`}
-          onClick={() => setMode('connect')}
-          data-testid="setup-mode-connect"
-        >
-          {t('setup.mode.a', 'A · 我已有 TeslaMate')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={mode === 'fullstack'}
-          className={`rounded-xl border px-3 py-2.5 text-sm transition ${mode === 'fullstack' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400 hover:border-white/20 hover:text-slate-200'}`}
-          onClick={() => setMode('fullstack')}
-          data-testid="setup-mode-fullstack"
-        >
-          {t('setup.mode.b', 'B · 新用户全栈部署')}
-        </button>
-      </div>
+      {!modeLocked ? (
+        <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="接入模式">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'connect'}
+            className={`rounded-xl border px-3 py-2.5 text-sm transition ${mode === 'connect' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400 hover:border-white/20 hover:text-slate-200'}`}
+            onClick={() => setMode('connect')}
+            data-testid="setup-mode-connect"
+          >
+            {t('setup.mode.a', 'A · 我已有 TeslaMate')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'fullstack'}
+            className={`rounded-xl border px-3 py-2.5 text-sm transition ${mode === 'fullstack' ? 'border-tesla bg-tesla/10 text-white' : 'border-slate-800 text-slate-400 hover:border-white/20 hover:text-slate-200'}`}
+            onClick={() => setMode('fullstack')}
+            data-testid="setup-mode-fullstack"
+          >
+            {t('setup.mode.b', 'B · 新用户全栈部署')}
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-500" data-testid="setup-mode-detected">
+          {mode === 'fullstack'
+            ? t('setup.mode.detectedFullstack', '已检测到部署形态：全栈版（AhaTesla + TeslaMate 一体化）——按引导完成 Tesla 授权即可。')
+            : t('setup.mode.detectedConnect', '已检测到部署形态：接入现有 TeslaMate——填数据库连接或一键创建只读账号即可。')}
+        </p>
+      )}
 
       {mode === 'connect' ? (
         <div className="space-y-3">

@@ -13,6 +13,8 @@ export interface SetupStatus {
   state: SetupState
   https: boolean
   carFound: boolean
+  /** compose 注入的部署形态（fullstack/connect）；裸机开发为 null → 向导出模式选择器 */
+  deployMode: 'fullstack' | 'connect' | null
 }
 
 export type SetupCheckName = 'reachability' | 'auth' | 'readonly' | 'cars'
