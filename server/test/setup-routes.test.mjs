@@ -598,3 +598,24 @@ test("saveDatasource fullstack：不 retarget（沿用 env DB 连接），仅落
   assert.deepEqual(calls, [], "fullstack 不触发 retarget");
   assert.equal(state.datasource.mode, "fullstack");
 });
+
+test("instanceSetupState env 供给：fullstack 或 connect+DB_URL → ready（/setup 对已配实例锁门）", () => {
+  const locked = baseState({ passwordHash: "x" }); // datasource: null
+  const env = process.env;
+  try {
+    // 裸机开发（无 deployMode、无 DB_URL）→ setup-locked（向导是唯一途径）
+    delete env.AHATESLA_DEPLOY_MODE; delete env.DB_URL;
+    assert.equal(instanceSetupState(locked), SETUP_STATES.SETUP_LOCKED);
+    // fullstack compose：恒注入 DB_URL → ready
+    env.AHATESLA_DEPLOY_MODE = "fullstack";
+    assert.equal(instanceSetupState(locked), SETUP_STATES.READY);
+    // connect compose + 显式 DB_URL（开发者 override/.env）→ ready
+    env.AHATESLA_DEPLOY_MODE = "connect"; env.DB_URL = "postgres://u:p@h:5432/d";
+    assert.equal(instanceSetupState(locked), SETUP_STATES.READY);
+    // connect compose 未填 DB_URL（向导配置型存量接入）→ setup-locked 保持可续配
+    delete env.DB_URL;
+    assert.equal(instanceSetupState(locked), SETUP_STATES.SETUP_LOCKED);
+  } finally {
+    delete env.AHATESLA_DEPLOY_MODE; delete env.DB_URL;
+  }
+});

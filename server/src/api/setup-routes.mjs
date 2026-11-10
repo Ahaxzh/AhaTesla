@@ -32,7 +32,17 @@ export function isInstanceUninitialized(state) {
 
 export function instanceSetupState(state) {
   if (!state.passwordHash) return SETUP_STATES.UNINITIALIZED;
-  return state.datasource?.configured ? SETUP_STATES.READY : SETUP_STATES.SETUP_LOCKED;
+  if (state.datasource?.configured) return SETUP_STATES.READY;
+  // 数据源已由部署形态供给时视为 ready —— /setup 不再对已配好的实例开门：
+  //   fullstack：compose 恒注入 DB_URL（同栈直连）
+  //   connect + env DB_URL：接入版但连接已显式配置（如开发者 .env/override 部署）
+  // 否则（connect 且 DB_URL 空，向导是唯一配置途径）保持 setup-locked，
+  // 已登录管理员仍可回向导续配（中断恢复）。
+  // 副作用取舍：全新 fullstack 用户若在向导中途刷新（state 已 ready），会被弹回
+  // 登录页 —— 实例本身已可用，剩余选项（主车/推送）在设置页均有入口，能力无损失。
+  if (process.env.AHATESLA_DEPLOY_MODE === "fullstack") return SETUP_STATES.READY;
+  if (process.env.AHATESLA_DEPLOY_MODE === "connect" && process.env.DB_URL) return SETUP_STATES.READY;
+  return SETUP_STATES.SETUP_LOCKED;
 }
 
 /** 把 {host,port,database,user,password} 归一成 pg 连接串（密码仅进 URL，绝不落日志）。 */

@@ -8,7 +8,7 @@
 ## 0. 全局规范
 
 - **认证**：JWT (HS256) httpOnly cookie `ahatesla_token`，**Access 24h + Refresh 30d 双 Token**（AC-3.2）；受保护端点未认证 → 401 `{error:{code,message}}`
-- **初始化状态机**：实例三态 `uninitialized`（无管理员）→ `setup-locked`（管理员已建，/api/setup/* 注册类端点 403）→ `ready`。`GET /api/setup/status` 可匿名查询
+- **初始化状态机**：实例三态 `uninitialized`（无管理员）→ `setup-locked`（管理员已建，/api/setup/* 注册类端点 403）→ `ready`。`ready` 判定 = 向导已完成保存 **或** 数据源已由部署形态供给（`AHATESLA_DEPLOY_MODE=fullstack` 恒注入 DB_URL；`connect` 且 env `DB_URL` 非空）——已供给实例的 `/setup` 对所有人锁门，向导仅服务真正未配置的部署（connect 空 DB_URL，已登录管理员可续配）。`GET /api/setup/status` 可匿名查询
 - **金额与精度（PRD §7.3）**：金额 2 位小数、单价 3~4 位小数（均以字符串传输，避免浮点误差）；内部计算高精度，展示层截断
 - **多币种（AC-9.1）**：金额字段统一 `cost` / `totalCost` / `avgPrice` 命名，**不带货币后缀**；货币由实例配置（`/api/settings` currency）决定
 - **多车（m4e/v1.1）**：数据端点接受可选 `?carId=<int>`，缺省 = 主车（settings.primaryCarId，回退绑定车/第一辆）；`GET /api/cars` → `[{id, name}]`（按 display_priority 排序）。账本 FIFO 批次池按车隔离（A 车充电只抵 A 车行程）；电价 geofence 全局共享（TeslaMate 语义）
