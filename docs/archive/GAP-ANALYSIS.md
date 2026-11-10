@@ -1,3 +1,5 @@
+> 🗄️ **历史归档**（2026-11-10 移入）：快照类文档，现状以代码、README 与 docs/API_CONTRACT.md 为准——勿按此文件里的 checkbox/差距清单理解当前功能。
+
 # AhaTesla 差距分析（GAP-ANALYSIS）— 现有骨架 vs PRD v1.3 / API_CONTRACT v2
 
 **执行**：ahahermes（Hermes Agent）· **日期**：2026-10-14 · **对应卡**：t_c03ab81d（M0-2 差距分析）

@@ -1,7 +1,7 @@
 // dashboard + system routes.
 import {
   getCarSnapshot, getDrivingState, getSystemStats, getMonthStats, getWeekStats,
-  listCharging, listChargingForStats, resolveCarId
+  listCharging, listChargingForStats, resolveCarId, getGeofences, geofenceLabelFor
 } from "../core/teslamate-queries.mjs";
 import { listDrivesSql, listDrivesLightSql, monthStartIso } from "../core/teslamate-queries.mjs";
 import { computeTripViews } from "./trips-routes.mjs";
@@ -32,17 +32,6 @@ async function fetchAllDrivesInWindow(db, { from, to = null, carId = null }, pag
     if (page.length < pageSize) break;
   }
   return rows;
-}
-
-/** 两点方位角（正北 0°，顺时针）： TeslaMate 无 heading 列，由连续两点推导。 */
-function bearingDeg(lat1, lng1, lat2, lng2) {
-  const φ1 = (Number(lat1) * Math.PI) / 180, φ2 = (Number(lat2) * Math.PI) / 180;
-  const Δλ = ((Number(lng2) - Number(lng1)) * Math.PI) / 180;
-  if (!Number.isFinite(φ1) || !Number.isFinite(φ2) || !Number.isFinite(Δλ)) return null;
-  if (lat1 === lat2 && lng1 === lng2) return null;
-  const y = Math.sin(Δλ) * Math.cos(φ2);
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-  return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
 }
 
 export function createDashboardRoutes({ db, state }) {
@@ -79,8 +68,9 @@ export function createDashboardRoutes({ db, state }) {
       // 首读是秒级磁盘 I/O，串行 await 会把首屏拖到 8s+（实测修复）。
       const requestedCarId = carIdFromQuery(ctx, state);
       const prefetchCarId = requestedCarId ?? resolveCarId(state, null);
-      const [car0, driving0, monthStats, weekStats, driveRows, recentCharges] = await Promise.all([
+      const [car0, driving0, monthStats, weekStats, driveRows, recentCharges, geofences] = await Promise.all([
         getCarSnapshot(db).catch(() => null),
+        // 围栏表（用户自建 POI，行数极小）：位置文字解析用（顶部卡右下角）
         getDrivingState(db, { carId: prefetchCarId }).catch(() => null),
         getMonthStats(db, monthStartIso(new Date(), instanceTimezone(state)), prefetchCarId).catch(() => null),
         getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), prefetchCarId).catch(() => null),
@@ -88,7 +78,8 @@ export function createDashboardRoutes({ db, state }) {
           const { sql, params } = listDrivesSql({ carId: prefetchCarId });
           return db.query(sql, [...params, 5, 0]).catch(() => []);
         })(),
-        recentChargesViews(5, prefetchCarId).catch(() => [])
+        recentChargesViews(5, prefetchCarId).catch(() => []),
+        getGeofences(db).catch(() => [])
       ]);
       // 解析链以快照首车收口：与并发预估不一致时按最终车补拉（未绑定的多车库）
       const boundCarId = requestedCarId ?? resolveCarId(state, car0?.id ?? null);
@@ -148,8 +139,9 @@ export function createDashboardRoutes({ db, state }) {
             lat: finiteNumber(car?.lat),
             lng: finiteNumber(car?.lng),
             at: car?.position_at ? isoFromTeslaMate(car.position_at) : null,
-            // 车头朝向（0-360°，正北为 0）：最近两点方位角；仅一点/坏点为 null
-            headingDeg: bearingDeg(car?.prev_lat, car?.prev_lng, car?.lat, car?.lng)
+            // 位置文字（顶部卡右下角）：围栏命中→围栏名；1.5km 内→「XX 附近」；
+            // 均未命中为 null → 前端退回显示坐标。围栏表为用户自建 POI，量级极小。
+            label: geofenceLabelFor(geofences, finiteNumber(car?.lat), finiteNumber(car?.lng))
           } : null,
           // 充电实时信息（charging state 时有值）
           charging: driving?.state === "charging" ? {

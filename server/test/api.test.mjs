@@ -452,7 +452,7 @@ test("GET /api/system/events 返回事件日志", async () => {
 function dashboardFakeDb() {
   return createFakeDb((sql) => {
     if (/position_at/.test(sql)) {
-      return [{ id: 1, name: "My Tesla", current_battery: 55, range_km: 220.5, odometer_km: 30021, position_at: "2026-10-13 03:00:00", last_drive_at: "2026-10-13 02:58:09", lat: 24.4896, lng: 118.1046, prev_lat: 24.4890, prev_lng: 118.1030 }];
+      return [{ id: 1, name: "My Tesla", current_battery: 55, range_km: 220.5, odometer_km: 30021, position_at: "2026-10-13 03:00:00", last_drive_at: "2026-10-13 02:58:09", lat: 24.4896, lng: 118.1046 }];
     }
     if (/driving/.test(sql)) return [{ state: "asleep_or_parked" }];
     if (/drive_minutes/.test(sql)) return [{ distance_km: 800.2, drive_count: 40, drive_minutes: 1200 }];
@@ -466,6 +466,7 @@ function dashboardFakeDb() {
     }
     if (/count\(\*\)::int AS total/.test(sql) && /FROM drives/.test(sql)) return [{ total: 1 }];
     if (/FROM addresses/.test(sql)) return [{ id: 1, display_name: "家里" }, { id: 2, display_name: "公司" }];
+    if (/FROM geofences/.test(sql)) return [{ id: 1, name: "家里", lat: 24.4895, lng: 118.1045, radius: 200 }];
     if (/FROM charging_processes/.test(sql)) return [];
     return [];
   });
@@ -476,12 +477,11 @@ test("GET /api/dashboard 汇总", async () => {
   const res = await fetchApp(app, "GET", "/api/dashboard", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 200);
   assert.equal(res.json.car.name, "My Tesla");
-  // 车辆位置（地图卡）：经纬度 + ISO 时间 + 两点推导的车头朝向；缺坐标时为 null → 前端整卡隐藏
+  // 车辆位置：经纬度 + ISO 时间 + 围栏解析的位置文字（顶部卡右下角）；缺坐标时为 null
   assert.equal(res.json.car.position.lat, 24.4896);
   assert.equal(res.json.car.position.lng, 118.1046);
   assert.equal(res.json.car.position.at, "2026-10-13T03:00:00.000Z");
-  // prev(24.4890,118.1030) → cur(24.4896,118.1046)：东偏北 ≈ 65°（±3 容差）
-  assert.ok(Math.abs(res.json.car.position.headingDeg - 65) <= 3, `headingDeg=${res.json.car.position.headingDeg}`);
+  assert.equal(res.json.car.position.label, "家里"); // fixture 围栏半径 200m 覆盖定位点
   assert.equal(res.json.car.currentBattery, 55);
   assert.equal(res.json.car.state, "asleep_or_parked");
   assert.equal(res.json.monthStats.driveCount, 40);

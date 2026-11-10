@@ -8,12 +8,12 @@ import {
   Coins,
   Flame,
   Gauge,
+  MapPin,
   Route,
   Sparkles,
   TrendingDown,
 } from 'lucide-react'
 import { api } from '@/api/client'
-import { CarLocationCard } from '@/components/CarLocationCard'
 import { PageHeader } from '@/components/PageHeader'
 import { SkeletonCards, SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
@@ -96,10 +96,9 @@ export default function DashboardPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* P2 模块1：车辆状态 + 位置一体卡（TeslaMate 概览卡式：左紧凑信息列，右地图填满；
-              电量改细横条不再占半版；无定位数据的旧库自动退化为纯信息卡） */}
-          <section className="glass-card fade-up overflow-hidden p-0 lg:grid lg:grid-cols-[240px_1fr]" data-testid="car-card">
-            <div className="flex flex-col justify-center gap-3 p-4 lg:border-r lg:border-white/[0.06]">
+          {/* P2 模块1：车辆状态卡（紧凑单列：电量细横条；右下角位置文字 = 围栏名/附近/坐标兜底） */}
+          <section className="glass-card fade-up p-4" data-testid="car-card">
+            <div className="flex flex-col justify-center gap-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
                   <Car className="h-4 w-4 shrink-0 text-tesla" />
@@ -126,17 +125,21 @@ export default function DashboardPage() {
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-400">
-                <span>{t('dash.odometer', '总里程')} <span className="num text-slate-300">{fmtKm(car!.odometerKm, 0)} km</span></span>
+              <div className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="shrink-0 text-slate-400">{t('dash.odometer', '总里程')} <span className="num text-slate-300">{fmtKm(car!.odometerKm, 0)} km</span></span>
+                {/* 右下角位置信息：围栏名/「XX 附近」/坐标兜底 + 定位时间；无定位数据整行退化为仅里程 */}
+                {car?.position ? (
+                  <span className="flex min-w-0 items-center gap-1 text-slate-400" data-testid="car-position" title={car.position.label ?? undefined}>
+                    <MapPin className="h-3 w-3 shrink-0 text-tesla" />
+                    <span className="truncate">
+                      {car.position.label ?? `${car.position.lat.toFixed(4)}, ${car.position.lng.toFixed(4)}`}
+                    </span>
+                    {car.position.at && <span className="shrink-0 text-slate-500">· {new Date(car.position.at).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+                  </span>
+                ) : null}
               </div>
               {car && <div className="text-[11px] text-slate-500">{t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}</div>}
             </div>
-            {/* 地图列：有定位才占位（lg:grid 两列布局下 null 会让信息列独占） */}
-            {car?.position ? (
-              <div className="min-h-56 lg:min-h-[224px]">
-                <CarLocationCard position={car.position} state={car.state} />
-              </div>
-            ) : null}
           </section>
 
           {/* P2 模块3：本月账本汇总（构成小字：含行驶 ¥X · 驻车/哨兵 ¥Y） */}

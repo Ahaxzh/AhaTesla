@@ -1,3 +1,5 @@
+> 🗄️ **历史归档**（2026-11-10 移入）：快照类文档，现状以代码、README 与 docs/API_CONTRACT.md 为准——勿按此文件里的 checkbox/差距清单理解当前功能。
+
 # M0 骨架验证报告
 
 **执行**：ahahermes（Hermes Agent）· **日期**：2026-10-14 · **环境**：Ubuntu-Core (.3)，Node 22，真 TeslaMate 库（只读桥接 127.0.0.1:15432）
