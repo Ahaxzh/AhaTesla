@@ -356,7 +356,9 @@ describe('SetupPage 向导', () => {
       http.post('/api/setup/auto-ro', () =>
         HttpResponse.json({
           ok: true,
-          dsn: 'postgres://ahatesla_ro:ro-pass-9@127.0.0.1:5432/teslamate',
+          // 后端契约（API_CONTRACT §1）：dsn 密码段是掩码 ***，一次性明文单独在 password
+          dsn: 'postgres://ahatesla_ro:***@127.0.0.1:5432/teslamate',
+          password: 'one-time-ro-pass',
         }),
       ),
     )
@@ -368,7 +370,8 @@ describe('SetupPage 向导', () => {
     await user.click(screen.getByTestId('auto-ro-button'))
     await waitFor(() => {
       expect((screen.getByLabelText('用户名（只读账号）') as HTMLInputElement).value).toBe('ahatesla_ro')
-      expect((screen.getByLabelText('密码') as HTMLInputElement).value).toBe('ro-pass-9')
+      // 明文来自响应的 password 字段而非 dsn 里的掩码 —— 此前回填 ***，「测试并验证」必挂 auth
+      expect((screen.getByLabelText('密码') as HTMLInputElement).value).toBe('one-time-ro-pass')
     })
     expect(await screen.findByText(/只读账号已创建/)).toBeInTheDocument()
     expect(screen.getByTestId('auto-ro-button')).toHaveTextContent('已创建')
@@ -405,6 +408,58 @@ describe('SetupPage 向导', () => {
     await user.click(screen.getByTestId('auto-ro-done'))
     await waitFor(() => expect(screen.queryByTestId('auto-ro-sql')).not.toBeInTheDocument())
     expect(screen.getByTestId('auto-ro-button')).toHaveTextContent('已创建')
+  })
+
+  it('setup-locked 且已登录 → 恢复向导直接进入 Step2（数据源），不再踢回登录页', async () => {
+    server.use(
+      http.get('/api/setup/status', () =>
+        HttpResponse.json({ state: 'setup-locked', https: false, carFound: false }),
+      ),
+    )
+    http.get('/api/auth/me', () =>
+      HttpResponse.json({ user: { username: 'eli', role: 'admin' } }),
+    )
+    server.use(
+      http.get('/api/auth/me', () =>
+        HttpResponse.json({ user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    renderSetupRouter()
+    // 此前刷新即被 Navigate 踢回 /login 且无任何恢复入口（向导死角）
+    expect(await screen.findByTestId('setup-datasource')).toBeInTheDocument()
+    expect(screen.queryByTestId('setup-admin-form')).not.toBeInTheDocument()
+  })
+
+  it('Step2 模式B：车辆发现超时 → 出现重试按钮，点击重新轮询（不再永久卡死）', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/setup/admin', () =>
+        HttpResponse.json({ ok: true, user: { username: 'eli', role: 'admin' } }),
+      ),
+    )
+    server.use(http.post('/api/setup/datasource', () => HttpResponse.json({ ok: true })))
+    server.use(
+      http.get('/api/setup/car-discovery', () =>
+        HttpResponse.json({ found: false, cars: [], car: null, suggestedCarId: null }),
+      ),
+    )
+    await renderSetupReady()
+    await registerAdmin(user)
+    await user.click(screen.getByTestId('setup-mode-fullstack'))
+    await user.click(screen.getByTestId('setup-save-datasource'))
+    expect(screen.getByTestId('setup-discovery-polling')).toBeInTheDocument()
+    // 超时判定基于 Date.now()：轮询已启动（startedAt 已捕获），把时钟拨快 61s，
+    // 下一个 2s tick 即触发超时——真实计时器保持不变（fake timers 会挂死 userEvent）
+    const shifted = Date.now() + 61_000
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(shifted)
+    const timeoutEl = await screen.findByTestId('setup-discovery-timeout', {}, { timeout: 4000 })
+    expect(timeoutEl).toBeInTheDocument()
+    expect(screen.getByTestId('setup-discovery-retry')).toBeInTheDocument()
+    // 点击重试 → 新窗口从当前（拨快后的）时钟起算：轮询提示恢复、超时区收起
+    await user.click(screen.getByTestId('setup-discovery-retry'))
+    expect(screen.queryByTestId('setup-discovery-timeout')).not.toBeInTheDocument()
+    expect(screen.getByTestId('setup-discovery-polling')).toBeInTheDocument()
+    nowSpy.mockRestore()
   })
 
   it('Step2 模式B：Tesla 登录引导卡与链接指向当前主机:4000（m4a 轨道A）', async () => {

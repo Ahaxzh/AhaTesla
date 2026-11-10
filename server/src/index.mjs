@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
-import { loadSecretKey, dataDir } from "./core/secret-box.mjs";
+import { loadSecretKey, dataDir, decryptSecret } from "./core/secret-box.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,7 +51,7 @@ import { listDrivesSql, listChargingForStats } from "./core/teslamate-queries.mj
 import { enrichTripEndEvent, enrichChargingDoneEvent, enrichChargingStartEvent } from "./core/event-enrichment.mjs";
 
 const PORT = Number(process.env.PORT) || 18500;
-const DB_URL = process.env.DB_URL || "postgres://teslamate@127.0.0.1:15432/teslamate";
+const DB_URL = process.env.DB_URL || ""; // 空 = 由 main() 内 resolveDbUrl 按 state.datasource 解析
 // MQTT 可选增强（§7.1）：仅显式配置 MQTT_URL 时启用；默认不配置（纯轮询基线）。
 const MQTT_URL = process.env.MQTT_URL || "";
 
@@ -105,7 +105,7 @@ export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null
 // 路由注册统一入口：buildApp 与 main() 重建路由共用，避免两份清单漂移。
 function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const auth = createAuthRoutes({ state, getSecret, eventLog });
-  const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog, currentDbUrl: process.env.DB_URL });
+  const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog, currentDbUrl: process.env.DB_URL }); // db.retarget 由 saveDatasource 注入下方
   const trips = createTripsRoutes({ db, state });
   const charging = createChargingRoutes({ db, state, getStore });
   const pricing = createPricingRoutes({ db, state, getStore });
@@ -264,13 +264,32 @@ async function startMqtt({ monitor, eventLog, loop }) {
 
 // ---- main --------------------------------------------------------------------
 
+// 数据源解析顺序：env DB_URL（compose/裸机显式配置，process env 优先）→ 向导保存的
+// connect 数据源（state.datasource，密码 AES-GCM 加密落库）→ 本机开发回落地址。
+// 此前 DB_URL 留空直接回落作者本机桥接死地址，向导存好的凭据无人消费 —— 容器用户按
+// README「DB_URL 留空交给向导」操作会四级校验全绿但永远无数据。
+function resolveDbUrl(state) {
+  if (process.env.DB_URL) return process.env.DB_URL;
+  try {
+    const ds = state?.datasource;
+    if (ds?.mode === "connect" && ds.configured && ds.host && ds.user && ds.passwordEnc) {
+      const dsn = `postgres://${encodeURIComponent(ds.user)}:${encodeURIComponent(decryptSecret(ds.passwordEnc))}@${ds.host}:${ds.port || 5432}/${ds.database || "teslamate"}`;
+      log(`datasource: using saved setup config (${ds.user}@${ds.host}:${ds.port || 5432}/${ds.database || "teslamate"})`);
+      return dsn;
+    }
+  } catch (error) {
+    log("datasource: saved config unreadable, falling back:", error.message);
+  }
+  return "postgres://teslamate@127.0.0.1:15432/teslamate";
+}
+
 async function main() {
   const startedAt = Date.now();
   const state = await bootstrap();
   // §7.1 事件日志落 SQLite（进程重启可回看）；getStore 顺带完成 JSON→SQLite 一次性迁移。
   const eventLog = createEventLog({ store: getStore() });
   // AHATESLA_DEMO=1：不连 TeslaMate 库，全部查询由确定性种子数据应答（m4d 演示模式）
-  const db = isDemo() ? createDemoDb() : createDb(DB_URL);
+  const db = isDemo() ? createDemoDb() : createDb(resolveDbUrl(state));
   if (isDemo()) log("DEMO MODE — AHATESLA_DEMO=1：数据为合成演示数据，未连接任何 TeslaMate 库");
 
   // 实例设置（GA-36）：货币/单位/时区/油车基准 —— kv 持久化，启动时恢复进 state

@@ -27,6 +27,7 @@
 - `POST /api/setup/test-connection` {host, port=5432, database="teslamate", user, password} → {steps:[{name:"reachability"|"auth"|"readonly"|"cars", ok, detail}]}
   - readonly 步 = **元数据探测**：`SELECT has_table_privilege(current_user,'public.drives','INSERT,UPDATE,DELETE,TRUNCATE') OR has_schema_privilege(current_user,'public','CREATE')`，返回 true 即危险配置（ok:false，要求降级只读账号，AC-2.4）；**严禁 CREATE/INSERT 实写探测**；连接池每 Session 初始化强制 `SET default_transaction_read_only = on`
 - `POST /api/setup/datasource` {mode:"connect"|"fullstack", ...连接参数} → {ok}（连接信息 AES-GCM 加密存 SQLite）
+  - connect 模式保存时**立即重建主查询池**（db.retarget：新池 ping 通过才切换，失败 400 `datasource_unreachable` 且连接不保存）；进程重启时启动链 = env `DB_URL` > 向导保存的 connect 数据源（state.datasource 解密重组 DSN）> 本机开发回落地址 —— 此前向导存好的凭据无运行时消费者（容器用户按「DB_URL 留空交给向导」部署后主池回落死地址），已修复
 - `GET /api/setup/car-discovery`（管理员）→ {found, car:{id,name,model}|null}（前端 2s 轮询，AC-2.3 的 60 秒发现）
 - `POST /api/setup/probe-discovery`（管理员）→ {candidates:[{host, port, reachable}]}（m4a 轨道 B：容器服务名/网关 + `AHATESLA_PROBE_HOSTS` env 展开 + 已配 DB_URL 目标，800ms TCP 探测，只报可达性不猜库名）
 - `POST /api/setup/auto-ro`（管理员）{host, port=5432, database="teslamate", adminUser, adminPassword} → 成功 {ok:true, dsn:"postgres://ahatesla_ro:***@host:port/db", password}（一次性明文仅此返回）；失败 {ok:false, stage:"auth"|"permission"|"verify", error, fallbackSql?} —— adminPassword 仅内存使用绝不落盘/入日志；permission 失败附可复制执行的 fallbackSql；RO 建号幂等（角色存在只改密码）

@@ -151,7 +151,7 @@ export const api = {
   setupProbeDiscovery: () =>
     post<{ candidates: { host: string; port: number; source: string }[] }>('/api/setup/probe-discovery', {}),
   setupAutoRo: (payload: { host: string; port: number; database: string; user: string; password: string }) =>
-    post<{ ok: true; dsn: string } | { ok: false; stage: string; error: string; fallbackSql: string }>('/api/setup/auto-ro', payload),
+    post<{ ok: true; dsn: string; password: string } | { ok: false; stage: string; error: string; fallbackSql: string }>('/api/setup/auto-ro', payload),
 
   // ---- m4e 车辆 ----
   cars: () => get<CarInfo[]>('/api/cars'),

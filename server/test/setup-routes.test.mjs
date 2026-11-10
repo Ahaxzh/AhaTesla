@@ -538,3 +538,49 @@ test("POST /api/setup/auto-ro 路由挂接：注入假池走通成功路径并�
   assert.ok(!JSON.stringify(evt).includes("one-shot"), "日志不含管理凭据");
   assert.equal(evt.data.host, "db");
 });
+
+// ---- saveDatasource 运行时接线（GA 修复：向导保存即切换主查询池）--------------------
+
+test("saveDatasource connect：先 retarget 成功再落盘；retarget 失败不保存且报 400", async () => {
+  const calls = [];
+  const okDb = { retarget: async (dsn) => calls.push(dsn), query: async () => [] };
+  const { app, state, saved } = buildSetupApp({ db: okDb });
+
+  const res = await fetchApp(app, "POST", "/api/setup/datasource", {
+    cookie: adminCookie(),
+    body: { mode: "connect", host: "db.internal", port: 5433, database: "teslamate", user: "ahatesla_ro", password: "ro-pass" },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.ok, true);
+  // retarget 收到完整 DSN（URL 编码）；密码已加密落 state，不存明文
+  assert.deepEqual(calls, ["postgres://ahatesla_ro:ro-pass@db.internal:5433/teslamate"]);
+  assert.equal(state.datasource.host, "db.internal");
+  assert.equal(state.datasource.port, 5433);
+  assert.ok(state.datasource.passwordEnc && !JSON.stringify(state.datasource).includes("ro-pass"), "明文密码不落盘");
+  assert.equal(saved.length, 1, "retarget 成功后才落盘");
+
+  // retarget 失败：400 + 连接未保存（原 state.datasource 保持 null）
+  const badDb = { retarget: async () => { throw new Error("ECONNREFUSED"); } };
+  const app2 = buildSetupApp({ db: badDb });
+  const res2 = await fetchApp(app2.app, "POST", "/api/setup/datasource", {
+    cookie: adminCookie(),
+    body: { mode: "connect", host: "bad", port: 5432, database: "teslamate", user: "u", password: "p" },
+  });
+  assert.equal(res2.status, 400);
+  assert.equal(res2.json.error.code, "datasource_unreachable");
+  assert.equal(app2.state.datasource, null, "失败时数据源未写入");
+  assert.equal(app2.saved.length, 0, "失败时不落盘");
+});
+
+test("saveDatasource fullstack：不 retarget（沿用 env DB 连接），仅落盘", async () => {
+  const calls = [];
+  const db = { retarget: async (dsn) => calls.push(dsn), query: async () => [] };
+  const { app, state } = buildSetupApp({ db });
+  const res = await fetchApp(app, "POST", "/api/setup/datasource", {
+    cookie: adminCookie(),
+    body: { mode: "fullstack" },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, [], "fullstack 不触发 retarget");
+  assert.equal(state.datasource.mode, "fullstack");
+});

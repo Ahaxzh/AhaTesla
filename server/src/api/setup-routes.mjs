@@ -439,12 +439,24 @@ export function createSetupRoutes({
     },
 
     // POST /api/setup/datasource —— 管理员；保存连接（密码 AES-GCM 加密）。
+    // connect 模式保存后立即把主查询池切到新数据源（db.retarget）——
+    // 此前保存的凭据无任何运行时消费者：容器用户按 README「DB_URL 留空交给向导」
+    // 操作时主池回落死地址，校验全绿但仪表盘永远无数据。
+    // 顺序：先 retarget（新池 ping 通过才切换，失败保留原池）→ 再落盘。
     async saveDatasource(ctx) {
       requireAdmin(ctx);
       const { mode, host, port, database, user, password, carId } = ctx.body || {};
       if (mode !== "connect" && mode !== "fullstack") throw new HttpError(400, "bad_request", "mode 必须为 connect 或 fullstack");
       if (mode === "connect") {
         if (!host || !user || !password) throw new HttpError(400, "bad_request", "host / user / password required");
+        const dsn = `postgres://${encodeURIComponent(String(user))}:${encodeURIComponent(String(password))}@${String(host)}:${Number(port) || 5432}/${String(database || "teslamate")}`;
+        if (db?.retarget) {
+          try {
+            await db.retarget(dsn);
+          } catch (error) {
+            throw new HttpError(400, "datasource_unreachable", `数据源切换失败，连接未保存：${error.message}`);
+          }
+        }
         state.datasource = {
           mode,
           host: String(host),

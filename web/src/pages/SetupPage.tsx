@@ -34,7 +34,7 @@ type Mode = 'connect' | 'fullstack'
 export default function SetupPage() {
   const navigate = useNavigate()
   const { t } = useI18n()
-  const { refresh } = useAuth()
+  const { refresh, user } = useAuth()
   const [step, setStep] = useState(1)
   const [setupState, setSetupState] = useState<SetupState | null>(null)
 
@@ -48,8 +48,14 @@ export default function SetupPage() {
     if (statusQuery.data) setSetupState(statusQuery.data.state)
   }, [statusQuery.data])
 
-  // 已初始化（管理员已建）→ /setup 锁定（AC-1.4），跳回登录/首页
-  if (setupState && setupState !== 'uninitialized' && step === 1) {
+  // setup_locked（管理员已建但数据源未配置）且已登录 → 恢复向导：从 Step2（数据源）
+  // 进入。此前刷新即被踢回登录页、登录后无任何数据源入口 —— 向导中断用户无路可走。
+  useEffect(() => {
+    if (setupState === 'setup-locked' && user && step === 1) setStep(2)
+  }, [setupState, user, step])
+
+  // 已初始化完成（ready）或未登录的 setup_locked → /setup 锁定（AC-1.4），跳回登录
+  if (setupState === 'ready' || (setupState === 'setup-locked' && !user && step === 1)) {
     return <Navigate to="/login" replace />
   }
 
@@ -215,6 +221,7 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [discovery, setDiscovery] = useState<CarDiscoveryResult | null>(null)
+  const [discoveryTimedOut, setDiscoveryTimedOut] = useState(false)
   const [selectedCarId, setSelectedCarId] = useState<number | null>(null)
   const discoveryTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -273,6 +280,9 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
       })
       if (r.ok) {
         applyDsn(r.dsn)
+        // 后端 dsn 字段的密码段是掩码 ***（不回传明文），一次性明文在 password 字段
+        // —— 此前直接回填掩码，「测试并验证」必挂 auth，用户被没输过的密码卡死。
+        if (r.password) setPassword(r.password)
         setRoDone(true)
         toast('只读账号已创建，连接信息已填入下方表单', 'success')
       } else {
@@ -298,6 +308,8 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
   const canSubmit = mode === 'fullstack' || (host.trim() && user.trim() && password)
 
   // 车辆发现轮询（AC-2.3/4.3：60s 内发现；2s 间隔）
+  // 超时不再静默停轮询（spinner 永转 + 下一步永久禁用）：置 discoveryTimedOut，
+  // UI 给「重新等待」按钮重置状态并再次 startDiscovery —— Tesla OAuth 授权常超 60s。
   const startDiscovery = useCallback(() => {
     if (discoveryTimer.current) return
     const startedAt = Date.now()
@@ -312,12 +324,19 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
         } else if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
           if (discoveryTimer.current) clearInterval(discoveryTimer.current)
           discoveryTimer.current = null
+          setDiscoveryTimedOut(true)
         }
       } catch {
         /* 继续轮询直至超时 */
       }
     }, POLL_INTERVAL_MS)
   }, [])
+
+  const restartDiscovery = useCallback(() => {
+    setDiscoveryTimedOut(false)
+    setDiscovery(null)
+    startDiscovery()
+  }, [startDiscovery])
 
   useEffect(() => () => {
     if (discoveryTimer.current) clearInterval(discoveryTimer.current)
@@ -595,6 +614,14 @@ function Step2Datasource({ onDone }: { onDone: () => void }) {
               <CircleDashed className="h-4 w-4 animate-spin text-tesla" />
               {t('setup.tesla.waiting', '正在等待车辆出现（TeslaMate 完成授权后自动发现）…')}
             </p>
+          )}
+          {saved && discoveryTimedOut && !discovery?.found && (
+            <div className="flex items-center gap-3 text-sm text-amber-400" data-testid="setup-discovery-timeout">
+              <span>{t('setup.tesla.timeout', '已等待超过 1 分钟仍未发现车辆——首次 Tesla 授权常需更久；确认已在 TeslaMate 完成登录后可重新等待。')}</span>
+              <button type="button" className="btn-mini" data-testid="setup-discovery-retry" onClick={restartDiscovery}>
+                {t('setup.tesla.retry', '重新等待')}
+              </button>
+            </div>
           )}
         </div>
       )}
