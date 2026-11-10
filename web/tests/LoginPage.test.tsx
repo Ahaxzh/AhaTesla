@@ -4,6 +4,8 @@ import { screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { server } from './msw'
 import LoginPage from '@/pages/LoginPage'
+import { LoginRoute } from '@/App'
+import { Routes, Route } from 'react-router-dom'
 import { renderWithProviders } from './test-utils'
 
 beforeAll(() => server.listen())
@@ -76,5 +78,47 @@ describe('LoginPage', () => {
     expect(pwd.type).toBe('text')
     await user.click(screen.getByRole('button', { name: '隐藏密码' }))
     expect(pwd.type).toBe('password')
+  })
+})
+
+describe('LoginRoute 路由分流', () => {
+  it('实例未初始化 → /login 重定向 /setup 向导（新用户不再看到死登录框）', async () => {
+    server.use(
+      http.get('/api/auth/me', () =>
+        HttpResponse.json({ error: { code: 'UNAUTHORIZED', message: '未登录' } }, { status: 401 }),
+      ),
+      http.get('/api/setup/status', () =>
+        HttpResponse.json({ state: 'uninitialized', https: false, carFound: false }),
+      ),
+    )
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginRoute />} />
+        <Route path="/setup" element={<div data-testid="setup-admin-form">wizard</div>} />
+      </Routes>,
+      { route: '/login' },
+    )
+    await waitFor(() => expect(screen.getByTestId('setup-admin-form')).toBeInTheDocument())
+    expect(screen.queryByTestId('login-card')).not.toBeInTheDocument()
+  })
+
+  it('实例已就绪（setup-locked/ready）→ 停留登录页', async () => {
+    server.use(
+      http.get('/api/auth/me', () =>
+        HttpResponse.json({ error: { code: 'UNAUTHORIZED', message: '未登录' } }, { status: 401 }),
+      ),
+      http.get('/api/setup/status', () =>
+        HttpResponse.json({ state: 'ready', https: true, carFound: true }),
+      ),
+    )
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginRoute />} />
+        <Route path="/setup" element={<div data-testid="setup-admin-form">wizard</div>} />
+      </Routes>,
+      { route: '/login' },
+    )
+    expect(await screen.findByTestId('login-card')).toBeInTheDocument()
+    expect(screen.queryByTestId('setup-admin-form')).not.toBeInTheDocument()
   })
 })

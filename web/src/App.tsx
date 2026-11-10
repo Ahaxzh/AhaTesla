@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, type ReactNode } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { AppLayout } from './layouts/AppLayout'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { api } from './api/client'
 
 // 路由级代码分割：每页独立 chunk,首屏只拉当前页(leaflet 等重组件只随用到的页面加载)。
 // chunk 加载失败(如 PWA SW 缓存了旧 index.html 引用已过期 hash)由各路由的
@@ -82,10 +84,14 @@ function Protected({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** §6.2 路由树：/login 已登录 → 重定向 / */
-function LoginRoute() {
+/** §6.2 路由树：/login 已登录 → /；实例未初始化（无管理员）→ /setup 向导。
+ *  此前 / 只认登录态：全新实例打开首页是死登录框（无任何向导提示），
+ *  与 README「打开 :18500 → 向导」承诺不符 —— 首位真实新用户实测踩中。 */
+export function LoginRoute() {
   const { user, initialized } = useAuth()
+  const statusQuery = useQuery({ queryKey: ['setup-status'], queryFn: api.setupStatus, staleTime: 0 })
   if (initialized && user) return <Navigate to="/" replace />
+  if (statusQuery.data?.state === 'uninitialized') return <Navigate to="/setup" replace />
   return <LoginPage />
 }
 
