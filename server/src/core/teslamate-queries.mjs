@@ -38,6 +38,7 @@ export async function getCarSnapshot(db, { carId = null } = {}) {
            pos.ideal_battery_range_km AS range_km,
            pos.odometer AS odometer_km,
            pos.date AS position_at,
+           pos.lat, pos.lng,
            (SELECT max(d.end_date) FROM drives d WHERE d.car_id = c.id AND d.end_date IS NOT NULL) AS last_drive_at
     FROM cars c
     ${filter}

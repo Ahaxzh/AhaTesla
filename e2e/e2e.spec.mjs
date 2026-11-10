@@ -36,12 +36,10 @@ test("总览页：车辆状态卡、本月账本卡、24h时间轴、热力图",
   await page.waitForSelector("[data-testid='timeline-card']", { timeout: 10000 });
   // v2.1 P2：用车热力图
   await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
-  // 车辆位置地图卡（有定位数据的库才渲染；真 leaflet 高德瓦片）
-  const locCard = page.getByTestId("car-location-card");
-  if (await locCard.isVisible().catch(() => false)) {
-    await expect(page.getByTestId("car-location-map")).toBeVisible();
-    await expect(page.getByTestId("car-location-state")).toBeVisible();
-  }
+  // 车辆位置地图卡：测试库有定位数据 → 必须渲染（曾因外层 SELECT 漏列静默隐藏，条件断言放过）
+  await expect(page.getByTestId("car-location-card")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("car-location-map")).toBeVisible();
+  await expect(page.getByTestId("car-location-state")).toBeVisible();
 });
 
 test("行程页：列表加载、分页、详情路线", async ({ page }) => {
