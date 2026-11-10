@@ -1,7 +1,7 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { Routes, Route } from 'react-router-dom'
 import { AppLayout, NAV_ITEMS, SIDEBAR_ITEMS } from '@/layouts/AppLayout'
 import { renderWithProviders } from './test-utils'
 import { server } from './msw'
@@ -34,7 +34,7 @@ describe('AppLayout 响应式导航', () => {
     await userEvent.click(screen.getByTestId('user-menu-button'))
     const menu = screen.getByTestId('user-menu')
     expect(menu).toBeInTheDocument()
-    expect(screen.getByTestId('user-menu-password')).toBeInTheDocument()
+    expect(screen.getByTestId('user-menu-account-link')).toBeInTheDocument()
     expect(screen.getByTestId('user-menu-logout')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-car')).toBeInTheDocument()
     // m4e:默认 mock 两辆车 → 切换 chips 渲染且可点选
@@ -87,54 +87,20 @@ describe('UserMenu 快捷开关与账户面板', () => {
     expect(langBtn.textContent).toContain('中文')
   })
 
-  it('账户面板：改用户名走 /api/auth/change-password，成功后刷新用户名', async () => {
+  it('账户安全入口：点击跳转设置页锚点（完整编辑唯一入口在设置→账户安全）', async () => {
     const user = userEvent.setup()
-    let captured: Record<string, unknown> | null = null
-    server.use(
-      http.post('/api/auth/change-password', async ({ request }) => {
-        captured = await request.json() as Record<string, unknown>
-        return HttpResponse.json({ ok: true, user: { username: 'eli' } })
-      }),
-      http.get('/api/auth/me', () =>
-        HttpResponse.json({ username: 'aha', initialized: true })),
+    renderWithProviders(
+      <Routes>
+        <Route path="/" element={<AppLayout />}>
+          <Route index element={<div data-testid="home-route" />} />
+          <Route path="settings" element={<div data-testid="settings-route" />} />
+        </Route>
+      </Routes>,
     )
-    renderWithProviders(<AppLayout />)
-    await userEvent.click(screen.getByTestId('user-menu-button'))
-    await user.click(screen.getByTestId('user-menu-password'))
-    const panel = await screen.findByTestId('user-menu-account-panel')
-    expect(panel).toBeInTheDocument()
-    await user.clear(screen.getByLabelText(/用户名|Username/i))
-    await user.type(screen.getByLabelText(/用户名|Username/i), 'eli')
-    await user.type(screen.getByLabelText(/当前密码|Current password/i), 'password-123')
-    await user.click(screen.getByTestId('user-menu-account-save'))
-    // 请求体带 newUsername，不带 newPassword（留空只改名）；成功后面板收起
-    await vi.waitFor(() => {
-      expect(captured).not.toBeNull()
-      expect(captured?.newUsername).toBe('eli')
-      expect(captured?.newPassword).toBeUndefined()
-    })
-    await vi.waitFor(() => {
-      expect(screen.queryByTestId('user-menu-account-panel')).not.toBeInTheDocument()
-    })
-  })
-
-  it('两次新密码不一致被前端拦截，不发请求', async () => {
-    const user = userEvent.setup()
-    let fired = 0
-    server.events.on('request:start', (req) => {
-      if (req.request.url.includes('/api/auth/change-password')) fired += 1
-    })
-    renderWithProviders(<AppLayout />)
-    await userEvent.click(screen.getByTestId('user-menu-button'))
-    await user.click(screen.getByTestId('user-menu-password'))
-    await screen.findByTestId('user-menu-account-panel')
-    await user.type(screen.getByLabelText(/当前密码|Current password/i), 'password-123')
-    await user.type(screen.getByLabelText(/^(新密码|New password)$/i), 'newpass999')
-    await user.type(screen.getByLabelText(/(确认新密码|Confirm new password)/i), 'different')
-    await user.click(screen.getByTestId('user-menu-account-save'))
-    await vi.waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toMatch(/不一致|do not match/)
-    })
-    expect(fired).toBe(0)
+    await user.click(screen.getByTestId('user-menu-button'))
+    await user.click(screen.getByTestId('user-menu-account-link'))
+    expect(await screen.findByTestId('settings-route')).toBeInTheDocument()
+    // 点击后菜单收起
+    expect(screen.queryByTestId('user-menu')).not.toBeInTheDocument()
   })
 })
