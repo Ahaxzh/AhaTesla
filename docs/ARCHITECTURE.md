@@ -2,6 +2,8 @@
 
 > 记账与行程边界算法的设计灵感来自 [manwithshit/tesla-butler](https://github.com/manwithshit/tesla-butler)；本项目按自有规格（docs/PRD.md / docs/API_CONTRACT.md）独立实现，并移植到 Ubuntu Server + Web 化。飞书推送 + Web/PWA 双通道。
 
+> ℹ️ 部署形态已演进：发行版走 deploy/fullstack-compose.yml（全栈）与 deploy/connect-compose.yml（挂入现有 teslamate 网络，直连容器名，无需 socat 桥）。下方 socat 桥接图保留为**裸机开发模式**参考。
+
 ## 架构（参考 AhaSlit 前后端分离模式）
 
 ```
@@ -13,7 +15,7 @@
              │ socat 桥接容器（唯一新增基础设施）
              │ 127.0.0.1:15432→DB  127.0.0.1:1883→MQTT
 ┌────────────┴───────────────────────────────┐
-│ server/  Node 22 ESM，端口 18500           │
+│ server/  Node 26 ESM，端口 18500           │
 │  ├─ core/  核心领域逻辑（自有实现）        │
 │  │   trip-monitor 行程边界 · pricing-       │
 │  │   ledger 电价批次 · feishu 飞书推送      │

@@ -26,7 +26,7 @@ AhaTesla 基于 [TeslaMate](https://github.com/teslamate-org/teslamate) 采集�
 | 💰 月度账单 | 里程 / 电费 / 油车对比、驻车哨兵损耗、行驶/驻车费用构成 |
 | 📊 仪表盘 | 24h 状态时间轴、用车热力图、语义化车辆状态卡(行驶/充电/哨兵/睡眠) |
 | 📄 报告推送 | 每日早报(昨日汇总 + 上周同日对比 + 异常提醒)、周报/月报(归档不可变快照) |
-| 🔔 多渠道推送 | Web Push(iPhone PWA 可收)/ Telegram / 飞书,6 事件 × 3 渠道独立矩阵;可选接入 OpenAI 兼容模型润色文案 |
+| 🔔 多渠道推送 | Web Push(iPhone PWA 可收)/ Telegram / 飞书 / 企业微信 / ntfy / Bark,9 事件 × 6 渠道独立矩阵;可选接入 OpenAI 兼容模型润色文案 |
 | 🌓 界面 | 明暗主题(跟随系统/浅色/深色)· 中英双语 |
 | 📱 Web / PWA | iPhone 添加到主屏幕,移动优先,深色科技风 UI |
 | 🔐 认证 | 单用户 JWT 双 Token(Access 24h + Refresh 30d)+ httpOnly cookie,scrypt 哈希,失败锁定 |
@@ -41,7 +41,7 @@ AhaTesla 基于 [TeslaMate](https://github.com/teslamate-org/teslamate) 采集�
 ```bash
 git clone https://github.com/Ahaxzh/AhaTesla.git && cd AhaTesla
 
-# 1. 生成并填入 2 个密钥(文件里附了可直接复制的生成命令)
+# 1. 生成并填入 3 个密钥(文件里附了可直接复制的生成命令,全部必填)
 cp deploy/.env.example.fullstack deploy/.env && vim deploy/.env
 
 # 2. 拉起全套(AhaTesla + TeslaMate + PostgreSQL + Mosquitto)
@@ -51,8 +51,12 @@ docker compose -f deploy/fullstack-compose.yml --profile fullstack up -d
 然后浏览器完成初始化(约 3 分钟):
 
 1. 打开 `http://<部署机IP>:18500` → 注册管理员(第一位注册即管理员)
-   - 远程主机部署时 18500/4000 默认只绑 127.0.0.1:18500 走 NPM HTTPS 反代对外(见 [NPM-SETUP.md](deploy/NPM-SETUP.md));
-     4000 是 TeslaMate 无密码管理页(可下发车辆指令),**严禁**直接映射公网 —— 远程访问用 SSH 隧道 `ssh -L 4000:127.0.0.1:4000 <主机>`
+   - 18500/4000 默认只绑 `127.0.0.1`(不暴露局域网/公网)。**浏览器不在部署机上时**,三选一:
+     ① SSH 隧道 `ssh -L 18500:127.0.0.1:18500 <主机>`(4000 同理,下一步要用);
+     ② 部署机本机浏览器直接打开;
+     ③ 改 compose 端口映射绑内网网卡(如 `192.168.31.3:18500:18500`,仅局域网可达,对外仍走反代)。
+     4000 是 TeslaMate 无密码管理页(可下发车辆指令),**严禁**直接映射公网 —— 远程访问只用 SSH 隧道
+     `ssh -L 4000:127.0.0.1:4000 <主机>` 或带认证的反代;对外 HTTPS 反代见 [NPM-SETUP.md](deploy/NPM-SETUP.md)
 2. 向导会引导你打开 `http://<部署机IP>:4000`,用**特斯拉账号**登录 TeslaMate(全栈版唯一需要出向导的一步,登录完回到 AhaTesla 等车出现即可)
 3. 车辆确认 → 账本/推送渠道(可跳过)→ 完成,仪表盘开始出数据
 
@@ -108,7 +112,7 @@ AHATESLA_DEMO=1 PORT=18590 node server/src/index.mjs
 ```
 Tesla(车) ←→ TeslaMate(车辆协议/Token) → PostgreSQL ←只读─ AhaTesla server(:18500)
                                                       ↘ Mosquitto MQTT(可选,事件提速)
-server/ Node 22 ESM(API + JWT + 静态托管 + 推送引擎) ← web/ React 19 + Vite + TS + Tailwind + PWA
+server/ Node ESM(API + JWT + 静态托管 + 推送引擎) ← web/ React 19 + Vite + TS + Tailwind + PWA
 ```
 
 - 对 teslamate 库**严格只读**(专用账号 + 启动时主动探测账号确无写权限)

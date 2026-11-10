@@ -21,7 +21,7 @@
 - 💰 **Monthly bill** — mileage vs. electricity vs. gas, sentry/parking drain, driving vs. parked cost split
 - 📊 **Dashboard** — 24h state timeline, usage heatmap, semantic state cards (driving / charging / sentry / asleep)
 - 📄 **Reports** — **daily digest** (yesterday + same-day-last-week comparison + anomaly notes), weekly & monthly reports (immutable archived snapshots)
-- 🔔 **Push, your way** — Web Push (works from an **iPhone home-screen PWA**), Telegram, Feishu — a 6-event × 3-channel matrix; optionally plug in your own OpenAI-compatible model to polish the copy (off by default; full templates with no model)
+- 🔔 **Push, your way** — Web Push (works from an **iPhone home-screen PWA**), Telegram, Feishu, WeCom, ntfy, Bark — a 9-event × 6-channel matrix; optionally plug in your own OpenAI-compatible model to polish the copy (off by default; full templates with no model)
 - 🌓 **Look & feel** — light/dark/system theme, English & Chinese UI
 - 📱 **Web / PWA** — install to your home screen, mobile-first dark UI
 - 🔐 **Auth** — single-user JWT with access + refresh tokens, httpOnly cookie, scrypt hashing, lockout on failures
@@ -35,7 +35,7 @@
 ```bash
 git clone https://github.com/Ahaxzh/AhaTesla.git && cd AhaTesla
 
-# 1. Generate and fill in 2 secrets (copy-paste commands included in the file)
+# 1. Generate and fill in 3 secrets (copy-paste commands included in the file, all required)
 cp deploy/.env.example.fullstack deploy/.env && vim deploy/.env
 
 # 2. One command brings up everything (AhaTesla + TeslaMate + PostgreSQL + Mosquitto)
@@ -45,7 +45,10 @@ docker compose -f deploy/fullstack-compose.yml --profile fullstack up -d --build
 Then finish setup in the browser (~3 minutes):
 
 1. Open `http://<host-ip>:18500` → register the admin (first registration becomes admin)
-   - On a remote host, 18500/4000 bind to 127.0.0.1 by default — open them up in the compose file or use a reverse proxy (notes inline)
+   - 18500/4000 bind to 127.0.0.1 by default. If the browser is on another machine, pick one:
+     SSH tunnel `ssh -L 18500:127.0.0.1:18500 <host>` (and the same for 4000, needed next),
+     a browser on the host itself, or rebind the port mapping to a LAN IP (LAN-only; keep 4000
+     tunnel-only — it is TeslaMate's passwordless admin UI and can issue vehicle commands)
 2. The wizard walks you to `http://<host-ip>:4000` — sign in to TeslaMate with **your Tesla account** (the only step that leaves the wizard; come back and wait for your car to appear)
 3. Confirm the car → ledger/push channels (skippable) → done, the dashboard fills up
 

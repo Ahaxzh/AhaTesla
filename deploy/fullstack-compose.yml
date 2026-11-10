@@ -101,7 +101,7 @@ services:
         psql -h teslamate-db -U teslamate -d teslamate -c "
           DO \$\$ BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '\''ahatesla_ro'\'') THEN
-              CREATE ROLE ahatesla_ro LOGIN PASSWORD '\''${TM_RO_PASSWORD}'\'';
+              CREATE ROLE ahatesla_ro LOGIN PASSWORD '\''${TM_RO_PASSWORD:?请在 deploy/.env 设置 TM_RO_PASSWORD（生成命令见 .env.example.fullstack）}'\'';
             END IF;
           END \$\$;
           GRANT CONNECT ON DATABASE teslamate TO ahatesla_ro;
@@ -137,7 +137,7 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       # 容器内必须监听 0.0.0.0（宿主端口映射才能进来；宿主侧仍只绑 127.0.0.1）
       HOST: 0.0.0.0
-      DB_URL: postgres://ahatesla_ro:${TM_RO_PASSWORD}@teslamate-db:5432/teslamate
+      DB_URL: postgres://ahatesla_ro:${TM_RO_PASSWORD:?TM_RO_PASSWORD 未设置}@teslamate-db:5432/teslamate
       MQTT_URL: mqtt://teslamate-mqtt:1883
       AHA_DATA_DIR: /data
     volumes:
