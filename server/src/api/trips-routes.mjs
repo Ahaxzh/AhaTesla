@@ -114,9 +114,18 @@ async function getDrive(db, id) {
            (SELECT p.latitude::float8 FROM positions p WHERE p.id = d.start_position_id) AS start_lat,
            (SELECT p.longitude::float8 FROM positions p WHERE p.id = d.start_position_id) AS start_lng,
            (SELECT p.latitude::float8 FROM positions p WHERE p.id = d.end_position_id) AS end_lat,
-           (SELECT p.longitude::float8 FROM positions p WHERE p.id = d.end_position_id) AS end_lng
+           (SELECT p.longitude::float8 FROM positions p WHERE p.id = d.end_position_id) AS end_lng,
+           tp.tp_fl, tp.tp_fr, tp.tp_rl, tp.tp_rr
     FROM drives d
     JOIN cars c ON c.id = d.car_id
+    LEFT JOIN LATERAL (
+      -- 行程内最后一个有效 TPMS 读数（与推送行程小结同口径；行程内变化极小）
+      SELECT p.tpms_pressure_fl::float8 AS tp_fl, p.tpms_pressure_fr::float8 AS tp_fr,
+             p.tpms_pressure_rl::float8 AS tp_rl, p.tpms_pressure_rr::float8 AS tp_rr
+      FROM positions p
+      WHERE p.drive_id = d.id AND p.tpms_pressure_fl IS NOT NULL
+      ORDER BY p.id DESC LIMIT 1
+    ) tp ON true
     WHERE d.id = $1 AND d.end_date IS NOT NULL
   `, [numId]);
   return rows[0] ?? null;
