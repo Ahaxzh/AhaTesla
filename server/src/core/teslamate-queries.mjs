@@ -39,6 +39,7 @@ export async function getCarSnapshot(db, { carId = null } = {}) {
            pos.odometer AS odometer_km,
            pos.date AS position_at,
            pos.lat, pos.lng,
+           tp.tp_fl, tp.tp_fr, tp.tp_rl, tp.tp_rr, tp.tp_at,
            (SELECT max(d.end_date) FROM drives d WHERE d.car_id = c.id AND d.end_date IS NOT NULL) AS last_drive_at
     FROM cars c
     ${filter}
@@ -50,6 +51,17 @@ export async function getCarSnapshot(db, { carId = null } = {}) {
       ORDER BY p.id DESC
       LIMIT 1
     ) pos ON true
+    LEFT JOIN LATERAL (
+      -- 最新有效 TPMS 读数（bar）：车沉睡时不产生新行，此为最后一次唤醒读数，
+      -- 随行读数时间供前端标注「测量于」（与 TeslaMate 官方卡同口径）
+      SELECT p.tpms_pressure_fl::float8 AS tp_fl, p.tpms_pressure_fr::float8 AS tp_fr,
+             p.tpms_pressure_rl::float8 AS tp_rl, p.tpms_pressure_rr::float8 AS tp_rr,
+             p.date AS tp_at
+      FROM positions p
+      WHERE p.car_id = c.id AND p.tpms_pressure_fl IS NOT NULL
+      ORDER BY p.id DESC
+      LIMIT 1
+    ) tp ON true
     ORDER BY c.display_priority ASC NULLS LAST, c.id ASC
     LIMIT 1
   `, params);

@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
+  CircleDot,
   Clock,
   Coins,
   Gauge as GaugeIcon,
@@ -136,6 +137,21 @@ export default function TripDetailPage() {
                   </div>
                 </div>
               </div>
+              {trip.tirePressure ? (
+                <div className="glass-card-flat flex items-center gap-3 p-4" data-testid="trip-tire-pressure">
+                  <CircleDot className="h-4 w-4 shrink-0 text-tesla" />
+                  <div>
+                    <div className="text-xs text-slate-400">{t('tripDetail.env.tire', '胎压（行程末）')}</div>
+                    {/* 主值=四轮最低（<2.6 bar 变红，对齐推送告警阈值）；副行前/后明细 */}
+                    <div className={`num mt-0.5 text-sm ${Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr) < 2.6 ? 'text-tesla' : 'text-slate-200'}`}>
+                      最低 {Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr).toFixed(1)} bar
+                      <span className="ml-2 text-[11px] font-normal text-slate-400">
+                        {t('tripDetail.env.tireFront', '前')} {trip.tirePressure.fl.toFixed(1)}/{trip.tirePressure.fr.toFixed(1)} · {t('tripDetail.env.tireRear', '后')} {trip.tirePressure.rl.toFixed(1)}/{trip.tirePressure.rr.toFixed(1)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Layers className="h-4 w-4 shrink-0 text-tesla" />
                 <div>

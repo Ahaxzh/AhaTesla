@@ -125,6 +125,18 @@ export default function DashboardPage() {
                   />
                 </div>
               </div>
+              {/* 胎压四轮横排（A 方案）：<2.6 bar 变红（对齐推送告警阈值）；
+                  TPMS 仅唤醒时上报 → 附「测量于」；无传感器数据整行不渲染 */}
+              {car?.tirePressure ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]" data-testid="tire-pressure">
+                  {([['前左', car.tirePressure.fl], ['前右', car.tirePressure.fr], ['后左', car.tirePressure.rl], ['后右', car.tirePressure.rr]] as const).map(([label, v]) => (
+                    <span key={label} className={v != null && v < 2.6 ? 'text-tesla' : 'text-slate-300'}>
+                      {label} <span className="num">{v != null ? v.toFixed(1) : '--'}</span>
+                    </span>
+                  ))}
+                  <span className="text-slate-500">bar · {t('dash.tp.measuredAt', '测量于')} {car.tirePressure.at ? new Date(car.tirePressure.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '--'}</span>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="shrink-0 text-slate-400">{t('dash.odometer', '总里程')} <span className="num text-slate-300">{fmtKm(car!.odometerKm, 0)} km</span></span>
                 {/* 右下角位置信息：围栏名/「XX 附近」/坐标兜底 + 定位时间；无定位数据整行退化为仅里程 */}

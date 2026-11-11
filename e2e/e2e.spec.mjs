@@ -38,6 +38,8 @@ test("总览页：车辆状态卡、本月账本卡、24h时间轴、热力图",
   await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
   // 车辆位置文字（顶部卡右下角）：测试库有定位数据 → 必须渲染（围栏名/附近/坐标兜底）
   await expect(page.getByTestId("car-position")).toBeVisible({ timeout: 10000 });
+  // 胎压四轮横排：测试库有 TPMS 历史 → 必须渲染（<2.6 着色由样式承担）
+  await expect(page.getByTestId("tire-pressure")).toBeVisible();
 });
 
 test("行程页：列表加载、分页、详情路线", async ({ page }) => {
@@ -63,6 +65,11 @@ test("行程页：列表加载、分页、详情路线", async ({ page }) => {
   (target ?? page.locator("tbody tr, [data-testid='trip-row'], li a, a[href*='/trips/']").first()).click();
   // 等详情数据渲染：路线图（有点）或空态占位（点不足）其一出现
   await page.waitForSelector("[data-testid='route-map'], [data-testid='route-map-empty']", { timeout: 20000 });
+  // 胎压瓦片（环境卡第五格）：库内该行程有 TPMS 读数 → 必须渲染（无读数行程不渲染属预期）
+  const tp = page.getByTestId("trip-tire-pressure");
+  if (await tp.isVisible().catch(() => false)) {
+    await expect(tp).toContainText(/bar/);
+  }
   const empty = await page.locator("[data-testid='route-map-empty']").isVisible().catch(() => false);
   if (!empty) {
     // preferCanvas: true → 轨迹画在 canvas（svg 仅在无 canvas 渲染器时出现）

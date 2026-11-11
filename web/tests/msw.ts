@@ -68,6 +68,7 @@ export const mockDashboard: DashboardData = {
     rangeKm: 358,
     state: 'online',
     odometerKm: 24560,
+    tirePressure: { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0, at: '2026-11-10T03:00:00Z' },
   },
   monthStats: { distanceKm: 1240.5, energyKWh: 223.1, costCny: 168.4, driveCount: 42, driveHours: 28.5 },
   weekStats: { distanceKm: 310.2, energyKWh: 55.8, costCny: 41.2 },

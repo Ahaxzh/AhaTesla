@@ -16,6 +16,10 @@ describe('DashboardPage', () => {
     expect(bar).toBeInTheDocument()
     expect(screen.getByTestId('car-card')).toHaveTextContent('72')
     expect(screen.getByTestId('car-card')).toHaveTextContent('358')
+    // 胎压四轮横排（A 方案）：<2.6 变红由 className 承担，这里断言四值与测量时间存在
+    const tp = screen.getByTestId('tire-pressure')
+    expect(tp).toHaveTextContent('3.1')
+    expect(tp).toHaveTextContent('2.9')
   })
 
   it('渲染本月统计卡（里程/能耗/电费）与油车对比', async () => {

@@ -175,7 +175,8 @@ function tripsFakeDb() {
         start_at: "2026-10-13 02:11:40", end_at: "2026-10-13 02:58:09",
         distance_km: 21.5, duration_min: 47,
         start_address_id: 1, end_address_id: 2,
-        efficiency: 150, ideal_used_km: 20, rated_used_km: 22
+        efficiency: 150, ideal_used_km: 20, rated_used_km: 22,
+        tp_fl: 3.1, tp_fr: 3.0, tp_rl: 2.9, tp_rr: 3.0
       }];
     }
     if (/ideal_used_km/.test(sql) && /FROM drives/.test(sql)) {
@@ -241,6 +242,8 @@ test("GET /api/trips/:id 返回路线点集", async () => {
   assert.equal(res.json.route.length, 2);
   assert.equal(res.json.route[0].lat, 24.48);
   assert.equal(res.json.id, 3241);
+  // 胎压（行程内最后有效读数，与推送同口径）：四轮 + 最低值着色由前端处理
+  assert.deepEqual(res.json.tirePressure, { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0 });
   const missing = await fetchApp(app, "GET", "/api/trips/999", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(missing.status, 404);
   assert.equal(missing.json.error.code, "not_found");
@@ -452,7 +455,7 @@ test("GET /api/system/events 返回事件日志", async () => {
 function dashboardFakeDb() {
   return createFakeDb((sql) => {
     if (/position_at/.test(sql)) {
-      return [{ id: 1, name: "My Tesla", current_battery: 55, range_km: 220.5, odometer_km: 30021, position_at: "2026-10-13 03:00:00", last_drive_at: "2026-10-13 02:58:09", lat: 24.4896, lng: 118.1046 }];
+      return [{ id: 1, name: "My Tesla", current_battery: 55, range_km: 220.5, odometer_km: 30021, position_at: "2026-10-13 03:00:00", last_drive_at: "2026-10-13 02:58:09", lat: 24.4896, lng: 118.1046, tp_fl: 3.1, tp_fr: 3.0, tp_rl: 2.9, tp_rr: 3.0, tp_at: "2026-10-13 03:00:00" }];
     }
     if (/driving/.test(sql)) return [{ state: "asleep_or_parked" }];
     if (/drive_minutes/.test(sql)) return [{ distance_km: 800.2, drive_count: 40, drive_minutes: 1200 }];
@@ -482,6 +485,8 @@ test("GET /api/dashboard 汇总", async () => {
   assert.equal(res.json.car.position.lng, 118.1046);
   assert.equal(res.json.car.position.at, "2026-10-13T03:00:00.000Z");
   assert.equal(res.json.car.position.label, "家里"); // fixture 围栏半径 200m 覆盖定位点
+  // 胎压（最后一次唤醒读数 + 时间；沉睡时为旧值，前端标「测量于」）
+  assert.deepEqual(res.json.car.tirePressure, { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0, at: "2026-10-13T03:00:00.000Z" });
   assert.equal(res.json.car.currentBattery, 55);
   assert.equal(res.json.car.state, "asleep_or_parked");
   assert.equal(res.json.monthStats.driveCount, 40);

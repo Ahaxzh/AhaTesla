@@ -271,7 +271,12 @@ export function createTripsRoutes({ db, state }) {
           savedPct: saved !== null && fuelCost > 0 ? round((saved / fuelCost) * 100, 1) : null
         },
         efficiency: { ratedKwh, actualKwh: energy, ratio },
-        environment: { avgTempC, acEstimateKwh, avgSpeedKmh: avgSpeed, maxSpeedKmh: maxSpeed }
+        environment: { avgTempC, acEstimateKwh, avgSpeedKmh: avgSpeed, maxSpeedKmh: maxSpeed },
+        // 胎压（bar，四轮）：行程内最后有效读数（与推送行程小结同口径）；无数据 null
+        tirePressure: finiteNumber(drive.tp_fl) != null ? {
+          fl: finiteNumber(drive.tp_fl), fr: finiteNumber(drive.tp_fr),
+          rl: finiteNumber(drive.tp_rl), rr: finiteNumber(drive.tp_rr)
+        } : null
       };
     }
   };

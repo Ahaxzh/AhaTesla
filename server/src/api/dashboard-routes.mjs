@@ -143,6 +143,13 @@ export function createDashboardRoutes({ db, state }) {
             // 均未命中为 null → 前端退回显示坐标。围栏表为用户自建 POI，量级极小。
             label: geofenceLabelFor(geofences, finiteNumber(car?.lat), finiteNumber(car?.lng))
           } : null,
+          // 胎压（bar，四轮）：最后一次唤醒的有效读数 + 读数时间（沉睡时为旧值，
+          // 前端标「测量于」）；无 TPMS 数据（老车/无传感器）为 null → 前端不渲染
+          tirePressure: finiteNumber(car?.tp_fl) != null ? {
+            fl: finiteNumber(car?.tp_fl), fr: finiteNumber(car?.tp_fr),
+            rl: finiteNumber(car?.tp_rl), rr: finiteNumber(car?.tp_rr),
+            at: car?.tp_at ? isoFromTeslaMate(car.tp_at) : null
+          } : null,
           // 充电实时信息（charging state 时有值）
           charging: driving?.state === "charging" ? {
             batteryLevel: finiteNumber(driving?.charging_battery),

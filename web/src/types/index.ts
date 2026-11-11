@@ -81,6 +81,8 @@ export interface TripDetail extends Trip {
   /** 能效达成率（P3 模块1） */
   efficiency?: { ratedKwh: number | null; actualKwh: number | null; ratio: number | null }
   /** 环境剖析（P3 模块3） */
+  /** 胎压四轮（bar，行程内最后有效读数；与推送行程小结同口径）；无数据省略 */
+  tirePressure?: { fl: number; fr: number; rl: number; rr: number } | null
   environment?: {
     avgTempC: number | null
     acEstimateKwh: number | null
@@ -128,6 +130,8 @@ export interface DashboardData {
     position?: { lat: number; lng: number; at: string | null; label?: string | null } | null
     /** 充电实时信息（state === 'charging' 时有值） */
     charging?: { batteryLevel: number | null; powerKw: number | null } | null
+    /** 胎压四轮（bar，最后一次唤醒读数）；无 TPMS 数据为 null → 不渲染 */
+    tirePressure?: { fl: number; fr: number; rl: number; rr: number; at: string | null } | null
   }
   monthStats: {
     distanceKm: number
