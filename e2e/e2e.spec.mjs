@@ -141,9 +141,9 @@ test("头像菜单：主题/语言快捷开关 + 账户安全跳设置页锚点 
   await expect(page.getByTestId("change-password-card")).toBeInViewport({ timeout: 5000 });
 });
 
-test("总览页：状态胶囊与数据同步合并行 + 胎压 FL/FR 缩写 + 近7天切换条形视图", async ({ page }) => {
+test("总览页：状态胶囊右上角（活跃态带 ping 状态点）+ 胎压 FL/FR 缩写 + 近7天切换条形视图", async ({ page }) => {
   await login(page);
-  // v0.2.x：状态胶囊（car-state-pill）与「数据同步于」同行（不再占顶部独立位置）
+  // v0.2.2：状态胶囊回右上角，内前置状态点；「数据同步于」独立留底部（胎压测量时间与其重复已去）
   await expect(page.getByTestId("car-state-pill")).toBeVisible({ timeout: 10000 });
   await expect(page.getByTestId("car-synced")).toContainText(/数据同步于|just now|min ago|h ago|d ago/);
   // 胎压四轮：位置用国际缩写 FL/FR/RL/RR

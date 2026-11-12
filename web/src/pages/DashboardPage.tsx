@@ -27,21 +27,22 @@ import { fmtCny, fmtDateTime, fmtKm, fmtKwh, timeAgo } from '@/utils/format'
 import type { Charge, Trip } from '@/types'
 
 /** states 原值 → 产品语义（PRD §6.3 P2）：offline≠睡眠；online=哨兵/在线驻车。
- *  labelKey/labelZh 交给调用点 t() 双语。 */
-function statePill(state: string): { labelKey: string; labelZh: string; cls: string } {
+ *  labelKey/labelZh 交给调用点 t() 双语；dot=胶囊内前置状态点的颜色（随各状态文字色），
+ *  live=true 的状态（充电/行驶/哨兵）带轻 ping 动效——只这点动，睡眠/离线保持安静。 */
+function statePill(state: string): { labelKey: string; labelZh: string; cls: string; dot: string; live: boolean } {
   switch (state) {
     case 'charging':
-      return { labelKey: 'dash.state.charging', labelZh: '充电中', cls: 'bg-emerald-400/10 text-emerald-400' }
+      return { labelKey: 'dash.state.charging', labelZh: '充电中', cls: 'bg-emerald-400/10 text-emerald-400', dot: 'bg-emerald-400', live: true }
     case 'driving':
-      return { labelKey: 'dash.state.driving', labelZh: '行驶中', cls: 'bg-sky-400/10 text-sky-400' }
+      return { labelKey: 'dash.state.driving', labelZh: '行驶中', cls: 'bg-sky-400/10 text-sky-400', dot: 'bg-sky-400', live: true }
     case 'asleep':
-      return { labelKey: 'dash.state.asleep', labelZh: '睡眠中', cls: 'bg-violet-400/10 text-violet-400' }
+      return { labelKey: 'dash.state.asleep', labelZh: '睡眠中', cls: 'bg-violet-400/10 text-violet-400', dot: 'bg-violet-400', live: false }
     case 'online':
-      return { labelKey: 'dash.state.online', labelZh: '哨兵/在线', cls: 'bg-amber-400/10 text-amber-400' }
+      return { labelKey: 'dash.state.online', labelZh: '哨兵/在线', cls: 'bg-amber-400/10 text-amber-400', dot: 'bg-amber-400', live: true }
     case 'offline':
-      return { labelKey: 'dash.state.offline', labelZh: '离线', cls: 'bg-white/[0.04] text-slate-500' }
+      return { labelKey: 'dash.state.offline', labelZh: '离线', cls: 'bg-white/[0.04] text-slate-500', dot: 'bg-slate-500', live: false }
     default:
-      return { labelKey: 'dash.state.pending', labelZh: '待数据', cls: 'bg-white/[0.06] text-slate-400' }
+      return { labelKey: 'dash.state.pending', labelZh: '待数据', cls: 'bg-white/[0.06] text-slate-400', dot: 'bg-slate-400', live: false }
   }
 }
 
@@ -99,9 +100,20 @@ export default function DashboardPage() {
           {/* P2 模块1：车辆状态卡（紧凑单列：电量细横条；右下角位置文字 = 围栏名/附近/坐标兜底） */}
           <section className="glass-card fade-up p-4" data-testid="car-card">
             <div className="flex flex-col justify-center gap-3">
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <Car className="h-4 w-4 shrink-0 text-tesla" />
-                <span className="truncate">{car!.name}</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
+                  <Car className="h-4 w-4 shrink-0 text-tesla" />
+                  <span className="truncate">{car!.name}</span>
+                </div>
+                {/* 状态胶囊回右上角（用户裁决）；前置状态点，活跃态（充电/行驶/哨兵）带轻 ping */}
+                <span className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
+                  <span className="relative flex h-1.5 w-1.5">
+                    {pill.live && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pill.dot} opacity-50`} />}
+                    <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${pill.dot}`} />
+                  </span>
+                  {t(pill.labelKey, pill.labelZh)}
+                  {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
+                </span>
               </div>
               {/* 电量：百分比 + 细横条（Tesla App 式，替代原 BatteryRing 大圆环） */}
               <div>
@@ -121,7 +133,7 @@ export default function DashboardPage() {
               </div>
               {/* 胎压四轮横排（A 方案）：<2.6 bar 变红（对齐推送告警阈值）；
                   位置用国际缩写 FL/FR/RL/RR（前左/前右/后左/后右，与 Tesla App 一致且省宽）；
-                  TPMS 仅唤醒时上报 → 附「测量于」；无传感器数据整行不渲染 */}
+                  「测量于」时间与底部「数据同步于」重复，只留后者；无传感器数据整行不渲染 */}
               {car?.tirePressure ? (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]" data-testid="tire-pressure">
                   {([['FL', car.tirePressure.fl], ['FR', car.tirePressure.fr], ['RL', car.tirePressure.rl], ['RR', car.tirePressure.rr]] as const).map(([label, v]) => (
@@ -129,7 +141,7 @@ export default function DashboardPage() {
                       {label} <span className="num">{v != null ? v.toFixed(1) : '--'}</span>
                     </span>
                   ))}
-                  <span className="text-slate-500">bar · {t('dash.tp.measuredAt', '测量于')} {car.tirePressure.at ? new Date(car.tirePressure.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '--'}</span>
+                  <span className="text-slate-500">bar</span>
                 </div>
               ) : null}
               <div className="flex items-center justify-between gap-2 text-[11px]">
@@ -145,18 +157,12 @@ export default function DashboardPage() {
                   </span>
                 ) : null}
               </div>
-              {/* 状态 + 同步时间合并为一行（省一行：状态胶囊在左，数据同步时间在右） */}
-              <div className="flex items-center justify-between gap-2">
-                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
-                  {t(pill.labelKey, pill.labelZh)}
-                  {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
-                </span>
-                {car && (
-                  <span className="truncate text-[11px] text-slate-500" data-testid="car-synced">
-                    {t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}
-                  </span>
-                )}
-              </div>
+              {/* 底部只留一条数据新鲜度（「数据同步于」）；胎压的「测量于」与其时间语义重复，已去 */}
+              {car && (
+                <div className="text-[11px] text-slate-500" data-testid="car-synced">
+                  {t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}
+                </div>
+              )}
             </div>
           </section>
 

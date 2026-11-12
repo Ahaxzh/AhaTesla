@@ -416,7 +416,6 @@ export const EN: Record<string, string> = {
   'charging.allMonths': 'All months',
   'charging.monthLabel': '{m}/{y}',
   'common.loading': 'Loading',
-  'dash.tp.measuredAt': 'measured',
   'menu.notLoggedIn': 'Not signed in',
   'nav.primary': 'Primary navigation',
   'nav.bottom': 'Bottom navigation',
