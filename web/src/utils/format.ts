@@ -1,5 +1,15 @@
 /** 数字/日期格式化工具 */
 
+// 界面语言（zh/en）：由 I18nProvider 切语言时注入，驱动非组件层文案
+// （时长/相对时间/请求错误消息）——这些工具函数拿不到 React context。
+let uiLang: 'zh' | 'en' = 'zh'
+export function setUiLang(l: 'zh' | 'en') {
+  uiLang = l
+}
+export function getUiLang() {
+  return uiLang
+}
+
 // 实例货币符号（settings.currency.symbol）：由 AppLayout 拉到设置后注入。
 // 修复：货币单位设置此前保存后从未被任何格式化路径消费，全站硬编码 ¥。
 let currencySymbol = '¥'
@@ -36,6 +46,7 @@ export function fmtDuration(min: number | null | undefined): string {
   if (min == null || Number.isNaN(min)) return '--'
   const h = Math.floor(min / 60)
   const m = Math.round(min % 60)
+  if (uiLang === 'en') return h > 0 ? `${h}h ${m}m` : `${m}m`
   return h > 0 ? `${h}小时${m}分` : `${m}分钟`
 }
 
@@ -59,12 +70,13 @@ export function timeAgo(iso: string | null | undefined): string {
   const diff = Date.now() - d
   if (diff < 0) return fmtDateTime(iso)
   const min = Math.floor(diff / 60_000)
-  if (min < 1) return '刚刚'
-  if (min < 60) return `${min} 分钟前`
+  const en = uiLang === 'en'
+  if (min < 1) return en ? 'just now' : '刚刚'
+  if (min < 60) return en ? `${min} min ago` : `${min} 分钟前`
   const h = Math.floor(min / 60)
-  if (h < 24) return `${h} 小时前`
+  if (h < 24) return en ? `${h} h ago` : `${h} 小时前`
   const day = Math.floor(h / 24)
-  if (day < 30) return `${day} 天前`
+  if (day < 30) return en ? `${day} d ago` : `${day} 天前`
   return fmtDate(iso)
 }
 

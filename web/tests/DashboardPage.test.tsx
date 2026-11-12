@@ -16,10 +16,18 @@ describe('DashboardPage', () => {
     expect(bar).toBeInTheDocument()
     expect(screen.getByTestId('car-card')).toHaveTextContent('72')
     expect(screen.getByTestId('car-card')).toHaveTextContent('358')
-    // 胎压四轮横排（A 方案）：<2.6 变红由 className 承担，这里断言四值与测量时间存在
+    // 胎压四轮横排（A 方案）：<2.6 变红由 className 承担，这里断言四值与测量时间存在；
+    // 位置标签用国际缩写 FL/FR/RL/RR（前左/前右/后左/后右）
     const tp = screen.getByTestId('tire-pressure')
+    expect(tp).toHaveTextContent('FL')
+    expect(tp).toHaveTextContent('FR')
+    expect(tp).toHaveTextContent('RL')
+    expect(tp).toHaveTextContent('RR')
     expect(tp).toHaveTextContent('3.1')
     expect(tp).toHaveTextContent('2.9')
+    // v0.2.x：状态胶囊与「数据同步于」合并为底部一行（省一行）
+    expect(screen.getByTestId('car-state-pill')).toHaveTextContent('哨兵/在线')
+    expect(screen.getByTestId('car-synced')).toHaveTextContent('数据同步于')
   })
 
   it('渲染本月统计卡（里程/能耗/电费）与油车对比', async () => {

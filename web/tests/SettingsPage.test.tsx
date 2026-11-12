@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
@@ -163,5 +163,17 @@ describe('SettingsPage', () => {
     await user.click(screen.getByTestId('password-submit'))
     expect(await screen.findByText('账户已更新')).toBeInTheDocument()
     await waitFor(() => expect((screen.getByLabelText('新密码') as HTMLInputElement).value).toBe(''))
+  })
+
+  // v0.2.x：头像菜单「账户安全」跳 /settings#settings-security 后滚动落地（此前只导航不滚动）
+  it('hash 锚点直达：#settings-security 渲染后滚动到账户安全分区', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    renderWithProviders(<SettingsPage />, { route: '/settings#settings-security' })
+    await screen.findByTestId('change-password-card')
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+    // 侧栏高亮同步切到 security
+    const desktopNav = screen.getAllByTestId('settings-nav')[0]
+    expect(desktopNav.querySelector('a[href="#settings-security"]')?.className).toContain('text-white')
   })
 })

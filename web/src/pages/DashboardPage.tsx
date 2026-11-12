@@ -99,15 +99,9 @@ export default function DashboardPage() {
           {/* P2 模块1：车辆状态卡（紧凑单列：电量细横条；右下角位置文字 = 围栏名/附近/坐标兜底） */}
           <section className="glass-card fade-up p-4" data-testid="car-card">
             <div className="flex flex-col justify-center gap-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
-                  <Car className="h-4 w-4 shrink-0 text-tesla" />
-                  <span className="truncate">{car!.name}</span>
-                </div>
-                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
-                  {t(pill.labelKey, pill.labelZh)}
-                  {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
-                </span>
+              <div className="flex items-center gap-2 text-sm text-slate-300">
+                <Car className="h-4 w-4 shrink-0 text-tesla" />
+                <span className="truncate">{car!.name}</span>
               </div>
               {/* 电量：百分比 + 细横条（Tesla App 式，替代原 BatteryRing 大圆环） */}
               <div>
@@ -126,10 +120,11 @@ export default function DashboardPage() {
                 </div>
               </div>
               {/* 胎压四轮横排（A 方案）：<2.6 bar 变红（对齐推送告警阈值）；
+                  位置用国际缩写 FL/FR/RL/RR（前左/前右/后左/后右，与 Tesla App 一致且省宽）；
                   TPMS 仅唤醒时上报 → 附「测量于」；无传感器数据整行不渲染 */}
               {car?.tirePressure ? (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]" data-testid="tire-pressure">
-                  {([['前左', car.tirePressure.fl], ['前右', car.tirePressure.fr], ['后左', car.tirePressure.rl], ['后右', car.tirePressure.rr]] as const).map(([label, v]) => (
+                  {([['FL', car.tirePressure.fl], ['FR', car.tirePressure.fr], ['RL', car.tirePressure.rl], ['RR', car.tirePressure.rr]] as const).map(([label, v]) => (
                     <span key={label} className={v != null && v < 2.6 ? 'text-tesla' : 'text-slate-300'}>
                       {label} <span className="num">{v != null ? v.toFixed(1) : '--'}</span>
                     </span>
@@ -150,7 +145,18 @@ export default function DashboardPage() {
                   </span>
                 ) : null}
               </div>
-              {car && <div className="text-[11px] text-slate-500">{t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}</div>}
+              {/* 状态 + 同步时间合并为一行（省一行：状态胶囊在左，数据同步时间在右） */}
+              <div className="flex items-center justify-between gap-2">
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
+                  {t(pill.labelKey, pill.labelZh)}
+                  {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
+                </span>
+                {car && (
+                  <span className="truncate text-[11px] text-slate-500" data-testid="car-synced">
+                    {t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}
+                  </span>
+                )}
+              </div>
             </div>
           </section>
 

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, BatteryCharging, Coins, MapPin, Pencil, X, Zap } from 'lucide-react'
+import { AlertTriangle, BatteryCharging, Coins, MapPin, Pencil, Repeat, X, Zap } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { Pagination } from '@/components/Pagination'
+import { BatteryHealthCard } from '@/components/BatteryHealthCard'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
@@ -46,7 +47,7 @@ function PowerCurve({ detail }: { detail: ChargeDetail }) {
 
   return (
     <div data-testid="power-curve" className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[420px]" role="img" aria-label="充电功率曲线">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[420px]" role="img" aria-label={t('charging.modal.curve', '充电功率曲线')}>
         {/* 网格 */}
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={PAD} x2={W - PAD} y1={PAD + f * (H - PAD * 2)} y2={PAD + f * (H - PAD * 2)} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
@@ -169,19 +170,30 @@ export default function ChargingPage() {
         )}
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3" data-testid="charge-stats">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="charge-stats">
         {stats ? (
           <>
             <StatCard icon={Zap} label={t('charging.stat.kwh', '本月充电量')} value={fmtKwh(stats.totalKWh)} />
             <StatCard icon={Coins} label={t('charging.stat.cost', '本月电费')} value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
             <StatCard icon={BatteryCharging} label={t('charging.stat.price', '平均单价')} value={`${getCurrencySymbol()}${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
+            {/* 会话数（server stats.sessionCount；月份筛选联动） */}
+            <StatCard
+              icon={Repeat}
+              label={t('charging.stat.sessions', '充电次数')}
+              value={`${stats.sessionCount ?? byLocation.reduce((s, l) => s + l.count, 0)} ${t('charging.chart.countUnit', '次')}`}
+            />
           </>
         ) : (
-          <div className="glass-card-flat col-span-2 space-y-3 p-4 sm:col-span-3">
+          <div className="glass-card-flat col-span-2 space-y-3 p-4 sm:col-span-4">
             <div className="skeleton h-3 w-1/4" />
             <div className="skeleton h-6 w-2/5" />
           </div>
         )}
+      </div>
+
+      {/* 电池健康（与仪表盘同卡复用，react-query 缓存共享零额外请求） */}
+      <div className="mb-4">
+        <BatteryHealthCard />
       </div>
 
       {/* 成本构成三分 + 免费充电 + 月度趋势（Grafana charging-costs-stats 提炼） */}

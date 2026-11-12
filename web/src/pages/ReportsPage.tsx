@@ -24,7 +24,7 @@ export default function ReportsPage() {
     onSuccess: (res, type) => {
       // 日报不落归档、送达即全部 → 逐通道汇报结果（排障时一眼看出挂在哪个渠道）
       if (type === 'daily' && res.results) {
-        const CHANNEL_LABELS: Record<string, string> = { feishu: '飞书', telegram: 'Telegram', webpush: 'WebPush', wecom: '企微', ntfy: 'Ntfy', bark: 'Bark' }
+        const CHANNEL_LABELS: Record<string, string> = { feishu: t('push.ch.feishu', '飞书'), telegram: 'Telegram', webpush: 'WebPush', wecom: t('push.ch.wecom', '企微'), ntfy: 'Ntfy', bark: 'Bark' }
         const parts = Object.entries(res.results).map(
           ([ch, r]) => `${CHANNEL_LABELS[ch] ?? ch} ${r.sent ? '✓' : '✗'}`,
         )

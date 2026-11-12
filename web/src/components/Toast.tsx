@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react'
+import { useI18n } from '@/i18n'
 
 type ToastKind = 'success' | 'error' | 'info'
 interface ToastItem {
@@ -25,6 +26,8 @@ const icons = {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([])
+  // 命名注意：下方 map 的逐条 toast 变量名为 t（历史代码），翻译函数取名 tr 避免遮蔽
+  const { t: tr } = useI18n()
 
   const toast = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = nextId++
@@ -55,7 +58,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {icons[t.kind]}
             <span className="flex-1">{t.message}</span>
             <button
-              aria-label="关闭提示"
+              aria-label={tr('common.close', '关闭提示')}
               className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-slate-200"
               onClick={() => setItems((prev) => prev.filter((x) => x.id !== t.id))}
             >

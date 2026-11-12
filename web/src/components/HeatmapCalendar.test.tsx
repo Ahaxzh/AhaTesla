@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { HeatmapCalendar } from '@/components/HeatmapCalendar'
+import { I18nProvider } from '@/i18n'
+import type { ReactElement } from 'react'
 import type { HeatmapData } from '@/types'
+
+/** 组件 v5 起文案走 useI18n，测试需包 Provider（默认 zh，断言中文文案不变） */
+function renderCalendar(ui: ReactElement) {
+  return render(<I18nProvider>{ui}</I18nProvider>)
+}
 
 /** 确定性造数：LCG 种子=距今天数；今天固定 42.5 km、第 8 天前固定 152.3 km（最高单日） */
 function makeData(days: number): HeatmapData {
@@ -31,7 +38,7 @@ const todayDate = (() => {
 describe('HeatmapCalendar', () => {
   it('渲染网格/图例/统计条/星期分布，格子数与天数一致', () => {
     const data = makeData(90)
-    render(<HeatmapCalendar data={data} />)
+    renderCalendar(<HeatmapCalendar data={data} />)
     const grid = screen.getByTestId('heatmap-grid')
     expect(within(grid).getAllByTestId('heatmap-cell')).toHaveLength(90)
     // 图例：少→多 + 5 档色块（量化区间在 <sm 隐藏，用 title 断言语义）
@@ -48,14 +55,14 @@ describe('HeatmapCalendar', () => {
   })
 
   it('今天的格子有白描边（ring）与 aria 语义', () => {
-    render(<HeatmapCalendar data={makeData(90)} />)
+    renderCalendar(<HeatmapCalendar data={makeData(90)} />)
     const today = screen.getByLabelText(`${todayDate} 42.5 km`)
     expect(today).toHaveAttribute('data-level', '3')
     expect(today.className).toContain('ring')
   })
 
   it('点按格子出现 tooltip（值为强、日期为辅），再点同一格关闭', () => {
-    render(<HeatmapCalendar data={makeData(90)} />)
+    renderCalendar(<HeatmapCalendar data={makeData(90)} />)
     const today = screen.getByLabelText(`${todayDate} 42.5 km`)
     fireEvent.click(today)
     const tip = screen.getByTestId('heatmap-hover')
@@ -70,25 +77,45 @@ describe('HeatmapCalendar', () => {
   it('未出行日 tooltip 显示「未出行」而非 0 km', () => {
     const data = makeData(90)
     const zeroDay = data.daysData.find((d) => d.distanceKm === 0)!
-    render(<HeatmapCalendar data={data} />)
+    renderCalendar(<HeatmapCalendar data={data} />)
     fireEvent.click(screen.getByLabelText(`${zeroDay.date} 0.0 km`))
     expect(screen.getByTestId('heatmap-hover')).toHaveTextContent('未出行')
   })
 
-  it('范围切换按钮触发 onDaysChange', () => {
+  it('范围切换按钮（近7天/近3月/近一年）触发 onDaysChange', () => {
     const onDaysChange = vi.fn()
-    render(<HeatmapCalendar data={makeData(90)} onDaysChange={onDaysChange} />)
+    renderCalendar(<HeatmapCalendar data={makeData(90)} onDaysChange={onDaysChange} />)
     fireEvent.click(screen.getByTestId('heatmap-range-365'))
     expect(onDaysChange).toHaveBeenCalledWith(365)
     fireEvent.click(screen.getByTestId('heatmap-range-90'))
     expect(onDaysChange).toHaveBeenCalledWith(90)
+    fireEvent.click(screen.getByTestId('heatmap-range-7'))
+    expect(onDaysChange).toHaveBeenCalledWith(7)
   })
 
   it('近一年数据同样渲染完整（365 格、月份标签随列定位）', () => {
-    render(<HeatmapCalendar data={makeData(365)} />)
+    renderCalendar(<HeatmapCalendar data={makeData(365)} />)
     const grid = screen.getByTestId('heatmap-grid')
     expect(within(grid).getAllByTestId('heatmap-cell')).toHaveLength(365)
     expect(Number(grid.getAttribute('data-cols'))).toBeGreaterThanOrEqual(52)
     expect(screen.getByTestId('heatmap-stats')).toHaveTextContent('/ 365 天')
+  })
+
+  it('近7天切换为每日条形紧凑视图（7 行、无周历网格、无星期分布）', () => {
+    renderCalendar(<HeatmapCalendar data={makeData(7)} />)
+    // 紧凑条形：7 行、每天一条 bar；今天 42.5 是最高单日 → 行的 bar 满宽
+    const rows = screen.getAllByTestId('heatmap-daily-row')
+    expect(rows).toHaveLength(7)
+    expect(screen.getAllByTestId('heatmap-daily-bar')).toHaveLength(7)
+    expect(screen.queryByTestId('heatmap-grid')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('heatmap-weekday-bars')).not.toBeInTheDocument()
+    // 统计条仍在（两种视图共用）；最高单日按 7 天窗口内数据推导
+    expect(screen.getByTestId('heatmap-stats')).toHaveTextContent('/ 7 天')
+    const data = makeData(7)
+    const maxKm = Math.round(Math.max(...data.daysData.map((d) => d.distanceKm)))
+    expect(screen.getByTestId('heatmap-stats')).toHaveTextContent(String(maxKm))
+    // 未出行日显示文案而非 0 km
+    const zeroDay = data.daysData.find((d) => d.distanceKm === 0)
+    if (zeroDay) expect(screen.getByText('未出行')).toBeTruthy()
   })
 })

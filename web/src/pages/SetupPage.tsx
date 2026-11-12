@@ -129,15 +129,15 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
-    if (username.trim().length < 3) return setError('用户名至少 3 个字符')
-    if (password.length < 8) return setError('密码至少 8 位')
-    if (password !== confirm) return setError('两次输入的密码不一致')
+    if (username.trim().length < 3) return setError(t('setup.err.nameShort', '用户名至少 3 个字符'))
+    if (password.length < 8) return setError(t('setup.err.pwShort', '密码至少 8 位'))
+    if (password !== confirm) return setError(t('setup.err.pwMismatch', '两次输入的密码不一致'))
     setSubmitting(true)
     try {
       await api.setupRegisterAdmin(username.trim(), password)
       onDone()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败，请重试')
+      setError(err instanceof Error ? err.message : t('setup.err.registerFailed', '注册失败，请重试'))
     } finally {
       setSubmitting(false)
     }
@@ -156,7 +156,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
           className="input-dark"
           type="text"
           autoComplete="username"
-          placeholder="请输入用户名"
+          placeholder={t('setup.s1.usernamePh', '请输入用户名')}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
         />
@@ -168,7 +168,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
           className="input-dark"
           type="password"
           autoComplete="new-password"
-          placeholder="至少 8 位"
+          placeholder={t('setup.s1.pwPh', '至少 8 位')}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
@@ -180,7 +180,7 @@ function Step1Admin({ onDone }: { onDone: () => void }) {
           className="input-dark"
           type="password"
           autoComplete="new-password"
-          placeholder="再次输入密码"
+          placeholder={t('setup.s1.confirmPh', '再次输入密码')}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
         />
@@ -265,7 +265,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
       setDsnError('')
       return true
     } catch {
-      setDsnError('DSN 格式无法解析，示例：postgres://user:pass@host:5432/teslamate')
+      setDsnError(t('setup.dsn.bad', 'DSN 格式无法解析，示例：postgres://user:pass@host:5432/teslamate'))
       return false
     }
   }
@@ -287,12 +287,12 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
         // —— 此前直接回填掩码，「测试并验证」必挂 auth，用户被没输过的密码卡死。
         if (r.password) setPassword(r.password)
         setRoDone(true)
-        toast('只读账号已创建，连接信息已填入下方表单', 'success')
+        toast(t('setup.autoRo.doneToast', '只读账号已创建，连接信息已填入下方表单'), 'success')
       } else {
         setRoFail({ stage: r.stage, error: r.error, fallbackSql: r.fallbackSql })
       }
     } catch (err) {
-      setRoFail({ stage: 'network', error: err instanceof Error ? err.message : '请求失败', fallbackSql: '' })
+      setRoFail({ stage: 'network', error: err instanceof Error ? err.message : t('setup.err.requestFailed', '请求失败'), fallbackSql: '' })
     } finally {
       setRoBusy(false)
     }
@@ -302,7 +302,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
     if (!roFail?.fallbackSql) return
     try {
       await navigator.clipboard.writeText(roFail.fallbackSql)
-      toast('SQL 已复制', 'success')
+      toast(t('setup.autoRo.sqlCopied', 'SQL 已复制'), 'success')
     } catch {
       /* 剪贴板不可用（如非安全上下文）→ 用户可手动选择文本复制 */
     }
@@ -366,7 +366,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
         setVerified(true)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '连接测试失败')
+      setError(err instanceof Error ? err.message : t('setup.err.testFailed', '连接测试失败'))
     } finally {
       setChecking(false)
     }
@@ -384,7 +384,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
       if (mode === 'fullstack') startDiscovery()
       setSaved(true)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      setError(err instanceof Error ? err.message : t('setup.err.saveFailed', '保存失败'))
     } finally {
       setSaving(false)
     }
@@ -474,8 +474,8 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
               {t('setup.autoRo.desc', '用 TeslaMate 管理员凭据自动创建只读账号并填入下方表单；凭据仅本次使用，不落盘。')}
             </p>
             <details className="text-[11px] text-slate-500">
-              <summary className="cursor-pointer select-none">密码在哪找？</summary>
-              <p className="mt-1 pl-3">在 TeslaMate 部署目录的 docker-compose.yml（DATABASE_PASS 环境变量）或 .env 文件中。</p>
+              <summary className="cursor-pointer select-none">{t('setup.autoRo.pwWhere', '密码在哪找？')}</summary>
+              <p className="mt-1 pl-3">{t('setup.autoRo.pwWhereDesc', '在 TeslaMate 部署目录的 docker-compose.yml（DATABASE_PASS 环境变量）或 .env 文件中。')}</p>
             </details>
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -499,7 +499,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
             {roFail && (
               <div className="space-y-2" data-testid="auto-ro-fail">
                 <p role="alert" className="text-xs text-tesla-soft">
-                  自动创建失败（{roFail.stage}）：{roFail.error}{roFail.fallbackSql ? '。请手工执行以下 SQL 后点「我已手工执行」：' : ''}
+                  {t('setup.autoRo.failPrefix', '自动创建失败')}（{roFail.stage}）：{roFail.error}{roFail.fallbackSql ? t('setup.autoRo.manualSql', '。请手工执行以下 SQL 后点「我已手工执行」：') : ''}
                 </p>
                 {roFail.fallbackSql && (
                   <pre data-testid="auto-ro-sql" className="num max-h-40 overflow-auto rounded-lg border border-white/[0.08] bg-base-950/60 p-2.5 text-[11px] leading-relaxed text-slate-300">{roFail.fallbackSql}</pre>
@@ -571,7 +571,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
               className="flex w-full items-center justify-center gap-1 text-xs text-slate-500 transition hover:text-slate-300"
             >
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} />
-              高级 · 手动粘贴 DSN
+              {t('setup.dsn.advanced', '高级 · 手动粘贴 DSN')}
             </button>
             {advancedOpen && (
               <div className="mt-2 space-y-2">
@@ -585,7 +585,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
                 />
                 {dsnError && <p role="alert" className="text-[11px] text-tesla-soft">{dsnError}</p>}
                 <button type="button" data-testid="setup-dsn-apply" className="btn-mini" disabled={!dsn.trim()} onClick={() => applyDsn(dsn)}>
-                  解析并填入
+                  {t('setup.dsn.apply', '解析并填入')}
                 </button>
               </div>
             )}
@@ -613,12 +613,12 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
             <p className="num text-[11px] text-slate-500">{teslamateUrl}</p>
           </div>
           <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-400">
-            <li>在上方卡片打开 TeslaMate，完成 Tesla 账号授权（授权仅发生在 TeslaMate，AhaTesla 不接触 Tesla 密码）。</li>
-            <li>回到本页，向导会自动轮询发现你的车辆（最长 60 秒）。</li>
+            <li>{t('setup.tesla.step1', '在上方卡片打开 TeslaMate，完成 Tesla 账号授权（授权仅发生在 TeslaMate，AhaTesla 不接触 Tesla 密码）。')}</li>
+            <li>{t('setup.tesla.step2', '回到本页，向导会自动轮询发现你的车辆（最长 60 秒）。')}</li>
           </ol>
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-300">
             <Lock className="mr-1 inline h-3.5 w-3.5" />
-            安全提示：TeslaMate Web 默认无密码，请勿将 4000 端口映射公网；建议仅内网访问并由 AhaTesla 反代保护（AC-4.1）。
+            {t('setup.tesla.securityNote', '安全提示：TeslaMate Web 默认无密码，请勿将 4000 端口映射公网；建议仅内网访问并由 AhaTesla 反代保护（AC-4.1）。')}
           </p>
           {saved && !discovery?.found && (
             <p className="flex items-center gap-2 text-sm text-slate-400" data-testid="setup-discovery-polling">
@@ -644,7 +644,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
           {multiCar ? (
             <>
               <p className="text-sm text-slate-300">{t('setup.tesla.foundPrefix', '发现')} {discovery.cars.length} {t('setup.tesla.foundSuffix', '辆车，请选择主绑定车辆：')}</p>
-              <div className="space-y-2" role="radiogroup" aria-label="车辆选择器" data-testid="setup-car-selector">
+              <div className="space-y-2" role="radiogroup" aria-label={t('setup.tesla.carSelector', '车辆选择器')} data-testid="setup-car-selector">
                 {discovery.cars.map((car) => (
                   <CarOption
                     key={car.id}
@@ -657,7 +657,7 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
             </>
           ) : (
             <p className="flex items-center gap-1.5 text-sm text-emerald-400" data-testid="setup-single-car">
-              <CheckCircle2 className="h-4 w-4" /> 已发现你的 {discovery.car?.model || discovery.car?.name || 'Tesla'}
+              <CheckCircle2 className="h-4 w-4" /> {t('setup.tesla.foundYour', '已发现你的')} {discovery.car?.model || discovery.car?.name || 'Tesla'}
             </p>
           )}
         </div>

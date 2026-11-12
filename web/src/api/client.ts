@@ -1,4 +1,5 @@
 /** 统一 API 客户端：credentials include、401 → refresh → 重试（B3）、错误 toast */
+import { getUiLang } from '@/utils/format'
 import type { BatteryHealth } from '@/types'
 import type {
   CarDiscoveryResult,
@@ -71,7 +72,7 @@ async function request<T>(path: string, init?: RequestInit, retried = false): Pr
       }
     }
     let code = 'UNKNOWN'
-    let message = `请求失败 (${res.status})`
+    let message = getUiLang() === 'en' ? `Request failed (${res.status})` : `请求失败 (${res.status})`
     try {
       const body = await res.json()
       if (body?.error?.code) code = body.error.code

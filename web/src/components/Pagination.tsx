@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useI18n } from '@/i18n'
 
 export function Pagination({
   page,
@@ -9,14 +10,15 @@ export function Pagination({
   pageCount: number
   onChange: (page: number) => void
 }) {
+  const { t } = useI18n()
   if (pageCount <= 1) return null
   return (
-    <nav className="flex items-center justify-center gap-1.5 pt-4" data-testid="pagination" aria-label="分页">
+    <nav className="flex items-center justify-center gap-1.5 pt-4" data-testid="pagination" aria-label={t('pagination.label', '分页')}>
       <button
         className="btn-ghost !px-3 !py-2"
         onClick={() => onChange(page - 1)}
         disabled={page <= 1}
-        aria-label="上一页"
+        aria-label={t('pagination.prev', '上一页')}
       >
         <ChevronLeft className="h-4 w-4" />
       </button>
@@ -38,7 +40,7 @@ export function Pagination({
         className="btn-ghost !px-3 !py-2"
         onClick={() => onChange(page + 1)}
         disabled={page >= pageCount}
-        aria-label="下一页"
+        aria-label={t('pagination.next', '下一页')}
       >
         <ChevronRight className="h-4 w-4" />
       </button>

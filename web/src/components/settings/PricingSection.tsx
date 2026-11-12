@@ -8,6 +8,7 @@ import { ChevronDown, Database, History, Save } from 'lucide-react'
 import { api } from '@/api/client'
 import { EmptyState } from '@/components/EmptyState'
 import { useToast } from '@/components/Toast'
+import { useI18n } from '@/i18n'
 import { fmtDateTime, getCurrencySymbol } from '@/utils/format'
 import type { PricingLocation } from '@/types'
 
@@ -37,6 +38,7 @@ function useTouEditor() {
 export function PricingSection() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { t } = useI18n()
   const { data, isLoading } = useQuery({ queryKey: ['pricing'], queryFn: api.pricing })
   const { data: history } = useQuery({ queryKey: ['pricing-history'], queryFn: api.pricingHistory })
 
@@ -49,7 +51,7 @@ export function PricingSection() {
   const saveMutation = useMutation({
     mutationFn: (value: number) => api.setDefaultRate(value),
     onSuccess: () => {
-      toast('默认电价已保存', 'success')
+      toast(t('pricing.savedToast', '默认电价已保存'), 'success')
       void queryClient.invalidateQueries({ queryKey: ['pricing'] })
       void queryClient.invalidateQueries({ queryKey: ['pricing-history'] })
     },
@@ -59,7 +61,7 @@ export function PricingSection() {
   const onSave = () => {
     const value = Number.parseFloat(rate)
     if (!rate.trim() || Number.isNaN(value) || value <= 0 || value > 10) {
-      toast('请输入 0~10 之间的有效电价（元/kWh）', 'error')
+      toast(t('pricing.invalidRate', '请输入 0~10 之间的有效电价（元/kWh）'), 'error')
       return
     }
     saveMutation.mutate(value)
@@ -82,7 +84,7 @@ export function PricingSection() {
           }
         : { priceMode: 'fixed' }),
     onSuccess: () => {
-      toast(tou.mode === 'tou' ? '分时电价已保存' : '已改为固定计价', 'success')
+      toast(tou.mode === 'tou' ? t('pricing.touSaved', '分时电价已保存') : t('pricing.fixedSaved', '已改为固定计价'), 'success')
       tou.close()
       void queryClient.invalidateQueries({ queryKey: ['pricing'] })
     },
@@ -93,8 +95,8 @@ export function PricingSection() {
     <div className="space-y-5">
       {/* 默认价编辑 */}
       <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4" data-testid="default-rate-card">
-        <h3 className="text-xs font-medium text-slate-300">默认电价</h3>
-        <p className="section-desc mt-1">充电记录无地点单价时按此价格计费，变更只影响之后的新行程。</p>
+        <h3 className="text-xs font-medium text-slate-300">{t('pricing.default', '默认电价')}</h3>
+        <p className="section-desc mt-1">{t('pricing.defaultDesc', '充电记录无地点单价时按此价格计费，变更只影响之后的新行程。')}</p>
         <div className="mt-3 flex max-w-sm items-center gap-3">
           <div className="relative flex-1">
             <input
@@ -108,11 +110,11 @@ export function PricingSection() {
               value={rate}
               onChange={(e) => setRate(e.target.value)}
               placeholder="0.00"
-              aria-label="默认电价（元每千瓦时）"
+              aria-label={t('pricing.defaultAria', '默认电价（元每千瓦时）')}
               disabled={isLoading}
             />
             <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-500">
-              元/kWh
+              {t('pricing.unitSuffix', '元/kWh')}
             </span>
           </div>
           <button
@@ -122,7 +124,7 @@ export function PricingSection() {
             data-testid="save-rate"
           >
             <Save className="h-4 w-4" />
-            {saveMutation.isPending ? '保存中…' : '保存'}
+            {saveMutation.isPending ? t('settings.saving', '保存中…') : t('common.save', '保存')}
           </button>
         </div>
       </div>
@@ -131,9 +133,9 @@ export function PricingSection() {
       <div className="overflow-hidden rounded-xl border border-white/[0.06]" data-testid="location-table">
         <div className="flex items-center gap-2 px-4 py-3">
           <Database className="h-4 w-4 text-tesla" />
-          <span className="text-xs font-medium text-slate-200">地点电价</span>
+          <span className="text-xs font-medium text-slate-200">{t('pricing.byLocation', '地点电价')}</span>
           <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-slate-400">
-            teslamate geofences · 点击行配置分时
+            {t('pricing.geofenceHint', 'teslamate geofences · 点击行配置分时')}
           </span>
         </div>
         {isLoading ? (
@@ -143,17 +145,17 @@ export function PricingSection() {
             ))}
           </div>
         ) : !data || data.locations.length === 0 ? (
-          <EmptyState icon={Database} title="暂无地点电价" description="在 TeslaMate 中配置 geofence 电价后会自动同步" />
+          <EmptyState icon={Database} title={t('pricing.empty.title', '暂无地点电价')} description={t('pricing.empty.desc', '在 TeslaMate 中配置 geofence 电价后会自动同步')} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-y border-white/[0.06] bg-white/[0.02] text-left text-[11px] uppercase tracking-wide text-slate-400">
-                  <th className="px-4 py-2.5 font-medium">地点</th>
-                  <th className="px-4 py-2.5 text-right font-medium">单价 (元/kWh)</th>
-                  <th className="px-4 py-2.5 text-right font-medium">服务费</th>
-                  <th className="px-4 py-2.5 font-medium">计费方式</th>
-                  <th className="w-10 px-2 py-2.5" aria-label="展开分时配置" />
+                  <th className="px-4 py-2.5 font-medium">{t('pricing.col.location', '地点')}</th>
+                  <th className="px-4 py-2.5 text-right font-medium">{t('pricing.col.unit', '单价 (元/kWh)')}</th>
+                  <th className="px-4 py-2.5 text-right font-medium">{t('pricing.col.sessionFee', '服务费')}</th>
+                  <th className="px-4 py-2.5 font-medium">{t('pricing.col.billing', '计费方式')}</th>
+                  <th className="w-10 px-2 py-2.5" aria-label={t('pricing.col.expand', '展开分时配置')} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.04]">
@@ -178,10 +180,10 @@ export function PricingSection() {
       <div data-testid="rate-history">
         <div className="mb-2 flex items-center gap-2">
           <History className="h-4 w-4 text-tesla" />
-          <span className="text-xs font-medium text-slate-300">费率变更历史</span>
+          <span className="text-xs font-medium text-slate-300">{t('pricing.history', '费率变更历史')}</span>
         </div>
         {!history || history.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-xs text-slate-500">暂无变更记录</p>
+          <p className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-xs text-slate-500">{t('pricing.historyEmpty', '暂无变更记录')}</p>
         ) : (
           <ul className="divide-y divide-white/[0.04] rounded-xl border border-white/[0.06] px-4">
             {history.map((h, i) => (
@@ -217,6 +219,7 @@ function LocationRow({
   saving: boolean
   onSave: () => void
 }) {
+  const { t } = useI18n()
   const isTou = loc.priceMode === 'tou'
   return (
     <>
@@ -224,7 +227,7 @@ function LocationRow({
         <td className="max-w-[220px] truncate px-4 py-2.5 text-slate-200" title={loc.name}>{loc.name}</td>
         <td className="num px-4 py-2.5 text-right font-medium text-white">
           {isTou && loc.tou
-            ? <span title={`谷 ${getCurrencySymbol()}${loc.tou.offPeakRate.toFixed(3)} / 峰 ${getCurrencySymbol()}${loc.tou.peakRate.toFixed(3)}`}>分时</span>
+            ? <span title={`${t('pricing.tou.off', '谷')} ${getCurrencySymbol()}${loc.tou.offPeakRate.toFixed(3)} / ${t('pricing.tou.peak', '峰')} ${getCurrencySymbol()}${loc.tou.peakRate.toFixed(3)}`}>{t('pricing.tou.tag', '分时')}</span>
             : loc.pricePerUnit != null ? `${getCurrencySymbol()}${loc.pricePerUnit.toFixed(2)}` : '--'}
         </td>
         <td className="num px-4 py-2.5 text-right text-slate-400">
@@ -232,20 +235,20 @@ function LocationRow({
         </td>
         <td className="px-4 py-2.5 text-slate-400">
           {isTou && loc.tou ? (
-            <span className="num" title="谷段 → 峰段">
-              <span className="text-sky-400">谷 {loc.tou.offPeakStart}~{loc.tou.offPeakEnd} {getCurrencySymbol()}{loc.tou.offPeakRate.toFixed(2)}</span>
+            <span className="num" title={`${t('pricing.tou.off', '谷')} → ${t('pricing.tou.peak', '峰')}`}>
+              <span className="text-sky-400">{t('pricing.tou.off', '谷')} {loc.tou.offPeakStart}~{loc.tou.offPeakEnd} {getCurrencySymbol()}{loc.tou.offPeakRate.toFixed(2)}</span>
               <span className="mx-1.5 text-slate-600">/</span>
-              <span className="text-amber-400">峰 {getCurrencySymbol()}{loc.tou.peakRate.toFixed(2)}</span>
+              <span className="text-amber-400">{t('pricing.tou.peak', '峰')} {getCurrencySymbol()}{loc.tou.peakRate.toFixed(2)}</span>
             </span>
           ) : (
-            `固定 · ${loc.billingType}`
+            `${t('pricing.tou.fixedTag', '固定')} · ${loc.billingType}`
           )}
         </td>
         <td className="px-2 py-2.5">
           <button
             onClick={onToggle}
             aria-expanded={expanded}
-            aria-label={`${loc.name} 分时电价配置`}
+            aria-label={`${loc.name} ${t('pricing.tou.configAria', '分时电价配置')}`}
             data-testid={`tou-toggle-${loc.id}`}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-white"
           >
@@ -258,8 +261,8 @@ function LocationRow({
           <td colSpan={5} className="px-4 pb-4">
             <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="text-xs font-medium text-slate-300">{loc.name} · 计费方式</span>
-                <div className="seg" role="radiogroup" aria-label={`${loc.name} 计费方式`}>
+                <span className="text-xs font-medium text-slate-300">{loc.name} · {t('pricing.col.billing', '计费方式')}</span>
+                <div className="seg" role="radiogroup" aria-label={`${loc.name} ${t('pricing.col.billing', '计费方式')}`}>
                   {(['tou', 'fixed'] as const).map((m) => (
                     <button
                       key={m}
@@ -269,7 +272,7 @@ function LocationRow({
                       aria-checked={editor.mode === m}
                       data-testid={`tou-mode-${m}`}
                     >
-                      {m === 'tou' ? '分时（谷/峰）' : '固定单价'}
+                      {m === 'tou' ? t('pricing.tou.modeTou', '分时（谷/峰）') : t('pricing.tou.modeFixed', '固定单价')}
                     </button>
                   ))}
                 </div>
@@ -277,31 +280,31 @@ function LocationRow({
               {editor.mode === 'tou' ? (
                 <>
                   <div className="mt-3 flex items-center gap-4 text-[11px] text-slate-500">
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-sky-400" />谷段（如夜间家充）</span>
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-amber-400" />峰段（日间快充）</span>
-                    <span>按充电起止跨时段比例计价</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-sky-400" />{t('pricing.tou.offHint', '谷段（如夜间家充）')}</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-amber-400" />{t('pricing.tou.peakHint', '峰段（日间快充）')}</span>
+                    <span>{t('pricing.tou.ratioHint', '按充电起止跨时段比例计价')}</span>
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">谷段开始</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('pricing.tou.offStart', '谷段开始')}</label>
                       <input type="time" className="input-dark num" value={editor.offStart} onChange={(e) => editor.setOffStart(e.target.value)} data-testid="tou-off-start" />
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">谷段结束</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('pricing.tou.offEnd', '谷段结束')}</label>
                       <input type="time" className="input-dark num" value={editor.offEnd} onChange={(e) => editor.setOffEnd(e.target.value)} data-testid="tou-off-end" />
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">谷段单价（元/kWh）</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('pricing.tou.offRate', '谷段单价（元/kWh）')}</label>
                       <input type="number" step="0.001" min="0" inputMode="decimal" className="input-dark num" value={editor.offRate} onChange={(e) => editor.setOffRate(e.target.value)} data-testid="tou-off-rate" />
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">峰段单价（元/kWh）</label>
+                      <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('pricing.tou.peakRate', '峰段单价（元/kWh）')}</label>
                       <input type="number" step="0.001" min="0" inputMode="decimal" className="input-dark num" value={editor.peakRate} onChange={(e) => editor.setPeakRate(e.target.value)} data-testid="tou-peak-rate" />
                     </div>
                   </div>
                 </>
               ) : (
-                <p className="section-desc mt-3">按上表固定单价计费（单价来自 TeslaMate geofence 配置）。</p>
+                <p className="section-desc mt-3">{t('pricing.tou.fixedDesc', '按上表固定单价计费（单价来自 TeslaMate geofence 配置）。')}</p>
               )}
               <button
                 className="btn-primary mt-4"
@@ -310,7 +313,7 @@ function LocationRow({
                 data-testid="tou-save"
               >
                 <Save className="h-4 w-4" />
-                {saving ? '保存中…' : editor.mode === 'tou' ? '保存分时电价' : '改为固定计价'}
+                {saving ? t('settings.saving', '保存中…') : editor.mode === 'tou' ? t('pricing.tou.saveTou', '保存分时电价') : t('pricing.tou.saveFixed', '改为固定计价')}
               </button>
             </div>
           </td>

@@ -151,10 +151,8 @@ function SidebarCarCard() {
   )
 }
 
-/** 跳转设置页锚点并滚动到位：react-router 不会自动滚 hash，需手动找元素；
-    路由切换有渲染时差，rAF 重试若干帧（分区骨架同步渲染，通常 1~2 帧内命中） */
 /** 左下角头像菜单（Discord 式）：用户信息 / 主题·语言快捷开关 /
- *  账户安全入口（跳设置页锚点——完整编辑唯一入口在设置→账户安全，避免双表单漂移） /
+ *  账户安全入口（跳设置页锚点 #settings-xxx，滚动落地由 SettingsPage 的 hash effect 承接） /
  *  版本标识 / 退出登录 */
 function UserMenu() {
   const { user, logout } = useAuth()
@@ -213,7 +211,7 @@ function UserMenu() {
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tesla/15 text-sm font-semibold text-tesla">
           {user?.username?.[0]?.toUpperCase() ?? '?'}
         </div>
-        <div className="min-w-0 flex-1 truncate text-left text-sm text-slate-300">{user?.username ?? '未登录'}</div>
+        <div className="min-w-0 flex-1 truncate text-left text-sm text-slate-300">{user?.username ?? t('menu.notLoggedIn', '未登录')}</div>
         <svg
           viewBox="0 0 24 24"
           className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`}
@@ -350,7 +348,7 @@ export function AppLayout() {
           <LogoFull />
         </div>
         <SidebarCarCard />
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3" aria-label="主导航">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3" aria-label={t('nav.primary', '主导航')}>
           {SIDEBAR_ITEMS.map((item) => (
             <NavItem key={item.to} {...item} pending={pendingPath === item.to} onFeedback={navFeedback} />
           ))}
@@ -370,13 +368,14 @@ export function AppLayout() {
 
       {/* 移动端底部 TabBar（§6.1：4 项 概览/行程/充电/设置）。
           安全区 padding 必须在带背景的内层：iOS 主屏独立模式下 env(safe-area-inset-bottom)≈34px，
-          若垫在外层透明容器上，背景只铺到导航内容底部，栏会悬浮在透明缝上（内容穿缝而过） */}
-      <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
+          若垫在外层透明容器上，背景只铺到导航内容底部，栏会悬浮在透明缝上（内容穿缝而过）。
+          transform-gpu：强制独立合成层，修 iOS 主屏模式动量滚动时 fixed 底栏的亚像素漂移（视觉上"跟着滚"） */}
+      <div className="fixed inset-x-0 bottom-0 z-30 transform-gpu lg:hidden">
         <div className="border-t border-white/[0.06] bg-base-900/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
           <nav
             data-testid="mobile-tabbar"
             className="mx-auto grid max-w-md grid-cols-5 px-2 pt-1"
-            aria-label="底部导航"
+            aria-label={t('nav.bottom', '底部导航')}
           >
             {NAV_ITEMS.map((item) => (
               <NavLink

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   Activity,
   BellRing,
@@ -31,24 +31,24 @@ const CURRENCIES = [
   { symbol: '£', code: 'GBP', label: '£ 英镑' },
 ]
 
-const EVENTS: { id: PushEventId; label: string; desc: string }[] = [
-  { id: 'tripEnd', label: '行程结束小结', desc: '每次行程结束推送费用与路线概要' },
-  { id: 'chargingStart', label: '充电开始提醒', desc: '插入充电枪开始充电时' },
-  { id: 'chargingDone', label: '充电完成账单', desc: '充电结束推送电量与费用' },
-  { id: 'outage', label: '数据断联告警', desc: '告警 · TeslaMate 断联≥10 分钟/恢复,不受静音时段影响' },
-  { id: 'chargeInterrupt', label: '充电提前中止', desc: '告警 · 充电未到 80% 即停止时提醒检查枪桩' },
-  { id: 'tirePressure', label: '胎压过低', desc: '告警 · 四轮最低低于 2.6 bar 时提醒(24h 一次)' },
-  { id: 'daily', label: '每日早报', desc: '每天 08:00 汇总昨日用车与充电' },
-  { id: 'weekly', label: '每周周报', desc: '每周一 08:00 汇总上周' },
-  { id: 'monthly', label: '每月月报', desc: '每月 1 日 08:00 汇总上月' },
+const EVENTS: { id: PushEventId; labelKey: string; label: string; descKey: string; desc: string }[] = [
+  { id: 'tripEnd', labelKey: 'settings.ev.tripEnd', label: '行程结束小结', descKey: 'settings.ev.tripEnd.desc', desc: '每次行程结束推送费用与路线概要' },
+  { id: 'chargingStart', labelKey: 'settings.ev.chargingStart', label: '充电开始提醒', descKey: 'settings.ev.chargingStart.desc', desc: '插入充电枪开始充电时' },
+  { id: 'chargingDone', labelKey: 'settings.ev.chargingDone', label: '充电完成账单', descKey: 'settings.ev.chargingDone.desc', desc: '充电结束推送电量与费用' },
+  { id: 'outage', labelKey: 'settings.ev.outage', label: '数据断联告警', descKey: 'settings.ev.outage.desc', desc: '告警 · TeslaMate 断联≥10 分钟/恢复,不受静音时段影响' },
+  { id: 'chargeInterrupt', labelKey: 'settings.ev.chargeInterrupt', label: '充电提前中止', descKey: 'settings.ev.chargeInterrupt.desc', desc: '告警 · 充电未到 80% 即停止时提醒检查枪桩' },
+  { id: 'tirePressure', labelKey: 'settings.ev.tirePressure', label: '胎压过低', descKey: 'settings.ev.tirePressure.desc', desc: '告警 · 四轮最低低于 2.6 bar 时提醒(24h 一次)' },
+  { id: 'daily', labelKey: 'settings.ev.daily', label: '每日早报', descKey: 'settings.ev.daily.desc', desc: '每天 08:00 汇总昨日用车与充电' },
+  { id: 'weekly', labelKey: 'settings.ev.weekly', label: '每周周报', descKey: 'settings.ev.weekly.desc', desc: '每周一 08:00 汇总上周' },
+  { id: 'monthly', labelKey: 'settings.ev.monthly', label: '每月月报', descKey: 'settings.ev.monthly.desc', desc: '每月 1 日 08:00 汇总上月' },
 ]
-const CHANNELS: { id: PushChannelId; label: string }[] = [
-  { id: 'webpush', label: 'Web Push' },
-  { id: 'telegram', label: 'Telegram' },
-  { id: 'feishu', label: '飞书' },
-  { id: 'wecom', label: '企业微信' },
-  { id: 'ntfy', label: 'ntfy' },
-  { id: 'bark', label: 'Bark' },
+const CHANNELS: { id: PushChannelId; labelKey: string; label: string }[] = [
+  { id: 'webpush', labelKey: 'settings.ch.webpush', label: 'Web Push' },
+  { id: 'telegram', labelKey: 'settings.ch.telegram', label: 'Telegram' },
+  { id: 'feishu', labelKey: 'settings.ch.feishu', label: '飞书' },
+  { id: 'wecom', labelKey: 'settings.ch.wecom', label: '企业微信' },
+  { id: 'ntfy', labelKey: 'settings.ch.ntfy', label: 'ntfy' },
+  { id: 'bark', labelKey: 'settings.ch.bark', label: 'Bark' },
 ]
 
 const THEME_OPTIONS: { id: ThemeSetting; key: string; zh: string }[] = [
@@ -100,7 +100,37 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme()
   const { lang, setLang, t } = useI18n()
   const queryClient = useQueryClient()
+  const location = useLocation()
   const [activeSection, setActiveSection] = useState('appearance')
+
+  // 锚点直达：/settings#settings-xxx（头像菜单「账户安全」等入口）。
+  // react-router 不会自动滚 hash；路由切换有渲染时差，rAF 重试若干帧（分区骨架同步渲染，通常 1~2 帧内命中）。
+  // 注意用瞬时滚动（非 smooth）：分区数据（电价表/事件日志）异步到达会推高布局，
+  // smooth 的目标像素在起滚瞬间已定，会落在半路；瞬时 + 400/900ms 两次补滚校正。
+  useEffect(() => {
+    const hash = location.hash
+    if (!hash.startsWith('#settings-')) return
+    const id = hash.slice(1)
+    setActiveSection(id.replace('settings-', ''))
+    let tries = 0
+    let raf = 0
+    const timers: number[] = []
+    const scrollTo = () => {
+      const el = document.getElementById(id)
+      if (el) el.scrollIntoView({ block: 'start' })
+      return el != null
+    }
+    const tick = () => {
+      if (scrollTo()) return
+      if (++tries < 90) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    timers.push(window.setTimeout(scrollTo, 400), window.setTimeout(scrollTo, 900))
+    return () => {
+      cancelAnimationFrame(raf)
+      timers.forEach((h) => window.clearTimeout(h))
+    }
+  }, [location.hash])
 
   // 滚动监听高亮当前分区（IntersectionObserver 不可用时静默降级）
   useEffect(() => {
@@ -187,7 +217,7 @@ export default function SettingsPage() {
     onSuccess: ({ jobId }) => {
       setRecalcJob(jobId)
       setRecalcProgress(0)
-      toast('重算已启动', 'success')
+      toast(t('settings.recalc.started', '重算已启动'), 'success')
       if (pollRef.current) clearInterval(pollRef.current)
       pollRef.current = setInterval(async () => {
         try {
@@ -195,7 +225,7 @@ export default function SettingsPage() {
           setRecalcProgress(Math.round(job.progress * 100))
           if (job.status !== 'running') {
             if (pollRef.current) clearInterval(pollRef.current)
-            toast(job.status === 'done' ? t('settings.recalc.done', '历史账本重算完成') : '重算失败', job.status === 'done' ? 'success' : 'error')
+            toast(job.status === 'done' ? t('settings.recalc.done', '历史账本重算完成') : t('settings.recalc.failed', '重算失败'), job.status === 'done' ? 'success' : 'error')
             setRecalcJob(null)
           }
         } catch {
@@ -219,7 +249,7 @@ export default function SettingsPage() {
   const saveMatrix = useMutation({
     mutationFn: (m: Record<string, Record<string, boolean>>) =>
       api.setPushRulesV2({ matrix: m as never, weeklyReportDay: pushRules?.weeklyReportDay ?? 1 }),
-    onSuccess: () => toast('推送矩阵已保存', 'success'),
+    onSuccess: () => toast(t('settings.push.matrixSaved', '推送矩阵已保存'), 'success'),
     onError: (err) => toast(err.message, 'error'),
   })
 
@@ -258,7 +288,7 @@ export default function SettingsPage() {
         ...(aiApiKey.trim() ? { apiKey: aiApiKey.trim() } : {}),
       }),
     onSuccess: () => {
-      toast('AI 配置已保存', 'success')
+      toast(t('settings.ai.savedToast', 'AI 配置已保存'), 'success')
       setAiApiKey('')
       void queryClient.invalidateQueries({ queryKey: ['ai-config'] })
     },
@@ -268,9 +298,9 @@ export default function SettingsPage() {
   const testAi = useMutation({
     mutationFn: api.aiTest,
     onSuccess: (r) => {
-      if (r.ok && r.preview) toast(`连通正常：${r.preview.slice(0, 50)}`, 'success')
-      else if (r.ok) toast('连通正常', 'success')
-      else toast(r.error ?? '测试失败', 'error')
+      if (r.ok && r.preview) toast(`${t('settings.ai.ok', '连通正常')}：${r.preview.slice(0, 50)}`, 'success')
+      else if (r.ok) toast(t('settings.ai.ok', '连通正常'), 'success')
+      else toast(r.error ?? t('settings.ai.testFailed', '测试失败'), 'error')
     },
     onError: (err) => toast(err.message, 'error'),
   })
@@ -294,19 +324,19 @@ export default function SettingsPage() {
     const name = username.trim()
     const nameChanged = name !== (user?.username ?? '')
     if (nameChanged && name.length < 3) {
-      setError('用户名至少 3 个字符')
+      setError(t('settings.pw.err.nameShort', '用户名至少 3 个字符'))
       return
     }
     if (newPassword && newPassword.length < 8) {
-      setError('新密码至少 8 位')
+      setError(t('settings.pw.err.pwShort', '新密码至少 8 位'))
       return
     }
     if (newPassword !== confirmPassword) {
-      setError('两次输入的新密码不一致')
+      setError(t('settings.pw.err.mismatch', '两次输入的新密码不一致'))
       return
     }
     if (!nameChanged && !newPassword) {
-      setError('没有需要保存的修改')
+      setError(t('settings.pw.err.noChange', '没有需要保存的修改'))
       return
     }
     setSubmitting(true)
@@ -316,12 +346,12 @@ export default function SettingsPage() {
         newPassword: newPassword || undefined,
         newUsername: nameChanged ? name : undefined,
       })
-      toast('账户已更新', 'success')
+      toast(t('settings.pw.saved', '账户已更新'), 'success')
       setOldPassword('')
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '修改失败')
+      setError(err instanceof Error ? err.message : t('settings.pw.err.failed', '修改失败'))
     } finally {
       setSubmitting(false)
     }
@@ -413,7 +443,7 @@ export default function SettingsPage() {
                         name="car-primary"
                         checked={carPrimaryId === c.id}
                         onChange={() => setCarPrimaryId(c.id)}
-                        aria-label={`${c.name} 设为主车`}
+                        aria-label={`${c.name} ${t('settings.cars.setPrimary', '设为主车')}`}
                         data-testid={`car-primary-${c.id}`}
                         className="h-4 w-4 accent-[#E82127]"
                       />
@@ -506,14 +536,14 @@ export default function SettingsPage() {
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.fuel.consumption', '百公里油耗')}</label>
                   <div className="relative">
-                    <input type="number" step="0.1" min="1" max="30" inputMode="decimal" className="input-dark num pr-16" value={liter} onChange={(e) => setLiter(e.target.value)} aria-label="百公里油耗（升）" data-testid="fuel-liter" />
+                    <input type="number" step="0.1" min="1" max="30" inputMode="decimal" className="input-dark num pr-16" value={liter} onChange={(e) => setLiter(e.target.value)} aria-label={`${t('settings.fuel.consumption', '百公里油耗')}（L）`} data-testid="fuel-liter" />
                     <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-500">L/100km</span>
                   </div>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-slate-400">{t('settings.fuel.price', '油价')}</label>
                   <div className="relative">
-                    <input type="number" step="0.01" min="1" max="50" inputMode="decimal" className="input-dark num pr-10" value={fuelPrice} onChange={(e) => setFuelPrice(e.target.value)} aria-label="油价（每升）" data-testid="fuel-price" />
+                    <input type="number" step="0.01" min="1" max="50" inputMode="decimal" className="input-dark num pr-10" value={fuelPrice} onChange={(e) => setFuelPrice(e.target.value)} aria-label={`${t('settings.fuel.price', '油价')}（${currency}/L）`} data-testid="fuel-price" />
                     <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-500">{currency}/L</span>
                   </div>
                 </div>
@@ -540,7 +570,7 @@ export default function SettingsPage() {
                   disabled={startRecalc.isPending || recalcJob != null}
                   data-testid="recalc-button"
                 >
-                  {recalcJob ? `重算中 ${recalcProgress}%` : t('settings.recalc.start', '开始重算')}
+                  {recalcJob ? t('settings.recalc.running', '重算中 {p}%').replace('{p}', String(recalcProgress)) : t('settings.recalc.start', '开始重算')}
                 </button>
               </div>
               {recalcJob != null && (
@@ -574,7 +604,7 @@ export default function SettingsPage() {
             <div className="mt-4 flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
               <Toggle checked={aiEnabled} onChange={setAiEnabled} label={t('settings.ai.enabled', '启用')} />
               <span className={`text-[11px] ${aiEnabled ? 'text-emerald-400' : 'text-slate-500'}`}>
-                {aiEnabled ? 'AI 润色已开启' : '使用内置模板'}
+                {aiEnabled ? t('settings.ai.polishOn', 'AI 润色已开启') : t('settings.ai.builtinTemplate', '使用内置模板')}
               </span>
             </div>
 
@@ -663,14 +693,16 @@ export default function SettingsPage() {
                     <div key={ev.id} className="flex flex-col gap-2.5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 text-[13px] text-slate-200">
-                          {ev.label}
+                          {t(ev.labelKey, ev.label)}
                           {enabledCount > 0 ? (
-                            <span className="rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">{enabledCount} 渠道</span>
+                            <span className="rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                              {t('settings.push.channelsCount', '{n} 渠道').replace('{n}', String(enabledCount))}
+                            </span>
                           ) : (
-                            <span className="rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-500">已静音</span>
+                            <span className="rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-500">{t('settings.push.muted', '已静音')}</span>
                           )}
                         </div>
-                        <div className="mt-0.5 text-[11px] text-slate-500">{ev.desc}</div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">{t(ev.descKey, ev.desc)}</div>
                       </div>
                       {/* 渠道 chips：点亮即启用，一行搞定 6 渠道 */}
                       <div className="flex shrink-0 gap-1.5">
@@ -681,7 +713,7 @@ export default function SettingsPage() {
                               key={ch.id}
                               onClick={() => toggleMatrix(ev.id, ch.id)}
                               aria-pressed={on}
-                              aria-label={`${ev.label} ${ch.label}`}
+                              aria-label={`${t(ev.labelKey, ev.label)} ${t(ch.labelKey, ch.label)}`}
                               data-testid={`matrix-${ev.id}-${ch.id}`}
                               className={`rounded-full border px-3 py-1.5 text-[11px] font-medium transition active:scale-[0.96] ${
                                 on
@@ -689,7 +721,7 @@ export default function SettingsPage() {
                                   : 'border-white/[0.08] text-slate-500 hover:border-white/20 hover:text-slate-300'
                               }`}
                             >
-                              {ch.label}
+                              {t(ch.labelKey, ch.label)}
                             </button>
                           )
                         })}
@@ -745,7 +777,7 @@ export default function SettingsPage() {
                 </div>
               )}
               <button type="submit" className="btn-primary w-full" disabled={submitting} data-testid="password-submit">
-                {submitting ? '提交中…' : t('settings.pw.submit', '修改密码')}
+                {submitting ? t('common.working', '提交中…') : t('settings.pw.submit', '修改密码')}
               </button>
             </form>
           </section>

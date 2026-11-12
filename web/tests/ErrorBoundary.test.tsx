@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { BatteryRing } from '@/components/BatteryRing'
+import { I18nProvider } from '@/i18n'
 
 function Boom(): never {
   throw new Error('null.toFixed exploded')
@@ -11,9 +12,11 @@ describe('ErrorBoundary（单页崩溃不白屏）', () => {
   it('渲染异常时显示兜底卡与重试按钮，而非整树崩塌', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     render(
-      <ErrorBoundary resetKey="/charging">
-        <Boom />
-      </ErrorBoundary>,
+      <I18nProvider>
+        <ErrorBoundary resetKey="/charging">
+          <Boom />
+        </ErrorBoundary>
+      </I18nProvider>,
     )
     expect(screen.getByTestId('page-error')).toBeTruthy()
     expect(screen.getByText('重试')).toBeTruthy()

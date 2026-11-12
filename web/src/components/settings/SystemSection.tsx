@@ -11,11 +11,12 @@ import { Toggle } from '@/components/Toggle'
 import { useI18n } from '@/i18n'
 import { api } from '@/api/client'
 import { EmptyState } from '@/components/EmptyState'
-import { fmtDateTime, timeAgo } from '@/utils/format'
+import { fmtDateTime, getUiLang, timeAgo } from '@/utils/format'
 import type { SystemEvent } from '@/types'
 
 /** 状态点 + 文案行（保留 status-dot-{label} 语义供测试定位） */
 function StatusDot({ ok, label, loading }: { ok: boolean; label: string; loading?: boolean }) {
+  const { t } = useI18n()
   // loading=true 显示中性灰点，避免首帧误报"断开"
   return (
     <span className="flex items-center gap-2 text-[13px]">
@@ -29,7 +30,7 @@ function StatusDot({ ok, label, loading }: { ok: boolean; label: string; loading
         />
       </span>
       <span className={loading ? 'text-slate-400' : ok ? 'text-slate-200' : 'text-tesla-soft'}>
-        {loading ? '检测中…' : label}
+        {loading ? t('system.detecting', '检测中…') : label}
       </span>
     </span>
   )
@@ -39,9 +40,10 @@ function fmtUptime(sec: number): string {
   const d = Math.floor(sec / 86400)
   const h = Math.floor((sec % 86400) / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  if (d > 0) return `${d} 天 ${h} 小时`
-  if (h > 0) return `${h} 小时 ${m} 分`
-  return `${m} 分钟`
+  const en = getUiLang() === 'en'
+  if (d > 0) return en ? `${d}d ${h}h` : `${d} 天 ${h} 小时`
+  if (h > 0) return en ? `${h}h ${m}m` : `${h} 小时 ${m} 分`
+  return en ? `${m}m` : `${m} 分钟`
 }
 
 /** 状态瓦片头部的小 pill */
@@ -55,11 +57,11 @@ function Pill({ tone, children }: { tone: 'ok' | 'bad' | 'neutral'; children: st
   return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>{children}</span>
 }
 
-/** 事件等级 → 色点/筛选标签 */
-const LEVEL_META: Record<SystemEvent['level'], { dot: string; label: string }> = {
-  info: { dot: 'bg-slate-400', label: '信息' },
-  warn: { dot: 'bg-amber-400', label: '警告' },
-  error: { dot: 'bg-tesla', label: '错误' },
+/** 事件等级 → 色点/筛选标签（key 交给调用点 t() 双语） */
+const LEVEL_META: Record<SystemEvent['level'], { dot: string; key: string; label: string }> = {
+  info: { dot: 'bg-slate-400', key: 'system.level.info', label: '信息' },
+  warn: { dot: 'bg-amber-400', key: 'system.level.warn', label: '警告' },
+  error: { dot: 'bg-tesla', key: 'system.level.error', label: '错误' },
 }
 type LevelFilter = 'all' | SystemEvent['level']
 
@@ -92,8 +94,8 @@ export function SystemSection() {
   const mqtt = status?.teslamate.mqtt
   const mqttConfigured = mqtt != null
   const faults: string[] = []
-  if (status && !status.teslamate.dbOk) faults.push('数据库断开')
-  if (mqtt && !mqtt.ok) faults.push('MQTT 断开')
+  if (status && !status.teslamate.dbOk) faults.push(t('system.dbDown', '数据库断开'))
+  if (mqtt && !mqtt.ok) faults.push(t('system.mqttDown', 'MQTT 断开'))
 
   // ---- 事件筛选 ----
   const [filter, setFilter] = useState<LevelFilter>('all')
@@ -161,8 +163,8 @@ export function SystemSection() {
             <>
               <ShieldCheck className="h-5 w-5 shrink-0 text-emerald-400" />
               <div className="min-w-0">
-                <div className="text-sm font-medium text-emerald-400">全部系统正常运行</div>
-                <div className="mt-0.5 text-[11px] text-slate-400">数据源与推送服务工作正常</div>
+                <div className="text-sm font-medium text-emerald-400">{t('system.allOk', '全部系统正常运行')}</div>
+                <div className="mt-0.5 text-[11px] text-slate-400">{t('system.allOkDesc', '数据源与推送服务工作正常')}</div>
               </div>
             </>
           ) : (
@@ -172,7 +174,7 @@ export function SystemSection() {
                 <div className={`text-sm font-medium ${status.teslamate.dbOk ? 'text-amber-400' : 'text-tesla-soft'}`}>
                   {faults.join(' · ')}
                 </div>
-                <div className="mt-0.5 text-[11px] text-slate-400">请检查对应服务与凭据配置</div>
+                <div className="mt-0.5 text-[11px] text-slate-400">{t('system.faultDesc', '请检查对应服务与凭据配置')}</div>
               </div>
             </>
           )}
@@ -190,20 +192,20 @@ export function SystemSection() {
             <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
               <Database className="h-3.5 w-3.5" /> TeslaMate DB
             </div>
-            {isLoading ? <Pill tone="neutral">--</Pill> : <Pill tone={status?.teslamate.dbOk ? 'ok' : 'bad'}>{status?.teslamate.dbOk ? '正常' : '断开'}</Pill>}
+            {isLoading ? <Pill tone="neutral">--</Pill> : <Pill tone={status?.teslamate.dbOk ? 'ok' : 'bad'}>{status?.teslamate.dbOk ? t('system.ok', '正常') : t('system.down', '断开')}</Pill>}
           </div>
           {isLoading ? (
             <div className="skeleton h-8 w-24" />
           ) : (
             <div className="flex items-baseline gap-1.5" data-testid="db-latency">
               <span className="num text-2xl font-semibold text-white">{status?.teslamate.latencyMs ?? '--'}</span>
-              <span className="text-xs text-slate-500">ms Ping 延迟</span>
+              <span className="text-xs text-slate-500">{t('system.pingLatency', 'ms Ping 延迟')}</span>
             </div>
           )}
           <StatusDot
             ok={status?.teslamate.dbOk ?? false}
             loading={!status}
-            label={status?.teslamate.dbOk ? 'PostgreSQL 正常' : '数据库断开'}
+            label={status?.teslamate.dbOk ? t('system.pgOk', 'PostgreSQL 正常') : t('system.dbDown', '数据库断开')}
           />
         </div>
 
@@ -216,17 +218,17 @@ export function SystemSection() {
             {isLoading ? (
               <Pill tone="neutral">--</Pill>
             ) : mqttConfigured ? (
-              <Pill tone={mqtt.ok ? 'ok' : 'bad'}>{mqtt.ok ? '正常' : '断开'}</Pill>
+              <Pill tone={mqtt.ok ? 'ok' : 'bad'}>{mqtt.ok ? t('system.ok', '正常') : t('system.down', '断开')}</Pill>
             ) : (
-              <Pill tone="neutral">未配置</Pill>
+              <Pill tone="neutral">{t('system.notConfigured', '未配置')}</Pill>
             )}
           </div>
           {isLoading ? (
             <div className="skeleton h-8 w-24" />
           ) : mqttConfigured ? (
-            <StatusDot ok={mqtt.ok} label={mqtt.ok ? 'MQTT 正常' : 'MQTT 断开'} />
+            <StatusDot ok={mqtt.ok} label={mqtt.ok ? t('system.mqttOk', 'MQTT 正常') : t('system.mqttDown', 'MQTT 断开')} />
           ) : (
-            <div className="text-sm text-slate-300">未配置（轮询基线）</div>
+            <div className="text-sm text-slate-300">{t('system.pollingBaseline', '未配置（轮询基线）')}</div>
           )}
         </div>
 
@@ -234,16 +236,16 @@ export function SystemSection() {
         <div className="space-y-2.5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
-              <HardDrive className="h-3.5 w-3.5" /> 服务
+              <HardDrive className="h-3.5 w-3.5" /> {t('system.service', '服务')}
             </div>
-            <Pill tone="ok">运行中</Pill>
+            <Pill tone="ok">{t('system.running', '运行中')}</Pill>
           </div>
           {isLoading ? (
             <div className="skeleton h-8 w-28" />
           ) : (
             <div className="num text-2xl font-semibold text-white">{status ? fmtUptime(status.uptime) : '--'}</div>
           )}
-          <div className="text-[11px] text-slate-500">最近行车 {status ? timeAgo(status.teslamate.lastDriveAt) : '--'}</div>
+          <div className="text-[11px] text-slate-500">{t('system.lastDrive', '最近行车')} {status ? timeAgo(status.teslamate.lastDriveAt) : '--'}</div>
         </div>
       </div>
 
@@ -255,9 +257,9 @@ export function SystemSection() {
         >
           <ShieldCheck className={`h-5 w-5 shrink-0 ${status.teslamate.readonlyVerified ? 'text-emerald-400' : 'text-tesla-soft'}`} />
           {status.teslamate.readonlyVerified ? (
-            <span className="text-emerald-400">只读模式运行中（写入已强阻断）</span>
+            <span className="text-emerald-400">{t('system.readonlyOk', '只读模式运行中（写入已强阻断）')}</span>
           ) : (
-            <span className="text-tesla-soft">⚠ 只读校验失败：当前数据库账号疑似具备写权限，请检查账号配置</span>
+            <span className="text-tesla-soft">{t('system.readonlyBad', '⚠ 只读校验失败：当前数据库账号疑似具备写权限，请检查账号配置')}</span>
           )}
         </div>
       )}
@@ -266,9 +268,9 @@ export function SystemSection() {
       <div className="overflow-hidden rounded-xl border border-white/[0.06]" data-testid="event-log">
         <div className="flex flex-wrap items-center gap-2 px-4 py-3">
           <ScrollText className="h-4 w-4 text-tesla" />
-          <span className="text-xs font-medium text-slate-200">事件日志</span>
+          <span className="text-xs font-medium text-slate-200">{t('system.eventLog', '事件日志')}</span>
           <span className="num rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-slate-400">
-            {filtered ? `${filtered.length} 条` : '—'}
+            {filtered ? t('system.eventCount', '{n} 条').replace('{n}', String(filtered.length)) : '—'}
           </span>
           {/* 等级筛选 chips */}
           <div className="ml-auto flex gap-1" data-testid="event-filter">
@@ -284,7 +286,7 @@ export function SystemSection() {
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
-                {lv === 'all' ? '全部' : LEVEL_META[lv].label}
+                {lv === 'all' ? t('system.filterAll', '全部') : t(LEVEL_META[lv].key, LEVEL_META[lv].label)}
               </button>
             ))}
           </div>
@@ -297,9 +299,13 @@ export function SystemSection() {
           </div>
         ) : !filtered || filtered.length === 0 ? (
           filter === 'all' ? (
-            <EmptyState icon={ScrollText} title="暂无事件" description="推送记录与错误会显示在这里" />
+            <EmptyState icon={ScrollText} title={t('system.noEvents', '暂无事件')} description={t('system.noEventsDesc', '推送记录与错误会显示在这里')} />
           ) : (
-            <EmptyState icon={ScrollText} title={`没有${LEVEL_META[filter].label}级事件`} description="试试切回「全部」" />
+            <EmptyState
+              icon={ScrollText}
+              title={t('system.noLevelEvents', '没有{lv}级事件').replace('{lv}', t(LEVEL_META[filter].key, LEVEL_META[filter].label))}
+              description={t('system.tryAll', '试试切回「全部」')}
+            />
           )
         ) : (
           <ul className="max-h-[420px] divide-y divide-white/[0.04] overflow-y-auto" data-testid="event-list">

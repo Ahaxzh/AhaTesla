@@ -137,6 +137,79 @@ test("头像菜单：主题/语言快捷开关 + 账户安全跳设置页锚点 
   // 跳转设置页账户安全锚点，密码表单可见
   await expect(page).toHaveURL(/settings#settings-security/, { timeout: 8000 });
   await expect(page.getByTestId("change-password-card")).toBeVisible();
+  // v0.2.x 修复：锚点不只是换 URL，还要真实滚动到该分区（视口内可见）
+  await expect(page.getByTestId("change-password-card")).toBeInViewport({ timeout: 5000 });
+});
+
+test("总览页：状态胶囊与数据同步合并行 + 胎压 FL/FR 缩写 + 近7天切换条形视图", async ({ page }) => {
+  await login(page);
+  // v0.2.x：状态胶囊（car-state-pill）与「数据同步于」同行（不再占顶部独立位置）
+  await expect(page.getByTestId("car-state-pill")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTestId("car-synced")).toContainText(/数据同步于|just now|min ago|h ago|d ago/);
+  // 胎压四轮：位置用国际缩写 FL/FR/RL/RR
+  const tp = page.getByTestId("tire-pressure");
+  if (await tp.isVisible().catch(() => false)) {
+    await expect(tp).toContainText("FL");
+    await expect(tp).toContainText("RR");
+  }
+  // 用车日历三档：点近7天 → 紧凑每日条形（无周历网格）
+  await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
+  await page.getByTestId("heatmap-range-7").click();
+  await page.waitForSelector("[data-testid='heatmap-daily-bars']", { timeout: 8000 });
+  await expect(page.getByTestId("heatmap-daily-row").first()).toBeVisible();
+  // 切回近3月 → 周历网格恢复
+  await page.getByTestId("heatmap-range-90").click();
+  await page.waitForSelector("[data-testid='heatmap-grid']", { timeout: 8000 });
+});
+
+test("移动端：底部导航栏固定不随页面滚动 + viewport 禁缩放", async ({ page }) => {
+  await login(page);
+  const viewport = page.viewportSize();
+  if (!viewport || viewport.width >= 1024) {
+    test.skip(true, "仅移动端视口执行");
+    return;
+  }
+  // iOS 主屏 PWA 禁缩放：viewport meta 带 user-scalable=no（+ JS gesture 拦截，浏览器内不可模拟）
+  const meta = await page.$eval("meta[name='viewport']", (el) => el.getAttribute("content"));
+  expect(meta).toContain("user-scalable=no");
+  // 长页面滚动后 TabBar 位置不动
+  await navigate(page, "trips");
+  await page.waitForTimeout(800);
+  const bar = page.getByTestId("mobile-tabbar");
+  await expect(bar).toBeVisible();
+  const before = await bar.boundingBox();
+  await page.mouse.wheel(0, 1600);
+  await page.waitForTimeout(600);
+  const after = await bar.boundingBox();
+  expect(after).toBeTruthy();
+  expect(Math.abs(after.y - before.y)).toBeLessThan(2);
+});
+
+test("充电页：充电次数第四卡 + 电池健康卡", async ({ page }) => {
+  await login(page);
+  await navigate(page, "charging");
+  await page.waitForSelector("[data-testid='charge-stats']", { timeout: 15000 });
+  await expect(page.getByTestId("charge-stats")).toContainText(/次|sessions/i);
+  // 电池健康卡：样本充足才渲染（与仪表盘同卡），可见时断言健康度数值
+  const bh = page.getByTestId("battery-health-card");
+  if (await bh.isVisible().catch(() => false)) {
+    await expect(bh).toContainText(/%/);
+  }
+});
+
+test("移动端：充电页统计四卡在窄屏两列排布不溢出", async ({ page }) => {
+  await login(page);
+  const viewport = page.viewportSize();
+  if (!viewport || viewport.width >= 1024) {
+    test.skip(true, "仅移动端视口执行");
+    return;
+  }
+  await navigate(page, "charging");
+  await page.waitForSelector("[data-testid='charge-stats']", { timeout: 15000 });
+  const stats = await page.getByTestId("charge-stats").boundingBox();
+  const body = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(body).toBeLessThanOrEqual(viewport.width + 1); // 无横向滚动
+  expect(stats).toBeTruthy();
 });
 
 test("登出后回到登录页且受保护页 401 跳转", async ({ page }) => {

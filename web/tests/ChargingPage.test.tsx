@@ -9,9 +9,13 @@ afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
 describe('ChargingPage', () => {
-  it('渲染统计卡、地点条形图与充电列表', async () => {
+  it('渲染统计卡（含量/价/次数四卡）、电池健康卡、地点条形图与充电列表', async () => {
     renderWithProviders(<ChargingPage />)
     expect(await screen.findByTestId('charge-total-cost')).toHaveTextContent('¥168.40')
+    // v0.2.x：第四张「充电次数」卡（stats.sessionCount）+ 电池健康卡复用
+    const stats = screen.getByTestId('charge-stats')
+    expect(stats).toHaveTextContent('24 次')
+    expect(await screen.findByTestId('battery-health-card')).toBeInTheDocument()
 
     const bars = await screen.findAllByTestId('location-bar')
     expect(bars).toHaveLength(2)

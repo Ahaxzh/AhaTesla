@@ -3,18 +3,19 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useI18n } from '@/i18n'
 
-/** 速度→颜色映射（km/h）：0 蓝 → 40 青 → 70 绿 → 100 黄 → 130+ 红 */
+/** 速度→颜色映射（km/h）：0 靛 → 40 蓝 → 70 青 → 100 紫 → 130+ 红。
+ *  刻意避开绿/黄段：高德标准底图主干道是黄色系，绿黄轨迹与其糊在一起分不清。 */
 function speedColor(kmh: number | null | undefined): string {
   if (kmh == null || !Number.isFinite(kmh)) return '#64748B'
   const stops: Array<[number, [number, number, number]]> = [
-    [0, [56, 130, 246]],   // 蓝
-    [40, [34, 211, 238]],  // 青
-    [70, [52, 211, 153]],  // 绿
-    [100, [250, 204, 21]], // 黄
-    [130, [239, 68, 68]],  // 红
+    [0, [79, 70, 229]],    // 靛 indigo-600
+    [40, [37, 99, 235]],   // 蓝 blue-600
+    [70, [6, 182, 212]],   // 青 cyan-500
+    [100, [147, 51, 234]], // 紫 purple-600
+    [130, [220, 38, 38]],  // 红 red-600
   ]
-  if (kmh <= 0) return 'rgb(56,130,246)'
-  if (kmh >= 130) return 'rgb(239,68,68)'
+  if (kmh <= 0) return 'rgb(79,70,229)'
+  if (kmh >= 130) return 'rgb(220,38,38)'
   for (let i = 0; i < stops.length - 1; i++) {
     const [s0, c0] = stops[i]
     const [s1, c1] = stops[i + 1]
@@ -24,7 +25,7 @@ function speedColor(kmh: number | null | undefined): string {
       return `rgb(${c[0]},${c[1]},${c[2]})`
     }
   }
-  return 'rgb(239,68,68)'
+  return 'rgb(220,38,38)'
 }
 
 // ---- WGS84 → GCJ02（国测局加密坐标）----
@@ -65,7 +66,7 @@ type RoutePoint = { lat: number; lng: number; t?: string; speed?: number | null 
 
 /**
  * 行程路线图：Leaflet + 高德底图（国内直连快，GCJ02 纠偏贴路），
- * 轨迹按速度分段着色（蓝→青→绿→黄→红），起终点标记，悬停提示速度。
+ * 轨迹按速度分段着色（靛→蓝→青→紫→红，避开底图黄色路网），起终点标记，悬停提示速度。
  * 瓦片由浏览器从高德 CDN 拉取（仅底图网格坐标，不含轨迹数据，无上传）。
  */
 export function RouteMap({
@@ -210,7 +211,7 @@ export function RouteMap({
         className="flex h-40 items-center justify-center rounded-xl bg-white/[0.03] text-xs text-slate-500"
         data-testid="route-map-empty"
       >
-        暂无路线轨迹数据
+        {t('tripDetail.map.empty', '暂无路线轨迹数据')}
       </div>
     )
   }
@@ -270,7 +271,7 @@ export function RouteMap({
             <span>{t('tripDetail.map.slow', '慢')}</span>
             <span
               className="inline-block h-2 w-28 rounded-full"
-              style={{ background: 'linear-gradient(to right, rgb(56,130,246), rgb(34,211,238), rgb(52,211,153), rgb(250,204,21), rgb(239,68,68))' }}
+              style={{ background: 'linear-gradient(to right, rgb(79,70,229), rgb(37,99,235), rgb(6,182,212), rgb(147,51,234), rgb(220,38,38))' }}
             />
             <span>{t('tripDetail.map.fast', '快')}{maxSpeed != null ? t('tripDetail.map.max', '（最高 {v} km/h）').replace('{v}', String(Math.round(maxSpeed))) : ''}</span>
           </span>

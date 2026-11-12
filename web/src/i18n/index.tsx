@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { EN } from './en'
+import { setUiLang } from '@/utils/format'
 
 export type Lang = 'zh' | 'en'
 
@@ -29,9 +30,10 @@ const I18nContext = createContext<I18nState | null>(null)
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(initialLang)
 
-  // 无障碍:<html lang> 跟随界面语言
+  // 无障碍:<html lang> 跟随界面语言;非组件层(format.ts 时长/相对时间、client.ts 错误文案)同步注入
   useEffect(() => {
     document.documentElement.lang = lang
+    setUiLang(lang)
   }, [lang])
 
   const setLang = useCallback((l: Lang) => {

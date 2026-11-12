@@ -1,4 +1,23 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { useI18n } from '@/i18n'
+
+/** 错误态视图（函数组件才能用 useI18n；class 渲染时挂载） */
+function ErrorFallbackView({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 p-8 text-center" data-testid="page-error">
+      <div className="text-4xl">⚠️</div>
+      <div className="text-sm text-slate-300">{t('error.title', '页面渲染出了点问题')}</div>
+      <div className="max-w-md break-all text-[11px] text-slate-500">{message}</div>
+      <button
+        className="rounded-lg bg-white/10 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/20"
+        onClick={onRetry}
+      >
+        {t('common.retry', '重试')}
+      </button>
+    </div>
+  )
+}
 
 /** 单页渲染异常兜底：任何一条脏数据（如 null.toFixed）只熄灭当前页，
  *  TabBar/导航保持可用，可一键重试 —— 不再整站白屏（CLAUDE.md 禁白屏）。
@@ -36,17 +55,10 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 p-8 text-center" data-testid="page-error">
-        <div className="text-4xl">⚠️</div>
-        <div className="text-sm text-slate-300">页面渲染出了点问题</div>
-        <div className="max-w-md break-all text-[11px] text-slate-500">{String(this.state.error?.message || '')}</div>
-        <button
-          className="rounded-lg bg-white/10 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/20"
-          onClick={() => this.setState({ error: null })}
-        >
-          重试
-        </button>
-      </div>
+      <ErrorFallbackView
+        message={String(this.state.error?.message || '')}
+        onRetry={() => this.setState({ error: null })}
+      />
     )
   }
 }

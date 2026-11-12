@@ -253,7 +253,7 @@ function TelegramCard() {
             id="tg-token"
             type="password"
             className="input-dark"
-            placeholder={telegram?.botAlias ? `已保存（${telegram.botAlias}…），留空则不修改` : '123456789:AAF…'}
+            placeholder={telegram?.botAlias ? t('push.savedKeep', '已保存（{alias}…），留空则不修改').replace('{alias}', telegram.botAlias) : '123456789:AAF…'}
             value={botToken}
             onChange={(e) => setBotToken(e.target.value)}
             data-testid="tg-token-input"
@@ -264,7 +264,7 @@ function TelegramCard() {
           <input
             id="tg-chat"
             className="input-dark num"
-            placeholder={telegram?.chatIdAlias ? `已保存（${telegram.chatIdAlias}…）` : '123456789'}
+            placeholder={telegram?.chatIdAlias ? t('push.saved', '已保存（{alias}…）').replace('{alias}', telegram.chatIdAlias) : '123456789'}
             value={chatId}
             onChange={(e) => setChatId(e.target.value)}
             data-testid="tg-chat-input"
@@ -327,7 +327,7 @@ function FeishuCard() {
             <Link2 className="h-[18px] w-[18px]" />
           </div>
           <div>
-            <h2 className="text-sm font-medium text-slate-100">飞书</h2>
+            <h2 className="text-sm font-medium text-slate-100">{t('push.ch.feishu', '飞书')}</h2>
             <p className="text-[11px] text-slate-400">{t('push.feishu.tagline', '应用消息推送渠道')}</p>
           </div>
         </div>
@@ -364,7 +364,7 @@ function FeishuCard() {
             id="feishu-secret"
             type="password"
             className="input-dark"
-            placeholder="已保存的 Secret 不会回传，留空则不修改"
+            placeholder={t('push.secretKeep', '已保存的 Secret 不会回传，留空则不修改')}
             value={appSecret}
             onChange={(e) => setAppSecret(e.target.value)}
           />
@@ -463,7 +463,7 @@ function WecomCard() {
             id="wecom-key"
             type="password"
             className="input-dark"
-            placeholder={wecom?.webhookKeyAlias ? `已保存（${wecom.webhookKeyAlias}…），留空则不修改` : '群机器人 webhook 地址中 key= 后面的部分'}
+            placeholder={wecom?.webhookKeyAlias ? t('push.savedKeep', '已保存（{alias}…），留空则不修改').replace('{alias}', wecom.webhookKeyAlias) : t('push.wecom.keyPh', '群机器人 webhook 地址中 key= 后面的部分')}
             value={webhookKey}
             onChange={(e) => setWebhookKey(e.target.value)}
             data-testid="wecom-key"
@@ -615,7 +615,7 @@ function BarkCard() {
             id="bark-key"
             type="password"
             className="input-dark"
-            placeholder={bark?.deviceKeyAlias ? `已保存（${bark.deviceKeyAlias}…），留空则不修改` : 'Bark App 里复制的关键字符串'}
+            placeholder={bark?.deviceKeyAlias ? t('push.savedKeep', '已保存（{alias}…），留空则不修改').replace('{alias}', bark.deviceKeyAlias) : t('push.bark.keyPh', 'Bark App 里复制的关键字符串')}
             value={deviceKey}
             onChange={(e) => setDeviceKey(e.target.value)}
             data-testid="bark-key"

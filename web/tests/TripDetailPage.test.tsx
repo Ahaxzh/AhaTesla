@@ -49,6 +49,13 @@ describe('TripDetailPage', () => {
     expect(screen.getByTestId('efficiency-badge')).toHaveTextContent('能效达成 93%')
     expect(screen.getByTestId('energy-formula-note')).toHaveTextContent('耗电口径')
     expect(screen.getByTestId('environment-card')).toHaveTextContent('18.5')
+    // 胎压卡（行程末）：最低值 + FL/RL 缩写明细（语言中立缩写）
+    expect(screen.getByTestId('trip-tire-pressure')).toHaveTextContent('最低')
+    expect(screen.getByTestId('trip-tire-pressure')).toHaveTextContent('FL 3.1/3.0')
+    expect(screen.getByTestId('trip-tire-pressure')).toHaveTextContent('RL 2.9/3.0')
+    // GPS 采样点 + 平均采样间隔成对（35min ÷ 3 点 = 700s/点）
+    expect(screen.getByTestId('trip-gps-count')).toHaveTextContent('3')
+    expect(screen.getByTestId('trip-sample-interval')).toHaveTextContent('700')
   })
 })
 

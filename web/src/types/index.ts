@@ -155,6 +155,8 @@ export interface ChargingStats extends ChargingStatsV2 {
   totalKWh: number
   totalCostCny: number
   avgPricePerKWh: number
+  /** 本期充电会话数（服务端 stats 已返回，前端类型此前漏标） */
+  sessionCount?: number
   byLocation: {
     name: string
     count: number

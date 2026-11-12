@@ -12,6 +12,7 @@ import {
   MapPin,
   Route as RouteIcon,
   Thermometer,
+  Timer,
   TrendingDown,
   Wind,
   Zap,
@@ -111,9 +112,9 @@ export default function TripDetailPage() {
             <ElevationProfile points={trip.route ?? []} />
           </div>
 
-          {/* 模块3：环境剖析微卡片 */}
+          {/* 模块3：环境剖析微卡片（6 卡 = 移动 2×3 / 桌面 3×2，栅格不落单） */}
           {trip.environment && (
-            <section className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="environment-card">
+            <section className="grid grid-cols-2 gap-3 lg:grid-cols-3" data-testid="environment-card">
               <div className="glass-card-flat flex items-center gap-3 p-4">
                 <Thermometer className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
@@ -142,23 +143,35 @@ export default function TripDetailPage() {
                   <CircleDot className="h-4 w-4 shrink-0 text-tesla" />
                   <div>
                     <div className="text-xs text-slate-400">{t('tripDetail.env.tire', '胎压（行程末）')}</div>
-                    {/* 主值=四轮最低（<2.6 bar 变红，对齐推送告警阈值）；副行前/后明细 */}
+                    {/* 主值=四轮最低（<2.6 bar 变红，对齐推送告警阈值）；副行四轮缩写明细（语言中立） */}
                     <div className={`num mt-0.5 text-sm ${Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr) < 2.6 ? 'text-tesla' : 'text-slate-200'}`}>
-                      最低 {Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr).toFixed(1)} bar
+                      {t('tripDetail.env.tireMin', '最低')} {Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr).toFixed(1)} bar
                       <span className="ml-2 text-[11px] font-normal text-slate-400">
-                        {t('tripDetail.env.tireFront', '前')} {trip.tirePressure.fl.toFixed(1)}/{trip.tirePressure.fr.toFixed(1)} · {t('tripDetail.env.tireRear', '后')} {trip.tirePressure.rl.toFixed(1)}/{trip.tirePressure.rr.toFixed(1)}
+                        FL {trip.tirePressure.fl.toFixed(1)}/{trip.tirePressure.fr.toFixed(1)} · RL {trip.tirePressure.rl.toFixed(1)}/{trip.tirePressure.rr.toFixed(1)}
                       </span>
                     </div>
                   </div>
                 </div>
               ) : null}
-              <div className="glass-card-flat flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex items-center gap-3 p-4" data-testid="trip-gps-count">
                 <Layers className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
                   <div className="text-xs text-slate-400">{t('tripDetail.env.gps', 'GPS 采样点')}</div>
                   <div className="num mt-0.5 text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
                 </div>
               </div>
+              {/* 采样间隔 = 时长 ÷ 原始点数（route 是 LTTB 抽稀后的 ≤300 点，不能用）；数据齐才渲染，与 GPS 卡凑成一对 */}
+              {trip.positionCount != null && trip.positionCount > 0 && (
+                <div className="glass-card-flat flex items-center gap-3 p-4" data-testid="trip-sample-interval">
+                  <Timer className="h-4 w-4 shrink-0 text-tesla" />
+                  <div>
+                    <div className="text-xs text-slate-400">{t('tripDetail.env.sampleInterval', '平均采样间隔')}</div>
+                    <div className="num mt-0.5 text-sm text-slate-200">
+                      {t('tripDetail.env.approxPrefix', '≈')} {Math.max(1, Math.round((trip.durationMin * 60) / trip.positionCount))} s/{t('tripDetail.env.perPoint', '点')}
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
