@@ -100,20 +100,29 @@ export default function DashboardPage() {
           {/* P2 模块1：车辆状态卡（紧凑单列：电量细横条；右下角位置文字 = 围栏名/附近/坐标兜底） */}
           <section className="glass-card fade-up p-4" data-testid="car-card">
             <div className="flex flex-col justify-center gap-3">
+              {/* 首行：车名 + 状态（读作一句话）… 右上角仅位置（地名，不带时间） */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
                   <Car className="h-4 w-4 shrink-0 text-tesla" />
                   <span className="truncate">{car!.name}</span>
-                </div>
-                {/* 状态胶囊回右上角（用户裁决）；前置状态点，活跃态（充电/行驶/哨兵）带轻 ping */}
-                <span className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
-                  <span className="relative flex h-1.5 w-1.5">
-                    {pill.live && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pill.dot} opacity-50`} />}
-                    <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${pill.dot}`} />
+                  {/* 状态胶囊跟车名（用户裁决）；前置状态点，活跃态（充电/行驶/哨兵）带轻 ping */}
+                  <span className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
+                    <span className="relative flex h-1.5 w-1.5">
+                      {pill.live && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pill.dot} opacity-50`} />}
+                      <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${pill.dot}`} />
+                    </span>
+                    {t(pill.labelKey, pill.labelZh)}
+                    {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
                   </span>
-                  {t(pill.labelKey, pill.labelZh)}
-                  {car!.state === 'charging' && car!.charging?.powerKw ? ` · ${car!.charging.powerKw} kW` : ''}
-                </span>
+                </div>
+                {car?.position ? (
+                  <span className="flex max-w-[46%] min-w-0 shrink-0 items-center gap-1 text-[11px] text-slate-400" data-testid="car-position" title={car.position.label ?? undefined}>
+                    <MapPin className="h-3 w-3 shrink-0 text-tesla" />
+                    <span className="truncate">
+                      {car.position.label ?? `${car.position.lat.toFixed(4)}, ${car.position.lng.toFixed(4)}`}
+                    </span>
+                  </span>
+                ) : null}
               </div>
               {/* 电量：百分比 + 细横条（Tesla App 式，替代原 BatteryRing 大圆环） */}
               <div>
@@ -144,25 +153,15 @@ export default function DashboardPage() {
                   <span className="text-slate-500">bar</span>
                 </div>
               ) : null}
+              {/* 里程行：左总里程，右数据同步时间（两者都是元数据，凑一对；位置已上移首行右角） */}
               <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="shrink-0 text-slate-400">{t('dash.odometer', '总里程')} <span className="num text-slate-300">{fmtKm(car!.odometerKm, 0)} km</span></span>
-                {/* 右下角位置信息：围栏名/「XX 附近」/坐标兜底 + 定位时间；无定位数据整行退化为仅里程 */}
-                {car?.position ? (
-                  <span className="flex min-w-0 items-center gap-1 text-slate-400" data-testid="car-position" title={car.position.label ?? undefined}>
-                    <MapPin className="h-3 w-3 shrink-0 text-tesla" />
-                    <span className="truncate">
-                      {car.position.label ?? `${car.position.lat.toFixed(4)}, ${car.position.lng.toFixed(4)}`}
-                    </span>
-                    {car.position.at && <span className="shrink-0 text-slate-500">· {new Date(car.position.at).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>}
+                {car && (
+                  <span className="truncate text-slate-500" data-testid="car-synced">
+                    {t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}
                   </span>
-                ) : null}
+                )}
               </div>
-              {/* 底部只留一条数据新鲜度（「数据同步于」）；胎压的「测量于」与其时间语义重复，已去 */}
-              {car && (
-                <div className="text-[11px] text-slate-500" data-testid="car-synced">
-                  {t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}
-                </div>
-              )}
             </div>
           </section>
 

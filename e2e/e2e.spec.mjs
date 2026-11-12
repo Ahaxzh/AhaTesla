@@ -36,7 +36,7 @@ test("总览页：车辆状态卡、本月账本卡、24h时间轴、热力图",
   await page.waitForSelector("[data-testid='timeline-card']", { timeout: 10000 });
   // v2.1 P2：用车热力图
   await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
-  // 车辆位置文字（顶部卡右下角）：测试库有定位数据 → 必须渲染（围栏名/附近/坐标兜底）
+  // 车辆位置文字（v0.2.3 移至首行右上角，仅地名）：测试库有定位数据 → 必须渲染（围栏名/附近/坐标兜底）
   await expect(page.getByTestId("car-position")).toBeVisible({ timeout: 10000 });
   // 胎压四轮横排：测试库有 TPMS 历史 → 必须渲染（<2.6 着色由样式承担）
   await expect(page.getByTestId("tire-pressure")).toBeVisible();
