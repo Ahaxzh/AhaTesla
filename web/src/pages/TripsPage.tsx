@@ -176,16 +176,19 @@ export default function TripsPage() {
             </div>
             <StateShareBar data={overview.stateShare} />
           </div>
-          {routeSummary && routeSummary.points.length >= 2 && (
+          {routeSummary && routeSummary.segments.length > 0 && (
             <div className="glass-card-flat p-4">
               <div className="mb-2.5 flex items-center justify-between">
                 <h3 className="flex items-center gap-2 text-sm font-medium text-slate-200">
                   <MapPinned className="h-4 w-4 text-tesla" /> {t('trips.map.title', '轨迹汇总')}
                 </h3>
-                <span className="num text-[11px] text-slate-500">{t('trips.map.pointsPrefix', '采样')} {routeSummary.pointCount.toLocaleString()} {t('heatmap.stats.daysUnit', '点')}</span>
+                <span className="num text-[11px] text-slate-500">
+                  {t('trips.map.tripsShown', '绘制')} {routeSummary.segments.length} / {routeSummary.tripCount} {t('dash.tripsUnit', '趟')}
+                </span>
               </div>
+              {/* 每段行程各自成线（TeslaMate trip.json 观感）；无速度图例/起终点标记 */}
               <Suspense fallback={<div className="skeleton h-64 w-full rounded-xl" />}>
-                <RouteMap points={routeSummary.points} height={280} />
+                <RouteMap points={[]} segments={routeSummary.segments} height={280} showSpeedLegend={false} />
               </Suspense>
             </div>
           )}

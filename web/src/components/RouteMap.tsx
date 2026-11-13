@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useI18n } from '@/i18n'
@@ -68,13 +68,17 @@ type RoutePoint = { lat: number; lng: number; t?: string; speed?: number | null 
  * 行程路线图：Leaflet + 高德底图（国内直连快，GCJ02 纠偏贴路），
  * 轨迹按速度分段着色（靛→蓝→青→紫→红，避开底图黄色路网），起终点标记，悬停提示速度。
  * 瓦片由浏览器从高德 CDN 拉取（仅底图网格坐标，不含轨迹数据，无上传）。
+ * segments 模式（v0.3.1 行程页轨迹汇总）：多段行程各自成线（细蓝线，段间不连），无起终点标记。
  */
 export function RouteMap({
   points,
+  segments,
   height = 340,
   showSpeedLegend = true,
 }: {
   points: RoutePoint[]
+  /** 汇总模式：多段行程（优先于 points） */
+  segments?: { points: { lat: number; lng: number }[] }[]
   height?: number
   showSpeedLegend?: boolean
 }) {
@@ -98,6 +102,22 @@ export function RouteMap({
       const [lat, lng] = wgs84ToGcj02(p.lat, p.lng)
       return { ...p, lat, lng }
     })
+
+  // 汇总模式：每段行程独立抽稀点列（GCJ02 转换后），段与段之间不连线
+  const segs = useMemo(
+    () =>
+      (segments || [])
+        .map((seg) =>
+          seg.points
+            .map((p) => {
+              const [lat, lng] = wgs84ToGcj02(Number(p.lat), Number(p.lng))
+              return { lat, lng, speed: null }
+            })
+            .filter((p) => Number.isFinite(p.lng) && Number.isFinite(p.lat)),
+        )
+        .filter((sp) => sp.length >= 2),
+    [segments],
+  )
 
   // 初始化地图（一次）
   useEffect(() => {
@@ -143,12 +163,30 @@ export function RouteMap({
     }
   }, [satellite])
 
-  // 数据变化时重画轨迹
+  // 数据变化时重画轨迹（points 单段模式 / segments 汇总模式）
   useEffect(() => {
     const map = mapRef.current
     const layer = layerRef.current
     if (!map || !layer) return
     layer.clearLayers()
+
+    // ---- 汇总模式：每段行程一条细蓝线（白描边衬底），不画起终点标记 ----
+    if (segs.length > 0) {
+      const allLatLng: [number, number][] = []
+      for (const sp of segs) {
+        const latlngs = sp.map((p) => [p.lat, p.lng] as [number, number])
+        allLatLng.push(...latlngs)
+        L.polyline(latlngs, {
+          color: 'rgba(255,255,255,0.85)', weight: 5, opacity: 0.8, lineCap: 'round', lineJoin: 'round',
+        }).addTo(layer)
+        L.polyline(latlngs, {
+          color: '#2563eb', weight: 2.5, opacity: 0.9, lineCap: 'round', lineJoin: 'round',
+        }).addTo(layer)
+      }
+      if (allLatLng.length >= 2) map.fitBounds(L.latLngBounds(allLatLng), { padding: [30, 30] })
+      return
+    }
+
     if (pts.length < 2) return
 
     const hasSpeed = pts.some((p) => p.speed != null)
@@ -203,9 +241,9 @@ export function RouteMap({
     const bounds = L.latLngBounds(pts.map((p) => [p.lat, p.lng] as [number, number]))
     map.fitBounds(bounds, { padding: [30, 30] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points])
+  }, [points, segs])
 
-  if (pts.length < 2) {
+  if (segs.length === 0 && pts.length < 2) {
     return (
       <div
         className="flex h-40 items-center justify-center rounded-xl bg-white/[0.03] text-xs text-slate-500"

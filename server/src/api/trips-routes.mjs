@@ -250,40 +250,53 @@ export function createTripsRoutes({ db, state }) {
     },
 
     /** GET /api/trips/route-summary?from&to&carId —— 区间内行驶轨迹汇总（Grafana trip.json 地图提炼）。
-     *  只取 drive_id 非空的 positions（纯行驶轨迹，不含驻车心跳）；SQL 按序号取模抽稀 ≤1200 点。 */
+     *  v0.3.1 重写：按 drive 分组抽样、每段 ≤10 点（含首尾），返回 segments 由前端逐段画线。
+     *  旧版全局取模抽样把不同行程串成一条 polyline → 满屏跨城"飞线"（蜘蛛网），已废。
+     *  只取 drive_id 非空的 positions（纯行驶轨迹）；行数按距离取最长 ≤400 段控制扫描量。 */
     async routeSummary(ctx) {
       const from = validateIso(ctx.query.from, "from");
       const to = validateIso(ctx.query.to, "to");
       const carId = carIdFromQuery(ctx, state);
-      const where = ["d.end_date IS NOT NULL", "p.drive_id IS NOT NULL", "p.latitude IS NOT NULL"];
+      const where = ["d.end_date IS NOT NULL"];
       if (from) where.push(`d.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')`);
       if (to) where.push(`d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')`);
       const carCond = carFilterSql(carId).replace(/^\s*AND\s+/i, "");
       if (carCond) where.push(carCond);
-      const whereSql = where.join(" AND ");
 
-      const cnt = await db.queryOne(`
-        SELECT count(*)::int AS n
-        FROM positions p JOIN drives d ON d.id = p.drive_id
-        WHERE ${whereSql}
-      `).catch(() => null);
-      const total = cnt?.n ?? 0;
-      if (!total) return { pointCount: 0, points: [] };
+      // 1) 区间内最长的 ≤400 段行程（距离优先——挪车微行程画出来只是噪点）
+      const drives = await db.query(`
+        SELECT d.id FROM drives d WHERE ${where.join(" AND ")}
+        ORDER BY d.distance DESC NULLS LAST LIMIT 400
+      `).catch(() => []);
+      const ids = drives.map((r) => Number(r.id)).filter(Number.isInteger);
+      if (!ids.length) return { tripCount: 0, segments: [] };
 
-      const stride = Math.max(Math.floor(total / 1200), 1);
+      // 2) 每段行程均匀取 ≤10 点（窗口计数 + 取模；首尾必含），按 drive 分组返回
+      const PER_DRIVE = 10;
       const rows = await db.query(`
         WITH pts AS (
-          SELECT p.latitude::float8 AS lat, p.longitude::float8 AS lng, p.speed::float8 AS speed,
-                 row_number() OVER (ORDER BY p.date, p.id) AS rn
-          FROM positions p JOIN drives d ON d.id = p.drive_id
-          WHERE ${whereSql}
+          SELECT p.drive_id,
+                 p.latitude::float8 AS lat, p.longitude::float8 AS lng, p.speed::float8 AS speed,
+                 row_number() OVER (PARTITION BY p.drive_id ORDER BY p.date, p.id) AS rn,
+                 count(*) OVER (PARTITION BY p.drive_id) AS cnt
+          FROM positions p
+          WHERE p.drive_id = ANY($1::int[]) AND p.latitude IS NOT NULL
         )
-        SELECT lat, lng, speed FROM pts WHERE rn % ${stride} = 0 ORDER BY rn
-      `);
-      return {
-        pointCount: total,
-        points: rows.map((r) => ({ lat: r.lat, lng: r.lng, speed: finiteNumber(r.speed) })),
-      };
+        SELECT drive_id, lat, lng, speed FROM pts
+        WHERE rn = 1 OR rn = cnt OR rn % GREATEST(FLOOR(cnt / ${PER_DRIVE}.0)::int, 1) = 0
+        ORDER BY drive_id, rn
+      `, [ids]).catch(() => []);
+
+      const byDrive = new Map();
+      for (const r of rows) {
+        const key = Number(r.drive_id);
+        if (!byDrive.has(key)) byDrive.set(key, []);
+        byDrive.get(key).push({ lat: Number(r.lat), lng: Number(r.lng), speed: finiteNumber(r.speed) });
+      }
+      const segments = [...byDrive.entries()]
+        .filter(([, pts]) => pts.length >= 2)
+        .map(([driveId, points]) => ({ driveId, points }));
+      return { tripCount: ids.length, segments };
     },
 
     async list(ctx) {

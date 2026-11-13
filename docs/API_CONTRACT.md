@@ -59,7 +59,7 @@
 - `GET /api/dashboard/heatmap`（v2.1 新增，P2 模块4）→ {days:[{date:"YYYY-MM-DD", distanceKm}], maxKm}（最近 90 天按实例时区聚合，date 为本地日期）
 - `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
 - `GET /api/trips/overview?from=ISO&to=ISO` → {tripCount, distanceKm, durationMin, energyKwh, costCny, maxSpeedKmh, stateShare:{driveMin, chargeMin, parkedMin}}（v0.3 行程页顶部汇总；能耗电费与列表同 FIFO 口径；占比为时长 SUM 近似）
-- `GET /api/trips/route-summary?from=ISO&to=ISO` → {pointCount, points:[{lat, lng, speed}]}（v0.3 区间行驶轨迹汇总，仅 drive_id 非空 positions，SQL 取模抽稀 ≤1200 点）
+- `GET /api/trips/route-summary?from=ISO&to=ISO` → {tripCount, segments:[{driveId, points:[{lat,lng,speed}]}]}（v0.3.1 按行程分组抽样：最长 ≤400 段、每段 ≤10 点含首尾；前端逐段画线，段间不连线。旧版全局取模抽样的单 polyline 已废——跨行程连线产生满屏飞线）
 - `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}, tirePressure:{fl,fr,rl,rr}|null（bar，行程内最后有效读数，与推送行程小结同口径）}
 - Trip: {id, startAt, endAt, distanceKm, durationMin, energyKwh, **cost**（原 costCny）, startAddress, endAddress, kwhPer100km, routeKey}
 

@@ -623,6 +623,7 @@ export const EN: Record<string, string> = {
   'trips.share.parked': 'Parked',
   'trips.map.title': 'Route overlay',
   'trips.map.pointsPrefix': 'samples',
+  'trips.map.tripsShown': 'Drawn',
   'trips.loadingMore': 'Loading…',
   'trips.scrollHint': 'Scroll for more',
   'trips.allLoaded': 'All {n} loaded',

@@ -301,24 +301,30 @@ test("GET /api/trips/overview 非法 from → 400", async () => {
   assert.equal(res.status, 400);
 });
 
-test("GET /api/trips/route-summary：计数 + 取模抽稀点集", async () => {
-  const seen = [];
+test("GET /api/trips/route-summary：按 drive 分组 segments（每段 ≤10 点含首尾）", async () => {
   const db = createFakeDb((sql) => {
-    seen.push(sql);
-    if (/count\(\*\)::int AS n[\s\S]*JOIN drives/.test(sql)) return [{ n: 2400 }];
-    if (/row_number\(\) OVER/.test(sql)) {
-      // stride = floor(2400/1200) = 2 → SQL 里应有 rn % 2
-      assert.match(sql, /rn % 2 = 0/);
-      return [{ lat: 31.22, lng: 121.4, speed: 32 }, { lat: 31.23, lng: 121.42, speed: 75 }];
+    if (/ORDER BY d\.distance DESC NULLS LAST LIMIT 400/.test(sql)) return [{ id: 3241 }, { id: 3242 }];
+    if (/row_number\(\) OVER \(PARTITION BY p\.drive_id/.test(sql)) {
+      // 窗口抽样 SQL：过滤应含首尾 + 取模（卫哨已另测 AND AND）
+      assert.match(sql, /rn = 1 OR rn = cnt OR/);
+      return [
+        { drive_id: 3241, lat: 31.22, lng: 121.4, speed: 32 },
+        { drive_id: 3241, lat: 31.23, lng: 121.42, speed: 75 },
+        { drive_id: 3241, lat: 31.24, lng: 121.44, speed: 90 },
+        { drive_id: 3242, lat: 31.30, lng: 121.50, speed: 40 },
+        { drive_id: 3242, lat: 31.31, lng: 121.52, speed: 55 },
+      ];
     }
     return [];
   });
   const { app } = buildTestApp({ db });
   const res = await fetchApp(app, "GET", "/api/trips/route-summary", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 200);
-  assert.equal(res.json.pointCount, 2400);
-  assert.equal(res.json.points.length, 2);
-  assert.equal(res.json.points[0].lat, 31.22);
+  assert.equal(res.json.tripCount, 2);
+  assert.equal(res.json.segments.length, 2);
+  assert.equal(res.json.segments[0].driveId, 3241);
+  assert.equal(res.json.segments[0].points.length, 3);
+  assert.equal(res.json.segments[1].driveId, 3242);
 });
 
 test("GET /api/charging?from/to：日期区间透传 SQL（优先于 month）", async () => {

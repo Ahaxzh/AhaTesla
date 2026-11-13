@@ -163,10 +163,11 @@ export interface TripsOverview {
   stateShare: { driveMin: number; chargeMin: number; parkedMin: number }
 }
 
-/** GET /api/trips/route-summary → 区间内行驶轨迹汇总（抽稀 ≤1200 点，speed km/h 供着色） */
+/** GET /api/trips/route-summary → 区间内行驶轨迹汇总（v0.3.1 按行程分组，
+ *  每段 ≤10 点含首尾；前端逐段画线，段间不连线） */
 export interface RouteSummary {
-  pointCount: number
-  points: { lat: number; lng: number; speed: number | null }[]
+  tripCount: number
+  segments: { driveId: number; points: { lat: number; lng: number; speed: number | null }[] }[]
 }
 
 export interface ChargingStats extends ChargingStatsV2 {

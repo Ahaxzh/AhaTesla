@@ -237,11 +237,10 @@ export const defaultHandlers = [
   ),
   http.get('/api/trips/route-summary', () =>
     HttpResponse.json({
-      pointCount: 3,
-      points: [
-        { lat: 31.22, lng: 121.4, speed: 32 },
-        { lat: 31.23, lng: 121.42, speed: 75 },
-        { lat: 31.25, lng: 121.45, speed: 105 },
+      tripCount: 2,
+      segments: [
+        { driveId: 101, points: [{ lat: 31.22, lng: 121.4, speed: 32 }, { lat: 31.23, lng: 121.42, speed: 75 }, { lat: 31.25, lng: 121.45, speed: 105 }] },
+        { driveId: 102, points: [{ lat: 31.30, lng: 121.50, speed: 40 }, { lat: 31.31, lng: 121.52, speed: 55 }] },
       ],
     }),
   ),
