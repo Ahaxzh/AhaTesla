@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import DashboardPage from '@/pages/DashboardPage'
 import { renderWithProviders } from './test-utils'
@@ -69,15 +70,22 @@ describe('DashboardPage', () => {
   })
 })
 
-/** 电池健康卡(Grafana BatteryHealthV2 提炼) */
-describe('BatteryHealthCard', () => {
-  it('渲染健康度/容量/循环/效率与月度趋势条', async () => {
+/** 电池健康（v0.3 调换：首页紧凑行，点击就地展开大卡） */
+describe('BatteryHealthCard（首页）', () => {
+  it('slim 显示核心数，点击展开完整指标与趋势条', async () => {
+    const user = userEvent.setup()
     renderWithProviders(<DashboardPage />)
-    const card = await screen.findByTestId('battery-health-card')
-    expect(card.textContent).toContain('98.2')
-    expect(card.textContent).toContain('50.7')
-    expect(card.textContent).toContain('56')
-    expect(card.textContent).toContain('92.6')
-    expect(await screen.findAllByTestId('battery-trend')).toHaveLength(1)
+    const slim = await screen.findByTestId('battery-health-slim')
+    expect(slim).toHaveTextContent('98.2')
+    expect(slim).toHaveTextContent('50.7')
+    // 点击展开 → 大卡身体（容量/循环/效率 + 趋势条）
+    await user.click(screen.getByTestId('battery-health-toggle'))
+    const expanded = await screen.findByTestId('battery-health-expanded')
+    expect(expanded.textContent).toContain('56')
+    expect(expanded.textContent).toContain('92.6')
+    expect(screen.getAllByTestId('battery-trend')).toHaveLength(1)
+    // 再点收起
+    await user.click(screen.getByTestId('battery-health-toggle'))
+    expect(screen.queryByTestId('battery-health-expanded')).not.toBeInTheDocument()
   })
 })

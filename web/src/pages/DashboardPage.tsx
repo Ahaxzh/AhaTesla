@@ -193,7 +193,8 @@ export default function DashboardPage() {
 
           {/* P2 模块2：24h 状态时间轴 */}
           {timeline && <Timeline24h data={timeline} />}
-          <BatteryHealthCard />
+          {/* v0.3 调换：首页紧凑行（点击展开大卡），完整大卡在充电页 */}
+          <BatteryHealthCard variant="slim" />
 
           {/* P2 模块4：用车日历热力图 */}
           {heatmap && <HeatmapCalendar data={heatmap} onDaysChange={setHeatmapDays} />}

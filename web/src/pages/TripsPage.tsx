@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { ChevronRight, Clock, Coins, Gauge, MapPinned, Route, TrendingUp } from 'lucide-react'
+import { ChevronRight, Clock, Coins, Gauge, MapPinned, Route, TrendingUp, X } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
@@ -150,11 +150,13 @@ export default function TripsPage() {
         </div>
         {(from || to) && (
           <button
-            className="btn-ghost !py-2 text-xs"
-            onClick={() => applyFilter('', '')}
+            className="btn-ghost !px-2.5 !py-2"
+            onClick={() => { setFrom(''); setTo('') }}
+            aria-label={t('trips.filter.clear', '清除筛选')}
+            title={t('trips.filter.clear', '清除筛选')}
             data-testid="filter-clear"
           >
-            {t('trips.filter.clear', '清除筛选')}
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>

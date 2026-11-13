@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Activity,
+  ChevronDown,
   BellRing,
   Calculator,
   Car,
@@ -61,6 +62,37 @@ const LANG_OPTIONS: { id: Lang; key: string; zh: string }[] = [
   { id: 'en', key: 'settings.lang.en', zh: 'English' },
 ]
 
+/** 折叠分区卡（v0.3）：头部 = 图标 + 标题 + 右侧摘要 + chevron，点击展开身体。
+ *  锚点直达（nav 点击 / #hash）由外层 effect 自动展开目标分区。 */
+function CollapseCard({ id, icon: Icon, title, summary, open, onToggle, testid, children }: {
+  id: string
+  icon: typeof Palette
+  title: string
+  summary?: string
+  open: boolean
+  onToggle: () => void
+  testid?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section id={`settings-${id}`} className="glass-card-flat scroll-mt-6" data-testid={testid ?? `settings-${id}`} data-open={open}>
+      <button
+        type="button"
+        className="flex w-full items-center gap-2.5 p-4 text-left transition hover:bg-white/[0.03]"
+        onClick={onToggle}
+        aria-expanded={open}
+        data-testid={`settings-${id}-header`}
+      >
+        <Icon className="h-4 w-4 shrink-0 text-tesla" />
+        <span className="shrink-0 text-[13px] font-medium tracking-wide text-slate-200">{title}</span>
+        {summary && <span className="ml-1 min-w-0 flex-1 truncate text-right text-[11px] text-slate-500">{summary}</span>}
+        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && <div className="border-t border-white/[0.06] px-5 pb-5 pt-4">{children}</div>}
+    </section>
+  )
+}
+
 /** 设置页分区导航（桌面侧栏锚点 / 移动横向滚动）— v2.4 与卡片一一对应 */
 function SettingsNav({ active }: { active: string }) {
   const { t } = useI18n()
@@ -103,6 +135,27 @@ export default function SettingsPage() {
   const queryClient = useQueryClient()
   const location = useLocation()
   const [activeSection, setActiveSection] = useState('appearance')
+  // 折叠分区（v0.3）：默认全收起；展开态记忆到本设备
+  const [openSections, setOpenSections] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('ahatesla_settings_open')
+      return new Set(saved ? (JSON.parse(saved) as string[]) : [])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      try { localStorage.setItem('ahatesla_settings_open', JSON.stringify([...next])) } catch { /* 仅本会话生效 */ }
+      return next
+    })
+  }
+  const themeLabel = () =>
+    theme === 'dark' ? t('settings.theme.dark', '深色') : theme === 'light' ? t('settings.theme.light', '浅色') : t('settings.theme.system', '跟随系统')
+  const langLabel = () => (lang === 'zh' ? '中文' : 'English')
 
   // 锚点直达：/settings#settings-xxx（头像菜单「账户安全」等入口）。
   // react-router 不会自动滚 hash；路由切换有渲染时差，rAF 重试若干帧（分区骨架同步渲染，通常 1~2 帧内命中）。
@@ -111,13 +164,20 @@ export default function SettingsPage() {
   useEffect(() => {
     const hash = location.hash
     if (!hash.startsWith('#settings-')) return
-    const id = hash.slice(1)
-    setActiveSection(id.replace('settings-', ''))
+    const id = hash.slice(1).replace('settings-', '')
+    setActiveSection(id)
+    // 锚点直达 = 先展开目标分区（收起态内容未渲染，滚了也看不见）
+    setOpenSections((prev) => {
+      if (prev.has(id)) return prev
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
     let tries = 0
     let raf = 0
     const timers: number[] = []
     const scrollTo = () => {
-      const el = document.getElementById(id)
+      const el = document.getElementById(`settings-${id}`)
       if (el) el.scrollIntoView({ block: 'start' })
       return el != null
     }
@@ -396,10 +456,7 @@ export default function SettingsPage() {
           </div>
 
           {/* ===== 分区1：外观（主题 + 语言，设备本地偏好） ===== */}
-          <section id="settings-appearance" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-appearance">
-            <h2 className="section-title">
-              <Palette className="h-4 w-4 text-tesla" /> {t('settings.nav.appearance', '外观')}
-            </h2>
+          <CollapseCard id="appearance" icon={Palette} title={t('settings.nav.appearance', '外观')} summary={`${themeLabel()} · ${langLabel()}`} open={openSections.has('appearance')} onToggle={() => toggleSection('appearance')} testid="settings-appearance">
             <p className="section-desc mt-1">{t('settings.appearance.desc', '主题与语言（保存在本设备）')}</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div>
@@ -437,24 +494,18 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-          </section>
+          </CollapseCard>
 
           {/* ===== 分区3：电价（默认价 + 地点电价含分时 + 历史） ===== */}
-          <section id="settings-pricing" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-pricing">
-            <h2 className="section-title">
-              <Tag className="h-4 w-4 text-tesla" /> {t('settings.nav.pricing', '电价')}
-            </h2>
+          <CollapseCard id="pricing" icon={Tag} title={t('settings.nav.pricing', '电价')} summary={t('settings.sum.pricing', '默认价 · 地点 · 历史')} open={openSections.has('pricing')} onToggle={() => toggleSection('pricing')} testid="settings-pricing">
             <p className="section-desc mt-1">{t('settings.pricing.desc', '默认电价 · 地点电价（含分时）· 费率变更历史')}</p>
             <div className="mt-4">
               <PricingSection />
             </div>
-          </section>
+          </CollapseCard>
 
           {/* ===== 分区2：账本参数（货币/单位/油车基准 + 重算） ===== */}
-          <section id="settings-ledger" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-ledger">
-            <h2 className="section-title">
-              <Calculator className="h-4 w-4 text-tesla" /> {t('settings.nav.ledger', '账本参数')}
-            </h2>
+          <CollapseCard id="ledger" icon={Calculator} title={t('settings.nav.ledger', '账本参数')} summary={settings ? `${currency}${' · '}${distanceUnit}${' · '}${liter}L@${fuelPrice}` : undefined} open={openSections.has('ledger')} onToggle={() => toggleSection('ledger')} testid="settings-ledger">
             <p className="section-desc mt-1">{t('settings.ledger.desc', '货币单位 · 油车对比基准 · 历史重算')}</p>
 
             {/* 货币 + 单位：分段控件 */}
@@ -550,13 +601,10 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
-          </section>
+          </CollapseCard>
 
           {/* ===== 分区5：推送矩阵 ===== */}
-          <section id="settings-push" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-push-matrix">
-            <h2 className="section-title">
-              <BellRing className="h-4 w-4 text-tesla" /> {t('settings.nav.push', '推送')}
-            </h2>
+          <CollapseCard id="push" icon={BellRing} title={t('settings.nav.push', '推送')} summary={matrix ? `${EVENTS.filter((ev) => CHANNELS.some((ch) => matrix[ev.id]?.[ch.id])).length}/${EVENTS.length} ${t('settings.sum.eventsOn', '事件启用')}` : undefined} open={openSections.has('push')} onToggle={() => toggleSection('push')} testid="settings-push-matrix">
             <p className="section-desc mt-1">
               {t('settings.push.descV2', '每个事件一个总开关（作用于所有已配置渠道）；渠道密钥与细粒度配置在「推送」页')}
               {/* 修复：/push 页此前从任何导航都到不了（矩阵文案提到却无入口） */}
@@ -600,13 +648,10 @@ export default function SettingsPage() {
                 {Array.from({ length: 5 }, (_, i) => <div key={i} className="skeleton h-10" />)}
               </div>
             )}
-          </section>
+          </CollapseCard>
 
           {/* ===== 分区4：AI 助手（BYO 模型，可选） ===== */}
-          <section id="settings-ai" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-ai">
-            <h2 className="section-title">
-              <Sparkles className="h-4 w-4 text-tesla" /> {t('settings.nav.ai', 'AI 助手')}
-            </h2>
+          <CollapseCard id="ai" icon={Sparkles} title={t('settings.nav.ai', 'AI 助手')} summary={aiCfg ? (aiCfg.enabled ? t('settings.ai.polishOn', 'AI 润色已开启') : t('settings.ai.builtinTemplate', '使用内置模板')) : undefined} open={openSections.has('ai')} onToggle={() => toggleSection('ai')} testid="settings-ai">
             <p className="section-desc mt-1">
               {t('settings.ai.desc', '接入 OpenAI 兼容模型润色推送文案；不接入也有完整模板，默认关闭')}
             </p>
@@ -680,13 +725,10 @@ export default function SettingsPage() {
                 {testAi.isPending ? t('settings.ai.testing', '测试中…') : t('settings.ai.test', '测试连通')}
               </button>
             </div>
-          </section>
+          </CollapseCard>
 
           {/* ===== m4e 分区：车辆（主车/别名管理） ===== */}
-          <section id="settings-cars" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-cars">
-            <h2 className="section-title">
-              <Car className="h-4 w-4 text-tesla" /> {t('settings.nav.cars', '车辆')}
-            </h2>
+          <CollapseCard id="cars" icon={Car} title={t('settings.nav.cars', '车辆')} summary={cars.length ? `${cars.length} ${t('settings.sum.carsUnit', '辆')} · ${cars.find((c) => c.isPrimary)?.name ?? cars[0]?.name ?? ''}` : undefined} open={openSections.has('cars')} onToggle={() => toggleSection('cars')} testid="settings-cars">
             <p className="section-desc mt-1">{t('settings.cars.desc', '多车实例管理主车与显示别名（清单来自 TeslaMate）')}</p>
             <div className="mt-4 max-w-xl space-y-2.5">
               {cars.length === 0 ? (
@@ -736,24 +778,18 @@ export default function SettingsPage() {
                 {saveCars.isPending ? t('settings.saving', '保存中…') : t('settings.cars.save', '保存车辆设置')}
               </button>
             )}
-          </section>
+          </CollapseCard>
 
           {/* ===== 分区6：系统（服务状态/只读盾/事件日志 唯一入口） ===== */}
-          <section id="settings-system" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-system">
-            <h2 className="section-title">
-              <Activity className="h-4 w-4 text-tesla" /> {t('settings.nav.system', '系统')}
-            </h2>
+          <CollapseCard id="system" icon={Activity} title={t('settings.nav.system', '系统')} summary={t('settings.system.desc', '服务状态 · 只读安全盾 · 事件日志')} open={openSections.has('system')} onToggle={() => toggleSection('system')} testid="settings-system">
             <p className="section-desc mt-1">{t('settings.system.desc', '服务状态 · 只读安全盾 · 事件日志')}</p>
             <div className="mt-4">
               <SystemSection />
             </div>
-          </section>
+          </CollapseCard>
 
           {/* ===== 分区7：账户安全 ===== */}
-          <section id="settings-security" className="glass-card-flat scroll-mt-6 p-5" data-testid="change-password-card">
-            <h2 className="section-title">
-              <KeyRound className="h-4 w-4 text-tesla" /> {t('settings.nav.security', '账户安全')}
-            </h2>
+          <CollapseCard id="security" icon={KeyRound} title={t('settings.nav.security', '账户安全')} summary={t('settings.sum.security', '用户名 · 密码')} open={openSections.has('security')} onToggle={() => toggleSection('security')} testid="change-password-card">
             <p className="section-desc mt-1">{t('settings.security.desc', '修改用户名或密码；修改密码后其他已登录会话将被吊销')}</p>
             <form onSubmit={onSubmitPassword} className="mt-4 max-w-sm space-y-3.5" noValidate>
               <div>
@@ -781,7 +817,7 @@ export default function SettingsPage() {
                 {submitting ? t('common.working', '提交中…') : t('settings.pw.submit', '修改密码')}
               </button>
             </form>
-          </section>
+          </CollapseCard>
         </div>
       </div>
     </div>

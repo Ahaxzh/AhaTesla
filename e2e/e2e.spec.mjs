@@ -89,6 +89,8 @@ test("充电页：列表与按地点统计", async ({ page }) => {
 test("设置页：电价分区地点电价表 + 默认电价显示", async ({ page }) => {
   await login(page);
   await navigate(page, "settings");
+  // v0.3 分区默认折叠：先点头部展开
+  await page.getByTestId("settings-pricing-header").click();
   await page.waitForSelector("[data-testid='location-table']", { timeout: 10000 });
   await expect(page.getByText(/CND/).first()).toBeVisible({ timeout: 10000 });
   await expect(page.getByText(/1\.8/).first()).toBeVisible();
@@ -108,6 +110,7 @@ test("推送页：三渠道卡片渲染（WebPush/Telegram/飞书）", async ({ 
 test("设置页：系统分区 DB/MQTT 状态", async ({ page }) => {
   await login(page);
   await navigate(page, "settings");
+  await page.getByTestId("settings-system-header").click();
   // 首次冷查询（DB 连通+只读校验）可能数秒，放宽到 15s
   await expect(page.getByText("TeslaMate DB")).toBeVisible({ timeout: 15000 });
   await expect(page.getByText("Mosquitto MQTT")).toBeVisible();
@@ -116,6 +119,7 @@ test("设置页：系统分区 DB/MQTT 状态", async ({ page }) => {
 test("设置页：修改密码表单存在并可取消", async ({ page }) => {
   await login(page);
   await navigate(page, "settings");
+  await page.getByTestId("settings-security-header").click();
   await expect(page.locator("input[type='password']").first()).toBeVisible();
 });
 
@@ -151,6 +155,13 @@ test("总览页：状态胶囊右上角（活跃态带 ping 状态点）+ 胎压
   if (await tp.isVisible().catch(() => false)) {
     await expect(tp).toContainText("FL");
     await expect(tp).toContainText("RR");
+  }
+  // 电池健康紧凑行（v0.3 首页 slim）：点击就地展开大卡
+  const slim = page.getByTestId("battery-health-slim");
+  if (await slim.isVisible().catch(() => false)) {
+    await slim.getByTestId("battery-health-toggle").click();
+    await expect(page.getByTestId("battery-health-expanded")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId("battery-trend").first()).toBeVisible();
   }
   // 用车日历三档：点近7天 → 紧凑每日条形（无周历网格）
   await page.waitForSelector("[data-testid='heatmap-card']", { timeout: 10000 });
@@ -190,10 +201,11 @@ test("充电页：充电次数第四卡 + 电池健康卡", async ({ page }) => 
   await navigate(page, "charging");
   await page.waitForSelector("[data-testid='charge-stats']", { timeout: 15000 });
   await expect(page.getByTestId("charge-stats")).toContainText(/次|sessions/i);
-  // 电池健康紧凑行（v0.3 与首页大卡区分；样本不足时隐藏属预期）
-  const bh = page.getByTestId("battery-health-slim");
+  // 电池健康完整大卡（v0.3 调换：大卡在充电页；样本不足时隐藏属预期）
+  const bh = page.getByTestId("battery-health-card");
   if (await bh.isVisible().catch(() => false)) {
     await expect(bh).toContainText(/%/);
+    await expect(page.getByTestId("battery-trend").first()).toBeVisible();
   }
   // v0.3 日期区间筛选（默认近 90 天，清除=全部）
   await expect(page.getByTestId("charge-filter")).toBeVisible();
@@ -228,6 +240,7 @@ test("设置页：推送分区为事件级总开关（v0.3 简化，无渠道 ch
   await login(page);
   await navigate(page, "settings");
   await page.waitForSelector("[data-testid='settings-push-matrix']", { timeout: 10000 });
+  await page.getByTestId("settings-push-header").click();
   await page.waitForSelector("[data-testid^='push-event-toggle-']", { timeout: 10000 });
   // 断联告警开关存在且为 switch 语义；渠道 chips 不再渲染
   const toggle = page.getByTestId("push-event-toggle-outage");

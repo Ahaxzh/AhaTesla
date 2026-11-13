@@ -7,6 +7,11 @@ import { renderWithProviders } from './test-utils'
 import { server } from './msw'
 import { mockSettings } from './msw'
 
+/** v0.3 分区默认折叠：先点头部展开再交互 */
+const openSection = async (user: ReturnType<typeof userEvent.setup>, id: string) => {
+  await user.click(screen.getByTestId(`settings-${id}-header`))
+}
+
 beforeAll(() => server.listen())
 afterEach(() => {
   server.resetHandlers()
@@ -20,7 +25,10 @@ describe('SettingsPage', () => {
     renderWithProviders(<SettingsPage />)
     // v2.2：账户信息合并进页头（无独立 account-card）
     expect(await screen.findByText(/aha.*单用户模式/s)).toBeInTheDocument()
-    expect(screen.getByTestId('change-password-card')).toBeInTheDocument()
+    // v0.3 默认折叠：分区在、内容收起
+    const sec = screen.getByTestId('change-password-card')
+    expect(sec).toHaveAttribute('data-open', 'false')
+    expect(screen.queryByLabelText('当前密码')).not.toBeInTheDocument()
   })
 
   it('分区结构：外观/车辆/账本/电价/AI/推送/系统/安全 八分区，导航与卡片一一对应', async () => {
@@ -53,6 +61,7 @@ describe('SettingsPage', () => {
       }),
     )
     renderWithProviders(<SettingsPage />)
+    await openSection(user, 'cars')
     await screen.findByTestId('settings-cars')
     // 默认两辆 mock,主车为 1(cars 查询异步,等行出现)
     expect(await screen.findByTestId('car-primary-1')).toBeChecked()
@@ -64,7 +73,9 @@ describe('SettingsPage', () => {
   })
 
   it('推送分区（v0.3 事件级总开关）：9 事件各一个 Toggle，副行显示启用渠道；关=全静音', async () => {
+    const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
+    await openSection(user, 'push')
     // 列表要等 pushRules 查询返回（此前是骨架屏）
     const list = await screen.findByTestId('push-matrix-list')
     // 9 行事件 Toggle 全渲染（含每日早报与告警三行）
@@ -90,6 +101,7 @@ describe('SettingsPage', () => {
       }),
     )
     renderWithProviders(<SettingsPage />)
+    await openSection(user, 'ai')
     await screen.findByTestId('settings-ai')
     // 默认关闭、密钥输入框存在且为 password 型
     expect(screen.getByTestId('ai-api-key')).toHaveAttribute('type', 'password')
@@ -110,7 +122,9 @@ describe('SettingsPage', () => {
   })
 
   it('外观分区：主题切换写 dataset，语言切换即时生效', async () => {
+    const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
+    await openSection(user, 'appearance')
     await screen.findByTestId('settings-appearance')
     // 默认中文（桌面导航 + 分区标题各出现一次）
     expect(screen.getAllByText('外观').length).toBeGreaterThanOrEqual(2)
@@ -129,6 +143,7 @@ describe('SettingsPage', () => {
   it('密码不一致与过短密码被前端拦截', async () => {
     const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
+    await openSection(user, 'security')
     await screen.findByTestId('change-password-card')
     await user.type(screen.getByLabelText('当前密码'), 'old')
     await user.type(screen.getByLabelText('新密码'), '123')
@@ -150,6 +165,7 @@ describe('SettingsPage', () => {
       http.post('/api/auth/change-password', () => HttpResponse.json({ ok: true })),
     )
     renderWithProviders(<SettingsPage />)
+    await openSection(user, 'security')
     await screen.findByTestId('change-password-card')
     await user.type(screen.getByLabelText('当前密码'), 'old')
     await user.type(screen.getByLabelText('新密码'), 'newpass99')
@@ -164,7 +180,9 @@ describe('SettingsPage', () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
     renderWithProviders(<SettingsPage />, { route: '/settings#settings-security' })
-    await screen.findByTestId('change-password-card')
+    // 锚点直达自动展开（v0.3）：分区 data-open=true 且表单渲染
+    await waitFor(() => expect(screen.getByTestId('change-password-card')).toHaveAttribute('data-open', 'true'))
+    await screen.findByLabelText('当前密码')
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
     // 侧栏高亮同步切到 security
     const desktopNav = screen.getAllByTestId('settings-nav')[0]

@@ -192,8 +192,14 @@ export default function ChargingPage() {
           />
         </div>
         {(from || to) && (
-          <button className="btn-ghost !py-2 text-xs" onClick={() => { setFrom(''); setTo('') }} data-testid="charge-filter-clear">
-            {t('charging.clear', '清除')}
+          <button
+            className="btn-ghost !px-2.5 !py-2"
+            onClick={() => { setFrom(''); setTo('') }}
+            aria-label={t('charging.clear', '清除')}
+            title={t('charging.clear', '清除')}
+            data-testid="charge-filter-clear"
+          >
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>
@@ -219,9 +225,9 @@ export default function ChargingPage() {
         )}
       </div>
 
-      {/* 电池健康（v0.3 紧凑单行版：与首页大卡区分层级；react-query 缓存共享零额外请求） */}
+      {/* 电池健康（v0.3 调换：充电页放完整大卡——电池语境；首页为紧凑可展开行） */}
       <div className="mb-4">
-        <BatteryHealthCard variant="slim" />
+        <BatteryHealthCard />
       </div>
 
       {/* 成本构成三分 + 免费充电 + 月度趋势（Grafana charging-costs-stats 提炼） */}
