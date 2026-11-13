@@ -76,9 +76,9 @@ export function createDashboardRoutes({ db, state }) {
         getWeekStats(db, new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), prefetchCarId).catch(() => null),
         (async () => {
           const { sql, params } = listDrivesSql({ carId: prefetchCarId });
-          return db.query(sql, [...params, 5, 0]).catch(() => []);
+          return db.query(sql, [...params, 3, 0]).catch(() => []);
         })(),
-        recentChargesViews(5, prefetchCarId).catch(() => []),
+        recentChargesViews(3, prefetchCarId).catch(() => []),
         getGeofences(db).catch(() => [])
       ]);
       // 解析链以快照首车收口：与并发预估不一致时按最终车补拉（未绑定的多车库）

@@ -58,6 +58,8 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
   app.get("/api/auth/me", requireAuth, (ctx) => auth.me(ctx));
   app.get("/api/dashboard", requireAuth, (ctx) => dashboard.dashboard(ctx));
   app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
+  app.get("/api/trips/overview", requireAuth, (ctx) => trips.overview(ctx));
+  app.get("/api/trips/route-summary", requireAuth, (ctx) => trips.routeSummary(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
@@ -253,6 +255,69 @@ test("trips 非法 from 参数 → 400", async () => {
   const { app } = buildTestApp({ db: tripsFakeDb() });
   const res = await fetchApp(app, "GET", "/api/trips?from=not-a-date", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 400);
+});
+
+// ---- trips overview / route-summary（v0.3 行程页汇总） --------------------
+
+function overviewFakeDb() {
+  return createFakeDb((sql) => {
+    if (/count\(\*\)::int AS n/.test(sql)) return [{ n: 45, distance_km: 1240.5, duration_min: 1710 }];
+    if (/sum\(cp\.duration_min\)/.test(sql)) return [{ charge_min: 2400 }];
+    if (/SELECT d\.id FROM drives/.test(sql)) return [{ id: 3241 }, { id: 3242 }];
+    if (/max\(p\.speed\)/.test(sql)) return [{ max_speed: 128 }];
+    return [];
+  });
+}
+
+test("GET /api/trips/overview：KPI + 状态占比（时长 SUM 近似）", async () => {
+  const { app } = buildTestApp({ db: overviewFakeDb() });
+  const from = "2026-08-15T00:00:00.000Z";
+  const to = "2026-11-13T00:00:00.000Z";
+  const res = await fetchApp(app, "GET", `/api/trips/overview?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.tripCount, 45);
+  assert.equal(res.json.distanceKm, 1240.5);
+  assert.equal(res.json.durationMin, 1710);
+  assert.equal(res.json.maxSpeedKmh, 128);
+  // 区间 90 天 = 129600 分 − 行驶 1710 − 充电 2400 → 驻车 125490
+  assert.equal(res.json.stateShare.driveMin, 1710);
+  assert.equal(res.json.stateShare.chargeMin, 2400);
+  assert.equal(res.json.stateShare.parkedMin, 125490);
+});
+
+test("GET /api/trips/overview 非法 from → 400", async () => {
+  const { app } = buildTestApp({ db: overviewFakeDb() });
+  const res = await fetchApp(app, "GET", "/api/trips/overview?from=zzz", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 400);
+});
+
+test("GET /api/trips/route-summary：计数 + 取模抽稀点集", async () => {
+  const seen = [];
+  const db = createFakeDb((sql) => {
+    seen.push(sql);
+    if (/count\(\*\)::int AS n[\s\S]*JOIN drives/.test(sql)) return [{ n: 2400 }];
+    if (/row_number\(\) OVER/.test(sql)) {
+      // stride = floor(2400/1200) = 2 → SQL 里应有 rn % 2
+      assert.match(sql, /rn % 2 = 0/);
+      return [{ lat: 31.22, lng: 121.4, speed: 32 }, { lat: 31.23, lng: 121.42, speed: 75 }];
+    }
+    return [];
+  });
+  const { app } = buildTestApp({ db });
+  const res = await fetchApp(app, "GET", "/api/trips/route-summary", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.pointCount, 2400);
+  assert.equal(res.json.points.length, 2);
+  assert.equal(res.json.points[0].lat, 31.22);
+});
+
+test("GET /api/charging?from/to：日期区间透传 SQL（优先于 month）", async () => {
+  const db = chargingFakeDb();
+  const { app } = buildTestApp({ db });
+  const from = "2026-10-01T00:00:00.000Z";
+  const res = await fetchApp(app, "GET", `/api/charging?from=${encodeURIComponent(from)}`, { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.ok(db.calls.some((c) => /cp\.start_date >= /.test(c.sql) && c.sql.includes("2026-10-01")));
 });
 
 // ---- charging -----------------------------------------------------------

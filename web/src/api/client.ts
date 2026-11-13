@@ -21,6 +21,8 @@ import type {
   AiConfig,
   RecalcJob,
   ReportDetail,
+  RouteSummary,
+  TripsOverview,
   ReportListItem,
   SetupStatus,
   SystemEvent,
@@ -169,18 +171,41 @@ export const api = {
     return get<Paged<Trip>>(`/api/trips?${q.toString()}`)
   },
   trip: (id: number | string) => get<TripDetail>(`/api/trips/${id}`),
+  /** v0.3 行程页顶部汇总：KPI + 状态占比 */
+  tripsOverview: (params: { from?: string; to?: string; carId?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.from) q.set('from', params.from)
+    if (params.to) q.set('to', params.to)
+    if (params.carId != null) q.set('carId', String(params.carId))
+    return get<TripsOverview>(`/api/trips/overview?${q.toString()}`)
+  },
+  /** v0.3 行程页轨迹汇总（区间内所有行驶轨迹叠加，抽稀 ≤1200 点） */
+  tripsRouteSummary: (params: { from?: string; to?: string; carId?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.from) q.set('from', params.from)
+    if (params.to) q.set('to', params.to)
+    if (params.carId != null) q.set('carId', String(params.carId))
+    return get<RouteSummary>(`/api/trips/route-summary?${q.toString()}`)
+  },
 
-  charging: (params: { limit?: number; offset?: number; month?: string; carId?: number } = {}) => {
+  charging: (params: { limit?: number; offset?: number; month?: string; from?: string; to?: string; carId?: number } = {}) => {
     const q = new URLSearchParams()
     if (params.limit != null) q.set('limit', String(params.limit))
     if (params.offset != null) q.set('offset', String(params.offset))
     if (params.month) q.set('month', params.month)
+    if (params.from) q.set('from', params.from)
+    if (params.to) q.set('to', params.to)
     if (params.carId != null) q.set('carId', String(params.carId))
     return get<Paged<Charge>>(`/api/charging?${q.toString()}`)
   },
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
-  chargingStats: (period: 'month' | 'year' | 'all' = 'month', month?: string, carId?: number) =>
-    get<ChargingStats>(withCar(`/api/charging/stats?period=${period}${month ? `&month=${month}` : ''}`, carId)),
+  chargingStats: (params: { from?: string; to?: string; month?: string; carId?: number } = {}) => {
+    const q = new URLSearchParams({ period: 'month' })
+    if (params.month) q.set('month', params.month)
+    if (params.from) q.set('from', params.from)
+    if (params.to) q.set('to', params.to)
+    return get<ChargingStats>(withCar(`/api/charging/stats?${q.toString()}`, params.carId))
+  },
   putChargeCost: (id: number, amount: number) =>
     put<{ ok: boolean }>(`/api/charging/${id}/cost`, { amount, source: 'manual' }),
 

@@ -100,11 +100,12 @@ export default function DashboardPage() {
           {/* P2 模块1：车辆状态卡（紧凑单列：电量细横条；右下角位置文字 = 围栏名/附近/坐标兜底） */}
           <section className="glass-card fade-up p-4" data-testid="car-card">
             <div className="flex flex-col justify-center gap-3">
-              {/* 首行：车名 + 状态，读作一句话（"Model 3 · 在线"）；位置/同步不在首行抢宽度 */}
-              <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
-                <Car className="h-4 w-4 shrink-0 text-tesla" />
-                <span className="min-w-0 truncate">{car!.name}</span>
-                {/* 状态胶囊跟车名（用户裁决）；前置状态点，活跃态（充电/行驶/哨兵）带轻 ping */}
+              {/* 首行：左车名（完整不截断），右状态胶囊（v0.3 用户裁决；活跃态轻 ping） */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-sm text-slate-300">
+                  <Car className="h-4 w-4 shrink-0 text-tesla" />
+                  <span className="truncate">{car!.name}</span>
+                </div>
                 <span className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${pill.cls}`} data-testid="car-state-pill">
                   <span className="relative flex h-1.5 w-1.5">
                     {pill.live && <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${pill.dot} opacity-50`} />}

@@ -164,6 +164,124 @@ export function lttbDownsample(points, threshold = 300) {
 
 export function createTripsRoutes({ db, state }) {
   return {
+    /** GET /api/trips/overview?from&to&carId —— 行程页顶部汇总（Grafana trip.json 提炼）：
+     *  KPI（趟数/里程/时长/能耗/电费/最高速）+ 状态占比（行驶/充电/驻车）。
+     *  能耗电费走 FIFO 回放与列表同口径；占比条是时长 SUM 近似（非逐段 timeline）。 */
+    async overview(ctx) {
+      const from = validateIso(ctx.query.from, "from");
+      const to = validateIso(ctx.query.to, "to");
+      const carId = carIdFromQuery(ctx, state);
+      const where = ["d.end_date IS NOT NULL"];
+      if (from) where.push(`d.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')`);
+      if (to) where.push(`d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')`);
+      where.push(carFilterSql(carId));
+      const whereSql = where.join(" AND ");
+
+      const [aggRow, chargeRow, drives] = await Promise.all([
+        db.queryOne(`
+          SELECT count(*)::int AS n,
+                 round(sum(d.distance)::numeric, 1) AS distance_km,
+                 round(sum(d.duration_min)::numeric, 0) AS duration_min
+          FROM drives d WHERE ${whereSql}
+        `).catch(() => null),
+        db.queryOne(`
+          SELECT round(sum(cp.duration_min)::numeric, 0) AS charge_min
+          FROM charging_processes cp
+          WHERE cp.end_date IS NOT NULL
+            ${from ? `AND cp.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')` : ""}
+            ${to ? `AND cp.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')` : ""}
+            ${carFilterSql(carId, "cp.car_id")}
+        `).catch(() => null),
+        db.query(`
+          SELECT d.id FROM drives d WHERE ${whereSql} ORDER BY d.end_date DESC
+        `).then((rows) => rows.map((r) => String(r.id))).catch(() => []),
+      ]);
+
+      // 能耗/电费：FIFO 全量回放后按区间内 drive 求和（与列表卡同口径）
+      let energyKwh = null;
+      let costCny = null;
+      if (drives.length) {
+        const idSet = new Set(drives);
+        const ledger = await getFifoLedger(db, state, carId).catch(() => null);
+        if (ledger) {
+          let e = 0, c = 0, any = false;
+          for (const [id, alloc] of ledger.byDriveId) {
+            if (!idSet.has(String(id))) continue;
+            any = true;
+            e += alloc.energy_kwh ?? 0;
+            c += alloc.cost_cny ?? 0;
+          }
+          if (any) { energyKwh = round(e, 1); costCny = round(c, 2); }
+        }
+      }
+
+      // 最高速：区间内 drives 的 positions MAX(speed)（drive_id 索引；区间行数有限）
+      let maxSpeedKmh = null;
+      if (drives.length) {
+        try {
+          const row = await db.queryOne(`
+            SELECT max(p.speed) AS max_speed
+            FROM positions p
+            WHERE p.drive_id = ANY($1::int[])
+          `, [drives.map(Number)]);
+          maxSpeedKmh = finiteNumber(row?.max_speed);
+        } catch { /* positions 缺列/超时 → 留空 */ }
+      }
+
+      const driveMin = finiteNumber(aggRow?.duration_min) ?? 0;
+      const chargeMin = finiteNumber(chargeRow?.charge_min) ?? 0;
+      const spanMin = Math.max(Math.round((to ? new Date(to).getTime() : Date.now()) - (from ? new Date(from).getTime() : Date.now())) / 60000, driveMin + chargeMin);
+      return {
+        tripCount: aggRow?.n ?? drives.length,
+        distanceKm: finiteNumber(aggRow?.distance_km) ?? 0,
+        durationMin: driveMin,
+        energyKwh,
+        costCny,
+        maxSpeedKmh,
+        stateShare: {
+          driveMin: Math.round(driveMin),
+          chargeMin: Math.round(chargeMin),
+          parkedMin: Math.max(Math.round(spanMin - driveMin - chargeMin), 0),
+        },
+      };
+    },
+
+    /** GET /api/trips/route-summary?from&to&carId —— 区间内行驶轨迹汇总（Grafana trip.json 地图提炼）。
+     *  只取 drive_id 非空的 positions（纯行驶轨迹，不含驻车心跳）；SQL 按序号取模抽稀 ≤1200 点。 */
+    async routeSummary(ctx) {
+      const from = validateIso(ctx.query.from, "from");
+      const to = validateIso(ctx.query.to, "to");
+      const carId = carIdFromQuery(ctx, state);
+      const where = ["d.end_date IS NOT NULL", "p.drive_id IS NOT NULL", "p.latitude IS NOT NULL"];
+      if (from) where.push(`d.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')`);
+      if (to) where.push(`d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')`);
+      where.push(carFilterSql(carId));
+      const whereSql = where.join(" AND ");
+
+      const cnt = await db.queryOne(`
+        SELECT count(*)::int AS n
+        FROM positions p JOIN drives d ON d.id = p.drive_id
+        WHERE ${whereSql}
+      `).catch(() => null);
+      const total = cnt?.n ?? 0;
+      if (!total) return { pointCount: 0, points: [] };
+
+      const stride = Math.max(Math.floor(total / 1200), 1);
+      const rows = await db.query(`
+        WITH pts AS (
+          SELECT p.latitude::float8 AS lat, p.longitude::float8 AS lng, p.speed::float8 AS speed,
+                 row_number() OVER (ORDER BY p.date, p.id) AS rn
+          FROM positions p JOIN drives d ON d.id = p.drive_id
+          WHERE ${whereSql}
+        )
+        SELECT lat, lng, speed FROM pts WHERE rn % ${stride} = 0 ORDER BY rn
+      `);
+      return {
+        pointCount: total,
+        points: rows.map((r) => ({ lat: r.lat, lng: r.lng, speed: finiteNumber(r.speed) })),
+      };
+    },
+
     async list(ctx) {
       const { limit, offset } = clampPaging(ctx.query);
       const from = validateIso(ctx.query.from, "from");

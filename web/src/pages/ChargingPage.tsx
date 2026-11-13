@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, BatteryCharging, Coins, MapPin, Pencil, Repeat, X, Zap } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
-import { Pagination } from '@/components/Pagination'
 import { BatteryHealthCard } from '@/components/BatteryHealthCard'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
@@ -11,10 +10,12 @@ import { StatCard } from '@/components/StatCard'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice, getCurrencySymbol } from '@/utils/format'
+import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice, getCurrencySymbol, toInputDate } from '@/utils/format'
 import type { ChargeDetail } from '@/types'
 
 const PAGE_SIZE = 20
+/** 默认筛选窗口（v0.3 与行程页统一）：近 90 天 */
+const DEFAULT_WINDOW_DAYS = 90
 
 /** 费用来源三态标记（P4 视图A）— labelKey/labelZh 由调用点 t() 双语 */
 const COST_SOURCE_TAG = {
@@ -71,42 +72,59 @@ function PowerCurve({ detail }: { detail: ChargeDetail }) {
 
 export default function ChargingPage() {
   const { t } = useI18n()
-  const [page, setPage] = useState(1)
-  const [month, setMonth] = useState('')
-  // 最近 18 个月选项（value 与后端 month 参数格式一致：YYYY-MM）
-  const monthOptions = useMemo(() => {
-    const out: { value: string; label: string }[] = []
-    const now = new Date()
-    for (let i = 0; i < 18; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-      out.push({
-        value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-        label: t('charging.monthLabel', '{y} 年 {m} 月').replace('{y}', String(d.getFullYear())).replace('{m}', String(d.getMonth() + 1)),
-      })
-    }
-    return out
-  }, [t])
+  const today = useMemo(() => new Date(), [])
+  const defaultFrom = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - DEFAULT_WINDOW_DAYS)
+    return toInputDate(d)
+  }, [])
+  const [from, setFrom] = useState(defaultFrom)
+  const [to, setTo] = useState('')
   const [detailId, setDetailId] = useState<number | null>(null)
   const [costInput, setCostInput] = useState('')
   const { toast } = useToast()
   const queryClient = useQueryClient()
-  const currentMonth = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-  }
 
   const { currentCarId } = useCar()
-  // 切车回第 1 页（防跨车高页码空列表）
-  useEffect(() => { setPage(1) }, [currentCarId])
-  const listParams = { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE, month: month || undefined, carId: currentCarId }
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['charging', listParams],
-    queryFn: () => api.charging(listParams),
-    placeholderData: keepPreviousData,
+  const rangeParams = useMemo(
+    () => ({
+      from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
+      to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+      carId: currentCarId,
+    }),
+    [from, to, currentCarId],
+  )
+
+  // 无限滚动（v0.3 与行程页统一交互；替代底部页码）
+  const {
+    data, isLoading, isFetching, isError, refetch, fetchNextPage, hasNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['charging', rangeParams],
+    queryFn: ({ pageParam }) => api.charging({ limit: PAGE_SIZE, offset: pageParam, ...rangeParams }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.items.length, 0)
+      return loaded < lastPage.total ? loaded : undefined
+    },
   })
+  const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data])
+  const total = data?.pages[0]?.total ?? 0
+
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting && hasNextPage && !isFetching) void fetchNextPage() },
+      { rootMargin: '400px 0px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [hasNextPage, isFetching, fetchNextPage])
+
   const { data: stats } = useQuery({
-    queryKey: ['charging-stats', month, currentCarId],
-    queryFn: () => api.chargingStats('month', month || currentMonth(), currentCarId),
+    queryKey: ['charging-stats', rangeParams],
+    queryFn: () => api.chargingStats(rangeParams),
   })
   const { data: detail, isError: detailError, refetch: refetchDetail } = useQuery({
     queryKey: ['charging-detail', detailId],
@@ -139,7 +157,6 @@ export default function ChargingPage() {
     return () => document.removeEventListener('keydown', onKey)
   }, [detailId])
 
-  const pageCount = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
   const byLocation = stats?.byLocation ?? []
   const maxKwh = Math.max(...byLocation.map((l) => l.kwh), 1)
 
@@ -147,24 +164,35 @@ export default function ChargingPage() {
     <div>
       <PageHeader icon={BatteryCharging} title={t('charging.title', '充电')} subtitle={t('charging.subtitle', '充电账本与站点统计')} />
 
-      {/* 月份筛选：下拉选最近 18 个月（原生 month input 桌面端是无下拉的裸输入框，
-          观感与操作都不像筛选器；select 一步到位且与全站 input-dark 风格一致） */}
-      <div className="mb-4 flex items-center gap-3">
-        <label htmlFor="charge-month" className="text-xs text-slate-400">{t('charging.monthFilter', '月份筛选')}</label>
-        <select
-          id="charge-month"
-          className="input-dark max-w-[150px]"
-          value={month}
-          onChange={(e) => { setMonth(e.target.value); setPage(1) }}
-          data-testid="month-filter"
-        >
-          <option value="">{t('charging.allMonths', '全部月份')}</option>
-          {monthOptions.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
-        {month && (
-          <button className="btn-ghost !py-2 text-xs" onClick={() => setMonth('')} data-testid="month-clear">
+      {/* 日期区间筛选（v0.3：与行程页统一；默认近 90 天，清除=全部） */}
+      <div className="glass-card-flat mb-4 flex flex-wrap items-end gap-3 p-4" data-testid="charge-filter">
+        <div>
+          <label htmlFor="charge-from" className="mb-1 block text-[11px] text-slate-400">{t('charging.filterFrom', '开始日期')}</label>
+          <input
+            id="charge-from"
+            type="date"
+            className="input-dark !w-auto"
+            value={from}
+            max={to || toInputDate(today)}
+            onChange={(e) => setFrom(e.target.value)}
+            data-testid="charge-from"
+          />
+        </div>
+        <div>
+          <label htmlFor="charge-to" className="mb-1 block text-[11px] text-slate-400">{t('charging.filterTo', '结束日期')}</label>
+          <input
+            id="charge-to"
+            type="date"
+            className="input-dark !w-auto"
+            value={to}
+            min={from || undefined}
+            max={toInputDate(today)}
+            onChange={(e) => setTo(e.target.value)}
+            data-testid="charge-to"
+          />
+        </div>
+        {(from || to) && (
+          <button className="btn-ghost !py-2 text-xs" onClick={() => { setFrom(''); setTo('') }} data-testid="charge-filter-clear">
             {t('charging.clear', '清除')}
           </button>
         )}
@@ -191,9 +219,9 @@ export default function ChargingPage() {
         )}
       </div>
 
-      {/* 电池健康（与仪表盘同卡复用，react-query 缓存共享零额外请求） */}
+      {/* 电池健康（v0.3 紧凑单行版：与首页大卡区分层级；react-query 缓存共享零额外请求） */}
       <div className="mb-4">
-        <BatteryHealthCard />
+        <BatteryHealthCard variant="slim" />
       </div>
 
       {/* 成本构成三分 + 免费充电 + 月度趋势（Grafana charging-costs-stats 提炼） */}
@@ -289,14 +317,14 @@ export default function ChargingPage() {
             action={{ label: t('common.retry', '重试'), onClick: () => void refetch() }}
           />
         </div>
-      ) : !data || data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="glass-card-flat">
           <EmptyState icon={BatteryCharging} title={t('charging.list.empty.title', '暂无充电记录')} description={t('charging.list.empty.desc', 'TeslaMate 记录到充电会话后会自动同步')} />
         </div>
       ) : (
-        <div>
+        <div className={isFetching ? 'opacity-60 transition' : 'transition'}>
           <ul className="space-y-2.5" data-testid="charge-list">
-            {data.items.map((c) => {
+            {items.map((c) => {
               const tag = COST_SOURCE_TAG[c.costSource ?? 'unknown']
               return (
                 <li key={c.id} className="glass-card-flat p-4" data-testid="charge-item">
@@ -341,7 +369,13 @@ export default function ChargingPage() {
               )
             })}
           </ul>
-          <Pagination page={page} pageCount={pageCount} onChange={setPage} />
+          {/* 无限滚动哨兵（v0.3 替代页码） */}
+          <div ref={sentinelRef} data-testid="charge-scroll-sentinel" className="h-2" />
+          <div className="num pt-3 pb-1 text-center text-[11px] text-slate-500" data-testid="charge-load-state">
+            {hasNextPage
+              ? isFetching ? t('trips.loadingMore', '加载中…') : t('trips.scrollHint', '下滑加载更多')
+              : t('trips.allLoaded', '已加载全部 {n} 条').replace('{n}', String(total))}
+          </div>
         </div>
       )}
 

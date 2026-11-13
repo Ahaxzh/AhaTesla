@@ -224,6 +224,27 @@ export const defaultHandlers = [
     }))
     return HttpResponse.json({ total, items })
   }),
+  http.get('/api/trips/overview', () =>
+    HttpResponse.json({
+      tripCount: 45,
+      distanceKm: 1240.5,
+      durationMin: 1710,
+      energyKwh: 223.1,
+      costCny: 168.4,
+      maxSpeedKmh: 128,
+      stateShare: { driveMin: 1710, chargeMin: 2400, parkedMin: 60000 },
+    }),
+  ),
+  http.get('/api/trips/route-summary', () =>
+    HttpResponse.json({
+      pointCount: 3,
+      points: [
+        { lat: 31.22, lng: 121.4, speed: 32 },
+        { lat: 31.23, lng: 121.42, speed: 75 },
+        { lat: 31.25, lng: 121.45, speed: 105 },
+      ],
+    }),
+  ),
   http.get('/api/trips/:id', ({ params }) =>
     HttpResponse.json({
       ...mockTrip,

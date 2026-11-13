@@ -19,6 +19,13 @@ export function createChargingRoutes({ db, state, getStore }) {
     return mon >= 1 && mon <= 12 ? m : null;
   }
 
+  // from/to 日期区间（v0.3 与行程页统一交互）：非法值 400，空值 null
+  function validIso(value, field) {
+    if (value === undefined || value === null || value === "") return null;
+    if (Number.isNaN(new Date(value).getTime())) throw new HttpError(400, "bad_request", `invalid ${field} timestamp`);
+    return new Date(value).toISOString();
+  }
+
   // 统一计价选项（补录/TOU/tz）—— 修复旧 overridesMap 读错列名（cpId）导致
   // 补录从未在充电页生效的问题，并让 TOU 分时同样作用于充电列表/统计。
   async function pricingOptions() {
@@ -55,10 +62,12 @@ export function createChargingRoutes({ db, state, getStore }) {
       const limit = Math.max(1, Math.min(200, Number(ctx.query.limit) || 50));
       const offset = Math.max(0, Number(ctx.query.offset) || 0);
       const month = validMonth(ctx.query.month);
+      const from = validIso(ctx.query.from, "from");
+      const to = validIso(ctx.query.to, "to");
       const carId = carIdFromQuery(ctx, state); // m4e
       const options = await pricingOptions();
-      const rows = await listCharging(db, { limit, offset, month, carId, tz: instanceTimezone(state) });
-      const total = await countCharging(db, { month, carId, tz: instanceTimezone(state) });
+      const rows = await listCharging(db, { limit, offset, month, from, to, carId, tz: instanceTimezone(state) });
+      const total = await countCharging(db, { month, from, to, carId, tz: instanceTimezone(state) });
       return { total, items: rows.map((r) => toChargeView(r, options)) };
     },
 
@@ -121,9 +130,15 @@ export function createChargingRoutes({ db, state, getStore }) {
       // period 仅作兼容（month=30天滚动窗口曾导致"本月20次"与列表8次对不上）
       const period = ctx.query.period === "all" ? "all" : ctx.query.period === "year" ? "year" : "month";
       const month = validMonth(ctx.query.month);
+      // v0.3：日期区间优先于 month/period（与列表筛选一致）
+      const rangeFrom = validIso(ctx.query.from, "from");
+      const rangeTo = validIso(ctx.query.to, "to");
       let sinceIso;
       let untilIso = null;
-      if (month) {
+      if (rangeFrom || rangeTo) {
+        sinceIso = rangeFrom;
+        untilIso = rangeTo;
+      } else if (month) {
         // 实例时区自然月 → UTC 边界（tz 感知，非硬编码 +08:00）
         const tz = instanceTimezone(state);
         const [y, m] = month.split("-").map(Number);

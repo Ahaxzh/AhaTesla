@@ -12,10 +12,12 @@ describe('ChargingPage', () => {
   it('渲染统计卡（含量/价/次数四卡）、电池健康卡、地点条形图与充电列表', async () => {
     renderWithProviders(<ChargingPage />)
     expect(await screen.findByTestId('charge-total-cost')).toHaveTextContent('¥168.40')
-    // v0.2.x：第四张「充电次数」卡（stats.sessionCount）+ 电池健康卡复用
+    // v0.3：第四张「充电次数」卡（stats.sessionCount）+ 电池健康紧凑单行（与首页大卡区分）
     const stats = screen.getByTestId('charge-stats')
     expect(stats).toHaveTextContent('24 次')
-    expect(await screen.findByTestId('battery-health-card')).toBeInTheDocument()
+    const slim = await screen.findByTestId('battery-health-slim')
+    expect(slim).toHaveTextContent('98.2')
+    expect(slim).toHaveTextContent('50.7')
 
     const bars = await screen.findAllByTestId('location-bar')
     expect(bars).toHaveLength(2)

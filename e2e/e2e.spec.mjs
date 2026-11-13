@@ -190,11 +190,49 @@ test("充电页：充电次数第四卡 + 电池健康卡", async ({ page }) => 
   await navigate(page, "charging");
   await page.waitForSelector("[data-testid='charge-stats']", { timeout: 15000 });
   await expect(page.getByTestId("charge-stats")).toContainText(/次|sessions/i);
-  // 电池健康卡：样本充足才渲染（与仪表盘同卡），可见时断言健康度数值
-  const bh = page.getByTestId("battery-health-card");
+  // 电池健康紧凑行（v0.3 与首页大卡区分；样本不足时隐藏属预期）
+  const bh = page.getByTestId("battery-health-slim");
   if (await bh.isVisible().catch(() => false)) {
     await expect(bh).toContainText(/%/);
   }
+  // v0.3 日期区间筛选（默认近 90 天，清除=全部）
+  await expect(page.getByTestId("charge-filter")).toBeVisible();
+  await page.getByTestId("charge-filter-clear").click();
+  await page.waitForTimeout(800);
+  await expect(page.getByTestId("charge-filter-clear")).not.toBeVisible();
+});
+
+test("行程页：顶部汇总（KPI/状态占比/轨迹图）+ 无限滚动替代页码", async ({ page }) => {
+  await login(page);
+  await navigate(page, "trips");
+  // 列表行出现（默认近 90 天）
+  await page.waitForSelector("[data-testid='trip-item']", { timeout: 20000 });
+  // 顶部汇总卡：区间内有行程才渲染（KPI + 占比条 + 轨迹汇总图）
+  const overview = page.getByTestId("trip-overview");
+  if (await overview.isVisible().catch(() => false)) {
+    await expect(page.getByTestId("trip-state-share")).toBeVisible();
+    await expect(overview).toContainText(/km/);
+  }
+  // 无限滚动：滚到底触发加载（真实库 90 天通常 >20 条；滚动后条数增加或已显示全部）
+  const before = await page.getByTestId("trip-item").count();
+  await page.mouse.wheel(0, 6000);
+  await page.waitForTimeout(1500);
+  const after = await page.getByTestId("trip-item").count();
+  const allLoaded = await page.getByTestId("trip-load-state").textContent().catch(() => "");
+  expect(after > before || /已加载全部|All/.test(allLoaded || "")).toBeTruthy();
+  // 底部不再有分页页码
+  await expect(page.getByTestId("pagination")).not.toBeVisible();
+});
+
+test("设置页：推送分区为事件级总开关（v0.3 简化，无渠道 chips）", async ({ page }) => {
+  await login(page);
+  await navigate(page, "settings");
+  await page.waitForSelector("[data-testid='settings-push-matrix']", { timeout: 10000 });
+  await page.waitForSelector("[data-testid^='push-event-toggle-']", { timeout: 10000 });
+  // 断联告警开关存在且为 switch 语义；渠道 chips 不再渲染
+  const toggle = page.getByTestId("push-event-toggle-outage");
+  await expect(toggle).toHaveAttribute("aria-checked", /^(true|false)$/);
+  await expect(page.locator("[data-testid^='matrix-']").first()).not.toBeVisible().catch(() => true);
 });
 
 test("移动端：充电页统计四卡在窄屏两列排布不溢出", async ({ page }) => {

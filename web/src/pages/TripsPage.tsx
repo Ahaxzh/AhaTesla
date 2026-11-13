@@ -1,52 +1,118 @@
-import { useEffect, useMemo, useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { ChevronRight, Route } from 'lucide-react'
+import { ChevronRight, Clock, Coins, Gauge, MapPinned, Route, TrendingUp } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
-import { Pagination } from '@/components/Pagination'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
+import { StatCard } from '@/components/StatCard'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
+import type { TripsOverview } from '@/types'
+
+// 轨迹汇总图二级懒加载：地图 chunk（Leaflet ~156KB）不阻塞行程页首屏
+const RouteMap = lazy(() => import('@/components/RouteMap').then((m) => ({ default: m.RouteMap })))
 
 const PAGE_SIZE = 20
+/** 默认筛选窗口（v0.3）：近 90 天——手机端首屏 & 列表噪音双优；「清除」可看全部 */
+const DEFAULT_WINDOW_DAYS = 90
+
+/** 状态占比条：行驶/充电/驻车（时长近似口径），一行分段彩色条 + 图例 */
+function StateShareBar({ data }: { data: TripsOverview['stateShare'] }) {
+  const { t } = useI18n()
+  const { driveMin, chargeMin, parkedMin } = data
+  const total = Math.max(driveMin + chargeMin + parkedMin, 1)
+  const segs = [
+    { key: 'trips.share.drive', zh: '行驶', min: driveMin, cls: 'bg-sky-500', dot: 'bg-sky-500' },
+    { key: 'trips.share.charge', zh: '充电', min: chargeMin, cls: 'bg-emerald-500', dot: 'bg-emerald-500' },
+    { key: 'trips.share.parked', zh: '驻车', min: parkedMin, cls: 'bg-slate-600', dot: 'bg-slate-600' },
+  ]
+  return (
+    <div data-testid="trip-state-share">
+      <div className="flex h-2.5 overflow-hidden rounded-full bg-white/[0.05]" role="presentation">
+        {segs.map((s) => (
+          <div key={s.key} className={s.cls} style={{ width: `${(s.min / total) * 100}%` }} />
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
+        {segs.map((s) => (
+          <span key={s.key} className="flex items-center gap-1.5">
+            <span className={`inline-block h-2 w-2 rounded-sm ${s.dot}`} />
+            {t(s.key, s.zh)} <span className="num text-slate-300">{fmtDuration(s.min)}</span>
+            <span className="num text-slate-500">{((s.min / total) * 100).toFixed(0)}%</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function TripsPage() {
   const { t } = useI18n()
-  const [page, setPage] = useState(1)
   const today = useMemo(() => new Date(), [])
+  const defaultFrom = useMemo(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - DEFAULT_WINDOW_DAYS)
+    return toInputDate(d)
+  }, [])
   const { currentCarId } = useCar()
-  const [from, setFrom] = useState('')
+  const [from, setFrom] = useState(defaultFrom)
   const [to, setTo] = useState('')
 
-  // 切车/改筛选回第 1 页（车 B 只有 12 条时，沿用 A 的第 3 页会看到假"无数据"）
-  useEffect(() => { setPage(1) }, [currentCarId, from, to])
-
-  const params = useMemo(
+  const rangeParams = useMemo(
     () => ({
-      limit: PAGE_SIZE,
-      offset: (page - 1) * PAGE_SIZE,
       from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
       to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
       carId: currentCarId,
     }),
-    [page, from, to, currentCarId],
+    [from, to, currentCarId],
   )
 
-  const { data, isLoading, isFetching, isError, refetch } = useQuery({
-    queryKey: ['trips', params],
-    queryFn: () => api.trips(params),
-    placeholderData: keepPreviousData,
+  // 无限滚动：useInfiniteQuery 累积分页，sentinel 进视口即取下一页
+  const {
+    data, isLoading, isFetching, isError, refetch, fetchNextPage, hasNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['trips', rangeParams],
+    queryFn: ({ pageParam }) => api.trips({ limit: PAGE_SIZE, offset: pageParam, ...rangeParams }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((n, p) => n + p.items.length, 0)
+      return loaded < lastPage.total ? loaded : undefined
+    },
   })
+  const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data])
+  const total = data?.pages[0]?.total ?? 0
 
-  const pageCount = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = sentinelRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') return
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting && hasNextPage && !isFetching) void fetchNextPage() },
+      { rootMargin: '400px 0px' }, // 提前 400px 预载，滚动到底无感衔接
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [hasNextPage, isFetching, fetchNextPage])
+
+  // 顶部汇总（KPI + 占比条 + 轨迹图）与列表同区间
+  const { data: overview } = useQuery({
+    queryKey: ['trips-overview', rangeParams],
+    queryFn: () => api.tripsOverview(rangeParams),
+    retry: false,
+  })
+  const { data: routeSummary } = useQuery({
+    queryKey: ['trips-route-summary', rangeParams],
+    queryFn: () => api.tripsRouteSummary(rangeParams),
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
 
   const applyFilter = (nextFrom: string, nextTo: string) => {
     setFrom(nextFrom)
     setTo(nextTo)
-    setPage(1)
   }
 
   return (
@@ -54,10 +120,10 @@ export default function TripsPage() {
       <PageHeader
         icon={Route}
         title={t('trips.title', '行程')}
-        subtitle={data ? `${t('trips.subtitle.totalPrefix', '共')} ${data.total} ${t('trips.subtitle.totalSuffix', '条记录')}` : t('trips.subtitle.loading', '行车记录')}
+        subtitle={data ? `${t('trips.subtitle.totalPrefix', '共')} ${total} ${t('trips.subtitle.totalSuffix', '条记录')}` : t('trips.subtitle.loading', '行车记录')}
       />
 
-      {/* 日期筛选 */}
+      {/* 日期筛选（默认近 90 天；清除=全部） */}
       <div className="glass-card-flat mb-4 flex flex-wrap items-end gap-3 p-4" data-testid="trip-filter">
         <div>
           <label htmlFor="filter-from" className="mb-1 block text-[11px] text-slate-400">{t('trips.filter.from', '开始日期')}</label>
@@ -93,6 +159,37 @@ export default function TripsPage() {
         )}
       </div>
 
+      {/* 顶部汇总（Grafana trip.json 提炼）：KPI 行 + 状态占比条 + 区间轨迹汇总图 */}
+      {overview && overview.tripCount > 0 && (
+        <div className="mb-4 space-y-4" data-testid="trip-overview">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard icon={Route} label={t('trips.kpi.distance', '总里程')} value={`${fmtKm(overview.distanceKm, 0)} km`} hint={`${overview.tripCount} ${t('dash.tripsUnit', '趟')} · ${fmtDuration(overview.durationMin)}`} />
+            <StatCard icon={Gauge} label={t('trips.kpi.maxSpeed', '最高时速')} value={overview.maxSpeedKmh != null ? `${Math.round(overview.maxSpeedKmh)} km/h` : '--'} />
+            <StatCard icon={TrendingUp} label={t('trips.kpi.energy', '总能耗')} value={overview.energyKwh != null ? fmtKwh(overview.energyKwh) : '--'} />
+            <StatCard icon={Coins} label={t('trips.kpi.cost', '总电费')} value={overview.costCny != null ? fmtCny(overview.costCny) : '--'} accent />
+          </div>
+          <div className="glass-card-flat p-4">
+            <div className="mb-2.5 flex items-center gap-2 text-sm font-medium text-slate-200">
+              <Clock className="h-4 w-4 text-tesla" /> {t('trips.share.title', '时间分布（区间内）')}
+            </div>
+            <StateShareBar data={overview.stateShare} />
+          </div>
+          {routeSummary && routeSummary.points.length >= 2 && (
+            <div className="glass-card-flat p-4">
+              <div className="mb-2.5 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <MapPinned className="h-4 w-4 text-tesla" /> {t('trips.map.title', '轨迹汇总')}
+                </h3>
+                <span className="num text-[11px] text-slate-500">{t('trips.map.pointsPrefix', '采样')} {routeSummary.pointCount.toLocaleString()} {t('heatmap.stats.daysUnit', '点')}</span>
+              </div>
+              <Suspense fallback={<div className="skeleton h-64 w-full rounded-xl" />}>
+                <RouteMap points={routeSummary.points} height={280} />
+              </Suspense>
+            </div>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <SkeletonList rows={6} />
       ) : isError ? (
@@ -104,7 +201,7 @@ export default function TripsPage() {
             action={{ label: t('common.retry', '重试'), onClick: () => void refetch() }}
           />
         </div>
-      ) : !data || data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="glass-card-flat">
           <EmptyState
             icon={Route}
@@ -115,7 +212,7 @@ export default function TripsPage() {
       ) : (
         <div className={isFetching ? 'opacity-60 transition' : 'transition'}>
           <ul className="space-y-2.5" data-testid="trip-list">
-            {data.items.map((trip) => (
+            {items.map((trip) => (
               <li key={trip.id}>
                 <Link
                   to={`/trips/${trip.id}`}
@@ -142,7 +239,13 @@ export default function TripsPage() {
               </li>
             ))}
           </ul>
-          <Pagination page={page} pageCount={pageCount} onChange={setPage} />
+          {/* 无限滚动哨兵：进视口自动取下一页；替代底部页码 */}
+          <div ref={sentinelRef} data-testid="trip-scroll-sentinel" className="h-2" />
+          <div className="num pt-3 pb-1 text-center text-[11px] text-slate-500" data-testid="trip-load-state">
+            {hasNextPage
+              ? isFetching ? t('trips.loadingMore', '加载中…') : t('trips.scrollHint', '下滑加载更多')
+              : t('trips.allLoaded', '已加载全部 {n} 条').replace('{n}', String(total))}
+          </div>
         </div>
       )}
     </div>

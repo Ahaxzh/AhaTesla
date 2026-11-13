@@ -53,18 +53,20 @@
     monthStats: {distanceKm, energyKwh, **cost**, driveCount, driveHours},
     weekStats: {distanceKm, energyKwh, **cost**},
     fuelComparison: {**fuelCost**, **saved**, savedPct, baseline, asOf},
-    recentTrips:[Trip top5], recentCharges:[Charge top5]
+    recentTrips:[Trip top3], recentCharges:[Charge top3]（v0.3 5→3：首页速览缩短滚动）
   }
 - `GET /api/dashboard/timeline`（v2.1 新增，P2 模块2）→ {segments:[{from, to, state:"driving"|"charging"|"online"|"asleep"|"offline"}], summary:{drivingH, chargingH, asleepH, onlineH, offlineH}}（最近 24h，按实例时区对齐零点或滚动窗口）
 - `GET /api/dashboard/heatmap`（v2.1 新增，P2 模块4）→ {days:[{date:"YYYY-MM-DD", distanceKm}], maxKm}（最近 90 天按实例时区聚合，date 为本地日期）
 - `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
+- `GET /api/trips/overview?from=ISO&to=ISO` → {tripCount, distanceKm, durationMin, energyKwh, costCny, maxSpeedKmh, stateShare:{driveMin, chargeMin, parkedMin}}（v0.3 行程页顶部汇总；能耗电费与列表同 FIFO 口径；占比为时长 SUM 近似）
+- `GET /api/trips/route-summary?from=ISO&to=ISO` → {pointCount, points:[{lat, lng, speed}]}（v0.3 区间行驶轨迹汇总，仅 drive_id 非空 positions，SQL 取模抽稀 ≤1200 点）
 - `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}, tirePressure:{fl,fr,rl,rr}|null（bar，行程内最后有效读数，与推送行程小结同口径）}
 - Trip: {id, startAt, endAt, distanceKm, durationMin, energyKwh, **cost**（原 costCny）, startAddress, endAddress, kwhPer100km, routeKey}
 
 ## 4. 充电（v1 演进）
 
-- `GET /api/charging?limit=50&offset=0&month=YYYY-MM` → {total, items:[Charge]}
-- `GET /api/charging/stats?period=month|all` → {totalKwh, **totalCost**, **avgPrice**, byLocation:[{name, count, kwh, cost, pricePerUnit}]}
+- `GET /api/charging?limit=50&offset=0&month=YYYY-MM&from=ISO&to=ISO` → {total, items:[Charge]}（v0.3 日期区间，优先于 month）
+- `GET /api/charging/stats?period=month|all&month=YYYY-MM&from=ISO&to=ISO` → {totalKwh, **totalCost**, **avgPrice**, sessionCount, byLocation:[{name, count, kwh, cost, pricePerUnit}]}（v0.3 from/to 优先于 month/period）
 - `GET /api/charging/:id` → {**...Charge, powerCurve:[{soc, kw}]（峰值打点 maxKw@soc）**, efficiency:{meterKwh, batteryKwh, ratio, lossKwh}, costSource:"manual"|"geofence"|"default"}
 - `PUT /api/charging/:id/cost` {amount, source:"manual"} → {ok}（费用补录；触发 7 天窗口异步重算，AC-7.6）
 - Charge: {id, startAt, endAt, locationName, energyAddedKwh, **cost**（原 costCny）, pricePerUnit, startBattery, endBattery, durationMin, powerMaxKw, costSource}

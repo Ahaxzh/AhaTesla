@@ -367,18 +367,26 @@ export async function getGeofences(db) {
 
 // ---- charging ------------------------------------------------------------
 
-export async function listCharging(db, { limit = 50, offset = 0, month = null, carId = null, tz = "Asia/Shanghai" } = {}) {
-  // month "YYYY-MM" → 实例时区自然月（此前 date::timestamptz 依赖 PG 会话时区，
-  // 与 /charging/stats 的北京口径漂移；"2026-99" 类非法月在上层校验）
-  let monthFilter = "";
+/** 充电区间过滤：month（实例时区自然月）优先，否则 from/to ISO 精确区间（v0.3 日期区间筛选） */
+function chargingRangeFilter({ month, from, to, tz }) {
   if (month) {
     const m = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
     const mon = m ? Number(m[2]) : 0;
     if (!m || mon < 1 || mon > 12) throw new Error("invalid month");
     const startIso = new Date(wallClockToUtcMs(tz, Number(m[1]), mon, 1)).toISOString();
     const endIso = new Date(wallClockToUtcMs(tz, mon === 12 ? Number(m[1]) + 1 : Number(m[1]), mon === 12 ? 1 : mon + 1, 1)).toISOString();
-    monthFilter = `AND cp.start_date >= ('${startIso}'::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < ('${endIso}'::timestamptz AT TIME ZONE 'UTC')`;
+    return `AND cp.start_date >= ('${startIso}'::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < ('${endIso}'::timestamptz AT TIME ZONE 'UTC')`;
   }
+  let f = "";
+  if (from) f += `AND cp.start_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC') `;
+  if (to) f += `AND cp.start_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC') `;
+  return f;
+}
+
+export async function listCharging(db, { limit = 50, offset = 0, month = null, from = null, to = null, carId = null, tz = "Asia/Shanghai" } = {}) {
+  // month "YYYY-MM" → 实例时区自然月（此前 date::timestamptz 依赖 PG 会话时区，
+  // 与 /charging/stats 的北京口径漂移；"2026-99" 类非法月在上层校验）
+  const rangeFilter = chargingRangeFilter({ month, from, to, tz });
   const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   return db.query(`
     SELECT cp.id, cp.car_id,
@@ -393,26 +401,18 @@ export async function listCharging(db, { limit = 50, offset = 0, month = null, c
     FROM charging_processes cp
     LEFT JOIN geofences g ON g.id = cp.geofence_id
     LEFT JOIN addresses a ON a.id = cp.address_id
-    WHERE cp.end_date IS NOT NULL ${monthFilter}
+    WHERE cp.end_date IS NOT NULL ${rangeFilter}
       AND ($3::int IS NULL OR cp.car_id = $3::int)
     ORDER BY cp.end_date DESC
     LIMIT $1 OFFSET $2
   `, [limit, offset, car]);
 }
 
-export async function countCharging(db, { month = null, carId = null, tz = "Asia/Shanghai" } = {}) {
-  let monthFilter = "";
-  if (month) {
-    const m = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
-    const mon = m ? Number(m[2]) : 0;
-    if (!m || mon < 1 || mon > 12) throw new Error("invalid month");
-    const startIso = new Date(wallClockToUtcMs(tz, Number(m[1]), mon, 1)).toISOString();
-    const endIso = new Date(wallClockToUtcMs(tz, mon === 12 ? Number(m[1]) + 1 : Number(m[1]), mon === 12 ? 1 : mon + 1, 1)).toISOString();
-    monthFilter = `AND cp.start_date >= ('${startIso}'::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < ('${endIso}'::timestamptz AT TIME ZONE 'UTC')`;
-  }
+export async function countCharging(db, { month = null, from = null, to = null, carId = null, tz = "Asia/Shanghai" } = {}) {
+  const rangeFilter = chargingRangeFilter({ month, from, to, tz });
   const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
   const row = await db.queryOne(`
-    SELECT count(*)::int AS total FROM charging_processes cp WHERE cp.end_date IS NOT NULL ${monthFilter}
+    SELECT count(*)::int AS total FROM charging_processes cp WHERE cp.end_date IS NOT NULL ${rangeFilter}
       AND ($1::int IS NULL OR cp.car_id = $1::int)
   `, [car]);
   return row ? row.total : 0;

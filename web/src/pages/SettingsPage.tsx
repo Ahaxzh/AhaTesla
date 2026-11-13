@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from 'react-router-dom'
 import {
@@ -64,13 +64,14 @@ const LANG_OPTIONS: { id: Lang; key: string; zh: string }[] = [
 /** 设置页分区导航（桌面侧栏锚点 / 移动横向滚动）— v2.4 与卡片一一对应 */
 function SettingsNav({ active }: { active: string }) {
   const { t } = useI18n()
+  // v0.3 顺序：日常会动的（电价/账本/推送）提前，一次性的（AI/车辆）靠后
   const items = [
     { id: 'appearance', label: t('settings.nav.appearance', '外观'), icon: Palette },
-    { id: 'cars', label: t('settings.nav.cars', '车辆'), icon: Car },
-    { id: 'ledger', label: t('settings.nav.ledger', '账本参数'), icon: Calculator },
     { id: 'pricing', label: t('settings.nav.pricing', '电价'), icon: Tag },
-    { id: 'ai', label: t('settings.nav.ai', 'AI 助手'), icon: Sparkles },
+    { id: 'ledger', label: t('settings.nav.ledger', '账本参数'), icon: Calculator },
     { id: 'push', label: t('settings.nav.push', '推送'), icon: BellRing },
+    { id: 'ai', label: t('settings.nav.ai', 'AI 助手'), icon: Sparkles },
+    { id: 'cars', label: t('settings.nav.cars', '车辆'), icon: Car },
     { id: 'system', label: t('settings.nav.system', '系统'), icon: Activity },
     { id: 'security', label: t('settings.nav.security', '账户安全'), icon: KeyRound },
   ]
@@ -135,7 +136,7 @@ export default function SettingsPage() {
   // 滚动监听高亮当前分区（IntersectionObserver 不可用时静默降级）
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
-    const ids = ['appearance', 'cars', 'ledger', 'pricing', 'ai', 'push', 'system', 'security']
+    const ids = ['appearance', 'pricing', 'ledger', 'push', 'ai', 'cars', 'system', 'security']
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -241,6 +242,20 @@ export default function SettingsPage() {
 
   // ---- 推送矩阵 ----
   const { data: pushRules } = useQuery({ queryKey: ['push-rules-v2'], queryFn: api.pushRulesV2 })
+  // v0.3 推送分区简化：事件级总开关只作用于「已配置渠道」（渠道增删在推送页）
+  const { data: channelStatus } = useQuery({ queryKey: ['channel-status-lite'], queryFn: api.channelStatus, retry: false, staleTime: 60_000 })
+  const configuredChannels: PushChannelId[] = useMemo(() => {
+    const cs = channelStatus
+    const out: PushChannelId[] = []
+    if (!cs) return ['webpush'] // 状态未到时按默认渠道兜底
+    if (cs.webpush?.configured) out.push('webpush')
+    if (cs.telegram?.connected) out.push('telegram')
+    if (cs.feishu?.connected) out.push('feishu')
+    if (cs.wecom?.configured) out.push('wecom')
+    if (cs.ntfy?.configured) out.push('ntfy')
+    if (cs.bark?.configured) out.push('bark')
+    return out.length ? out : ['webpush']
+  }, [channelStatus])
   const [matrix, setMatrix] = useState<Record<string, Record<string, boolean>> | null>(null)
   useEffect(() => {
     if (pushRules?.matrix) setMatrix(pushRules.matrix)
@@ -253,12 +268,13 @@ export default function SettingsPage() {
     onError: (err) => toast(err.message, 'error'),
   })
 
-  const toggleMatrix = (event: PushEventId, channel: PushChannelId) => {
+  /** 事件级总开关（v0.3）：on = 该事件在所有已配置渠道上启用（未配置渠道置 false）；
+   *  off = 该事件全渠道静音。渠道粒度配置移至推送页。 */
+  const toggleEvent = (event: PushEventId, on: boolean) => {
     if (!matrix) return
-    const next = {
-      ...matrix,
-      [event]: { ...matrix[event], [channel]: !matrix[event]?.[channel] },
-    }
+    const row: Record<string, boolean> = {}
+    for (const ch of CHANNELS) row[ch.id] = on && configuredChannels.includes(ch.id)
+    const next = { ...matrix, [event]: row }
     setMatrix(next)
     saveMatrix.mutate(next)
   }
@@ -423,60 +439,15 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* ===== m4e 分区：车辆（主车/别名管理） ===== */}
-          <section id="settings-cars" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-cars">
+          {/* ===== 分区3：电价（默认价 + 地点电价含分时 + 历史） ===== */}
+          <section id="settings-pricing" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-pricing">
             <h2 className="section-title">
-              <Car className="h-4 w-4 text-tesla" /> {t('settings.nav.cars', '车辆')}
+              <Tag className="h-4 w-4 text-tesla" /> {t('settings.nav.pricing', '电价')}
             </h2>
-            <p className="section-desc mt-1">{t('settings.cars.desc', '多车实例管理主车与显示别名（清单来自 TeslaMate）')}</p>
-            <div className="mt-4 max-w-xl space-y-2.5">
-              {cars.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-xs text-slate-500">
-                  {t('settings.cars.empty', '未发现车辆（完成向导或等待 TeslaMate 同步）')}
-                </div>
-              ) : (
-                cars.map((c) => (
-                  <div key={c.id} className="flex flex-col gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:flex-row sm:items-center">
-                    <label className="flex min-w-0 flex-1 items-center gap-2.5">
-                      <input
-                        type="radio"
-                        name="car-primary"
-                        checked={carPrimaryId === c.id}
-                        onChange={() => setCarPrimaryId(c.id)}
-                        aria-label={`${c.name} ${t('settings.cars.setPrimary', '设为主车')}`}
-                        data-testid={`car-primary-${c.id}`}
-                        className="h-4 w-4 accent-[#E82127]"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] text-slate-200">{c.name}</span>
-                        <span className="block text-[11px] text-slate-500">
-                          {carPrimaryId === c.id ? t('settings.cars.isPrimary', '主车 · 缺省展示') : `${t('settings.cars.carId', '车辆')} #${c.id}`}
-                        </span>
-                      </span>
-                    </label>
-                    <input
-                      type="text"
-                      className="input-dark sm:max-w-52"
-                      placeholder={t('settings.cars.aliasPh', '别名（显示用，可空）')}
-                      value={carAliases[String(c.id)] ?? ''}
-                      onChange={(e) => setCarAliases((prev) => ({ ...prev, [String(c.id)]: e.target.value }))}
-                      aria-label={`${t('settings.cars.alias', '别名')} ${c.name}`}
-                      data-testid={`car-alias-${c.id}`}
-                    />
-                  </div>
-                ))
-              )}
+            <p className="section-desc mt-1">{t('settings.pricing.desc', '默认电价 · 地点电价（含分时）· 费率变更历史')}</p>
+            <div className="mt-4">
+              <PricingSection />
             </div>
-            {cars.length > 0 && (
-              <button
-                className="btn-primary mt-4"
-                onClick={() => saveCars.mutate()}
-                disabled={saveCars.isPending}
-                data-testid="cars-save"
-              >
-                {saveCars.isPending ? t('settings.saving', '保存中…') : t('settings.cars.save', '保存车辆设置')}
-              </button>
-            )}
           </section>
 
           {/* ===== 分区2：账本参数（货币/单位/油车基准 + 重算） ===== */}
@@ -581,15 +552,54 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* ===== 分区3：电价（默认价 + 地点电价含分时 + 历史） ===== */}
-          <section id="settings-pricing" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-pricing">
+          {/* ===== 分区5：推送矩阵 ===== */}
+          <section id="settings-push" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-push-matrix">
             <h2 className="section-title">
-              <Tag className="h-4 w-4 text-tesla" /> {t('settings.nav.pricing', '电价')}
+              <BellRing className="h-4 w-4 text-tesla" /> {t('settings.nav.push', '推送')}
             </h2>
-            <p className="section-desc mt-1">{t('settings.pricing.desc', '默认电价 · 地点电价（含分时）· 费率变更历史')}</p>
-            <div className="mt-4">
-              <PricingSection />
-            </div>
+            <p className="section-desc mt-1">
+              {t('settings.push.descV2', '每个事件一个总开关（作用于所有已配置渠道）；渠道密钥与细粒度配置在「推送」页')}
+              {/* 修复：/push 页此前从任何导航都到不了（矩阵文案提到却无入口） */}
+              {' '}
+              <Link to="/push" className="text-tesla hover:underline" data-testid="settings-push-page-link">
+                {t('settings.push.openChannelPage', '前往渠道配置 →')}
+              </Link>
+            </p>
+            {matrix ? (
+              <div className="mt-4 divide-y divide-white/[0.05]" data-testid="push-matrix-list">
+                {EVENTS.map((ev) => {
+                  const enabled = CHANNELS.filter((ch) => matrix[ev.id]?.[ch.id])
+                  const on = enabled.length > 0
+                  return (
+                    <div key={ev.id} className="flex items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <div className="text-[13px] text-slate-200">{t(ev.labelKey, ev.label)}</div>
+                        <div className="mt-0.5 text-[11px] text-slate-500">{t(ev.descKey, ev.desc)}</div>
+                        <div className="mt-0.5 truncate text-[11px]">
+                          {on ? (
+                            <span className="text-emerald-400/90">
+                              {t('settings.push.viaChannels', '经')} {enabled.map((ch) => t(ch.labelKey, ch.label)).join(' · ')}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">{t('settings.push.muted', '已静音')}</span>
+                          )}
+                        </div>
+                      </div>
+                      <Toggle
+                        checked={on}
+                        onChange={(v) => toggleEvent(ev.id, v)}
+                        aria-label={`${t(ev.labelKey, ev.label)} ${t('settings.push.masterToggle', '推送总开关')}`}
+                        data-testid={`push-event-toggle-${ev.id}`}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="mt-4 space-y-2">
+                {Array.from({ length: 5 }, (_, i) => <div key={i} className="skeleton h-10" />)}
+              </div>
+            )}
           </section>
 
           {/* ===== 分区4：AI 助手（BYO 模型，可选） ===== */}
@@ -672,68 +682,59 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          {/* ===== 分区5：推送矩阵 ===== */}
-          <section id="settings-push" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-push-matrix">
+          {/* ===== m4e 分区：车辆（主车/别名管理） ===== */}
+          <section id="settings-cars" className="glass-card-flat scroll-mt-6 p-5" data-testid="settings-cars">
             <h2 className="section-title">
-              <BellRing className="h-4 w-4 text-tesla" /> {t('settings.nav.push', '推送')}
+              <Car className="h-4 w-4 text-tesla" /> {t('settings.nav.cars', '车辆')}
             </h2>
-            <p className="section-desc mt-1">
-              {t('settings.push.desc', '6 类事件 × 6 渠道独立开关 · 渠道密钥在「推送」页配置')}
-              {/* 修复：/push 页此前从任何导航都到不了（矩阵文案提到却无入口） */}
-              {' '}
-              <Link to="/push" className="text-tesla hover:underline" data-testid="settings-push-page-link">
-                {t('settings.push.openChannelPage', '前往渠道配置 →')}
-              </Link>
-            </p>
-            {matrix ? (
-              <div className="mt-4 divide-y divide-white/[0.05]" data-testid="push-matrix-list">
-                {EVENTS.map((ev) => {
-                  const enabledCount = CHANNELS.filter((ch) => matrix[ev.id]?.[ch.id]).length
-                  return (
-                    <div key={ev.id} className="flex flex-col gap-2.5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-[13px] text-slate-200">
-                          {t(ev.labelKey, ev.label)}
-                          {enabledCount > 0 ? (
-                            <span className="rounded-full bg-emerald-400/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-                              {t('settings.push.channelsCount', '{n} 渠道').replace('{n}', String(enabledCount))}
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-slate-500">{t('settings.push.muted', '已静音')}</span>
-                          )}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-slate-500">{t(ev.descKey, ev.desc)}</div>
-                      </div>
-                      {/* 渠道 chips：点亮即启用，一行搞定 6 渠道 */}
-                      <div className="flex shrink-0 gap-1.5">
-                        {CHANNELS.map((ch) => {
-                          const on = Boolean(matrix[ev.id]?.[ch.id])
-                          return (
-                            <button
-                              key={ch.id}
-                              onClick={() => toggleMatrix(ev.id, ch.id)}
-                              aria-pressed={on}
-                              aria-label={`${t(ev.labelKey, ev.label)} ${t(ch.labelKey, ch.label)}`}
-                              data-testid={`matrix-${ev.id}-${ch.id}`}
-                              className={`rounded-full border px-3 py-1.5 text-[11px] font-medium transition active:scale-[0.96] ${
-                                on
-                                  ? 'border-tesla/50 bg-tesla/15 text-tesla-soft shadow-[0_0_0_1px_rgba(232,33,39,0.15)] hover:bg-tesla/25'
-                                  : 'border-white/[0.08] text-slate-500 hover:border-white/20 hover:text-slate-300'
-                              }`}
-                            >
-                              {t(ch.labelKey, ch.label)}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="mt-4 space-y-2">
-                {Array.from({ length: 5 }, (_, i) => <div key={i} className="skeleton h-10" />)}
-              </div>
+            <p className="section-desc mt-1">{t('settings.cars.desc', '多车实例管理主车与显示别名（清单来自 TeslaMate）')}</p>
+            <div className="mt-4 max-w-xl space-y-2.5">
+              {cars.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-white/[0.08] px-4 py-5 text-center text-xs text-slate-500">
+                  {t('settings.cars.empty', '未发现车辆（完成向导或等待 TeslaMate 同步）')}
+                </div>
+              ) : (
+                cars.map((c) => (
+                  <div key={c.id} className="flex flex-col gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:flex-row sm:items-center">
+                    <label className="flex min-w-0 flex-1 items-center gap-2.5">
+                      <input
+                        type="radio"
+                        name="car-primary"
+                        checked={carPrimaryId === c.id}
+                        onChange={() => setCarPrimaryId(c.id)}
+                        aria-label={`${c.name} ${t('settings.cars.setPrimary', '设为主车')}`}
+                        data-testid={`car-primary-${c.id}`}
+                        className="h-4 w-4 accent-[#E82127]"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] text-slate-200">{c.name}</span>
+                        <span className="block text-[11px] text-slate-500">
+                          {carPrimaryId === c.id ? t('settings.cars.isPrimary', '主车 · 缺省展示') : `${t('settings.cars.carId', '车辆')} #${c.id}`}
+                        </span>
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      className="input-dark sm:max-w-52"
+                      placeholder={t('settings.cars.aliasPh', '别名（显示用，可空）')}
+                      value={carAliases[String(c.id)] ?? ''}
+                      onChange={(e) => setCarAliases((prev) => ({ ...prev, [String(c.id)]: e.target.value }))}
+                      aria-label={`${t('settings.cars.alias', '别名')} ${c.name}`}
+                      data-testid={`car-alias-${c.id}`}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+            {cars.length > 0 && (
+              <button
+                className="btn-primary mt-4"
+                onClick={() => saveCars.mutate()}
+                disabled={saveCars.isPending}
+                data-testid="cars-save"
+              >
+                {saveCars.isPending ? t('settings.saving', '保存中…') : t('settings.cars.save', '保存车辆设置')}
+              </button>
             )}
           </section>
 

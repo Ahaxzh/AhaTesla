@@ -151,6 +151,24 @@ export interface Paged<T> {
   items: T[]
 }
 
+/** GET /api/trips/overview → 行程页顶部汇总（v0.3；Grafana trip.json 提炼） */
+export interface TripsOverview {
+  tripCount: number
+  distanceKm: number
+  durationMin: number
+  energyKwh: number | null
+  costCny: number | null
+  maxSpeedKmh: number | null
+  /** 时长占比（近似：SUM 口径，非逐段 timeline）；parkedMin = 区间 − 行驶 − 充电 */
+  stateShare: { driveMin: number; chargeMin: number; parkedMin: number }
+}
+
+/** GET /api/trips/route-summary → 区间内行驶轨迹汇总（抽稀 ≤1200 点，speed km/h 供着色） */
+export interface RouteSummary {
+  pointCount: number
+  points: { lat: number; lng: number; speed: number | null }[]
+}
+
 export interface ChargingStats extends ChargingStatsV2 {
   totalKWh: number
   totalCostCny: number

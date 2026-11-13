@@ -63,27 +63,21 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(savedBody).toMatchObject({ primaryCarId: 2, carAliases: { '2': '老婆的Y' } }))
   })
 
-  it('推送矩阵：9 事件 × 6 渠道，含每日早报与告警三行(P2)', async () => {
+  it('推送分区（v0.3 事件级总开关）：9 事件各一个 Toggle，副行显示启用渠道；关=全静音', async () => {
     renderWithProviders(<SettingsPage />)
-    // 矩阵列表要等 pushRules 查询返回（此前是骨架屏）
+    // 列表要等 pushRules 查询返回（此前是骨架屏）
     const list = await screen.findByTestId('push-matrix-list')
-    // 9 行事件 × 6 渠道 chip 全渲染（m4b 起 wecom/ntfy/bark 并列;P2 告警三行）
-    expect(within(list).getAllByTestId(/^matrix-/).length).toBeGreaterThanOrEqual(9 * 6)
+    // 9 行事件 Toggle 全渲染（含每日早报与告警三行）
+    expect(within(list).getAllByTestId(/^push-event-toggle-/).length).toBe(9)
     expect(within(list).getByText('每日早报')).toBeInTheDocument()
-    // 告警三行存在且 desc 标注不受静音时段影响
     expect(within(list).getByText('数据断联告警')).toBeInTheDocument()
     expect(within(list).getByText('充电提前中止')).toBeInTheDocument()
     expect(within(list).getByText('胎压过低')).toBeInTheDocument()
-    expect(within(list).getByText(/不受静音时段影响/)).toBeInTheDocument()
-    // 告警默认即时渠道开(msw 矩阵)
-    expect(screen.getByTestId('matrix-outage-telegram')).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('matrix-outage-wecom')).toHaveAttribute('aria-pressed', 'false')
-    // msw 默认 daily: webpush=true → chip 按钮处于按下态;新渠道默认关
-    expect(screen.getByTestId('matrix-daily-webpush')).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByTestId('matrix-daily-feishu')).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('matrix-daily-wecom')).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('matrix-daily-ntfy')).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByTestId('matrix-daily-bark')).toHaveAttribute('aria-pressed', 'false')
+    // msw 矩阵 outage: webpush/telegram/feishu 开 → 副行列出渠道名，switch 亮
+    expect(screen.getByTestId('push-event-toggle-outage')).toHaveAttribute('aria-checked', 'true')
+    expect(list).toHaveTextContent('经 Web Push · Telegram · 飞书')
+    // chargingStart 全关 → 静音态
+    expect(screen.getByTestId('push-event-toggle-chargingStart')).toHaveAttribute('aria-checked', 'false')
   })
 
   it('AI 助手分区：填写保存断言 PUT body，测试按钮成功 toast', async () => {

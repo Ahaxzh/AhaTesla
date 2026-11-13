@@ -1,24 +1,24 @@
-import type { ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
 interface ToggleProps {
   checked: boolean
   onChange: (checked: boolean) => void
   disabled?: boolean
   label?: string
-  'aria-label'?: string
 }
 
-export function Toggle({ checked, onChange, disabled, label, ...rest }: ToggleProps) {
-  const ariaLabel = rest['aria-label'] ?? label
+/** ...rest（data-testid / aria-* 等）透传到 switch 按钮 */
+export function Toggle({ checked, onChange, disabled, label, ...rest }: ToggleProps & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange' | 'checked' | 'onClick'>) {
   const handle = (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      aria-label={ariaLabel}
+      aria-label={rest['aria-label'] ?? label}
       disabled={disabled}
       data-state={checked ? 'checked' : 'unchecked'}
       onClick={() => onChange(!checked)}
+      {...rest}
       className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tesla/70 disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? 'border-tesla/60 bg-tesla' : 'border-white/10 bg-white/[0.08]'
       }`}

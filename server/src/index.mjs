@@ -144,6 +144,9 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/battery-health", requireAuth, async (ctx) => getBatteryHealth(db, { carId: carIdFromQuery(ctx, state) }));
   app.get("/api/dashboard/heatmap", requireAuth, (ctx) => dashboardExtra.heatmap(ctx));
   app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
+  // 汇总与轨迹必须在 :id 之前注册（手写路由按注册顺序匹配）
+  app.get("/api/trips/overview", requireAuth, (ctx) => trips.overview(ctx));
+  app.get("/api/trips/route-summary", requireAuth, (ctx) => trips.routeSummary(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
