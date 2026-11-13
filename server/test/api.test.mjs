@@ -269,6 +269,16 @@ function overviewFakeDb() {
   });
 }
 
+test("overview/route-summary SQL 卫哨：不允许出现 AND AND（v0.3 线上翻车回归）", async () => {
+  const db = overviewFakeDb();
+  const { app } = buildTestApp({ db });
+  await fetchApp(app, "GET", "/api/trips/overview", { cookie: `ahatesla_token=${tokenFor()}` });
+  await fetchApp(app, "GET", "/api/trips/route-summary", { cookie: `ahatesla_token=${tokenFor()}` });
+  for (const c of db.calls) {
+    assert.doesNotMatch(c.sql, /AND\s+AND/i, `double AND in: ${c.sql.slice(0, 120)}`);
+  }
+});
+
 test("GET /api/trips/overview：KPI + 状态占比（时长 SUM 近似）", async () => {
   const { app } = buildTestApp({ db: overviewFakeDb() });
   const from = "2026-08-15T00:00:00.000Z";

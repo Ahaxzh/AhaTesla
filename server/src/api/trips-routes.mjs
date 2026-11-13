@@ -171,10 +171,13 @@ export function createTripsRoutes({ db, state }) {
       const from = validateIso(ctx.query.from, "from");
       const to = validateIso(ctx.query.to, "to");
       const carId = carIdFromQuery(ctx, state);
+      // 注意：carFilterSql 返回带前导 " AND " 的片段（内联用法），拼 where 数组须剥前缀，
+      // 否则 join 后产生 "AND AND" 非法 SQL（v0.3 线上翻车点：被 .catch 静默吞成空数据）
       const where = ["d.end_date IS NOT NULL"];
       if (from) where.push(`d.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')`);
       if (to) where.push(`d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')`);
-      where.push(carFilterSql(carId));
+      const carCond = carFilterSql(carId).replace(/^\s*AND\s+/i, "");
+      if (carCond) where.push(carCond);
       const whereSql = where.join(" AND ");
 
       const [aggRow, chargeRow, drives] = await Promise.all([
@@ -255,7 +258,8 @@ export function createTripsRoutes({ db, state }) {
       const where = ["d.end_date IS NOT NULL", "p.drive_id IS NOT NULL", "p.latitude IS NOT NULL"];
       if (from) where.push(`d.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')`);
       if (to) where.push(`d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')`);
-      where.push(carFilterSql(carId));
+      const carCond = carFilterSql(carId).replace(/^\s*AND\s+/i, "");
+      if (carCond) where.push(carCond);
       const whereSql = where.join(" AND ");
 
       const cnt = await db.queryOne(`
