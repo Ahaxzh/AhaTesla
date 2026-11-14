@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, BatteryCharging, CalendarRange, Coins, Gauge, Route as RouteIcon, TrendingDown, TrendingUp } from 'lucide-react'
+import { ArrowLeft, BatteryCharging, CalendarRange, Coins, Gauge, Route as RouteIcon, TrendingDown, TrendingUp, Trophy } from 'lucide-react'
 import { api } from '@/api/client'
 import { StatCard } from '@/components/StatCard'
 import { useI18n } from '@/i18n'
@@ -81,7 +81,10 @@ export default function ReportDetailPage() {
   }
 
   const kpi = report.kpi
-  const titleKey = report.type === 'daily' ? 'rep.detail.title.daily' : report.type === 'weekly' ? 'rep.detail.title.weekly' : 'rep.detail.title.monthly'
+  const titleKey = report.type === 'daily' ? 'rep.detail.title.daily'
+    : report.type === 'weekly' ? 'rep.detail.title.weekly'
+      : report.type === 'annual' ? 'rep.detail.title.annual'
+        : 'rep.detail.title.monthly'
 
   return (
     <div>
@@ -91,7 +94,7 @@ export default function ReportDetailPage() {
         </Link>
         <div>
           <h1 className="page-title">
-            {t(titleKey, report.type === 'daily' ? '日报' : report.type === 'weekly' ? '周报' : '月报')} · {report.periodLabel}
+            {t(titleKey, report.type === 'daily' ? '日报' : report.type === 'weekly' ? '周报' : report.type === 'annual' ? '年报' : '月报')} · {report.periodLabel}
           </h1>
           {report.carName && <p className="mt-0.5 text-xs text-slate-400">{report.carName}</p>}
         </div>
@@ -151,6 +154,36 @@ export default function ReportDetailPage() {
               ? `${t('rep.detail.kpi.saved', '较油车节省')} ${fmtCny(report.ytd.saved)}`
               : `${t('rep.detail.more', '多')} ${fmtCny(-report.ytd.saved)}`}
           </p>
+        </section>
+      )}
+
+      {/* 年报：年度之最（v2.5）——朋友圈年度账单的料 */}
+      {report.annual && (
+        <section className="glass-card-flat mt-4 p-5" data-testid="report-annual">
+          <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-200">
+            <Trophy className="h-4 w-4 text-tesla" /> {t('rep.detail.annual.title', '年度之最')}
+          </h2>
+          <div className="num grid grid-cols-2 gap-2.5 text-sm sm:grid-cols-4">
+            <div>
+              <p className="text-[11px] text-slate-400">{t('rep.detail.annual.maxDay', '最长单日')}</p>
+              <p className="mt-0.5 text-slate-200">{fmtKm(report.annual.maxDayKm, 0)} km</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-400">{t('rep.detail.annual.maxTrip', '最长单程')}</p>
+              <p className="mt-0.5 text-slate-200">
+                {report.annual.maxTripKm != null ? `${fmtKm(report.annual.maxTripKm, 0)} km` : '--'}
+                {report.annual.maxTripRoute && <span className="ml-1 text-[11px] text-slate-500">{report.annual.maxTripRoute}</span>}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-400">{t('rep.detail.annual.sessions', '充电次数')}</p>
+              <p className="mt-0.5 text-slate-200">{report.annual.chargeSessions}</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-slate-400">{t('rep.detail.annual.superPct', '超充占比')}</p>
+              <p className="mt-0.5 text-slate-200">{report.annual.superPct != null ? `${report.annual.superPct}%` : '--'}</p>
+            </div>
+          </div>
         </section>
       )}
 

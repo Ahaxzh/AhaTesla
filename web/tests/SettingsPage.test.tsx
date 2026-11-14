@@ -72,21 +72,26 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(savedBody).toMatchObject({ primaryCarId: 2, carAliases: { '2': '老婆的Y' } }))
   })
 
-  it('推送分区（v0.3 事件级总开关）：9 事件各一个 Toggle，副行显示启用渠道；关=全静音', async () => {
+  it('推送分区（v0.3 事件级总开关）：11 事件各一个 Toggle，副行显示启用渠道；关=全静音', async () => {
     const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
     await openSection(user, 'push')
     // 列表要等 pushRules 查询返回（此前是骨架屏）
     const list = await screen.findByTestId('push-matrix-list')
-    // 9 行事件 Toggle 全渲染（含每日早报与告警三行）
-    expect(within(list).getAllByTestId(/^push-event-toggle-/).length).toBe(9)
+    // 11 行事件 Toggle 全渲染（含每日早报、告警四行与年报）
+    expect(within(list).getAllByTestId(/^push-event-toggle-/).length).toBe(11)
     expect(within(list).getByText('每日早报')).toBeInTheDocument()
     expect(within(list).getByText('数据断联告警')).toBeInTheDocument()
     expect(within(list).getByText('充电提前中止')).toBeInTheDocument()
     expect(within(list).getByText('胎压过低')).toBeInTheDocument()
+    // v2.5：低电量告警 + 年报
+    expect(within(list).getByText('电量偏低')).toBeInTheDocument()
+    expect(within(list).getByText('每年年报')).toBeInTheDocument()
     // msw 矩阵 outage: webpush/telegram/feishu 开 → 副行列出渠道名，switch 亮
     expect(screen.getByTestId('push-event-toggle-outage')).toHaveAttribute('aria-checked', 'true')
     expect(list).toHaveTextContent('经 Web Push · Telegram · 飞书')
+    // batteryLow 存量矩阵缺行 → 告警默认开（matrixFromRules 回退默认值）
+    expect(screen.getByTestId('push-event-toggle-batteryLow')).toHaveAttribute('aria-checked', 'true')
     // chargingStart 全关 → 静音态
     expect(screen.getByTestId('push-event-toggle-chargingStart')).toHaveAttribute('aria-checked', 'false')
   })

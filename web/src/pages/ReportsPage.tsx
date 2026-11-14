@@ -16,11 +16,11 @@ export default function ReportsPage() {
   const { toast } = useToast()
   const { t } = useI18n()
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'all' | 'weekly' | 'monthly'>('all')
+  const [tab, setTab] = useState<'all' | 'weekly' | 'monthly' | 'annual'>('all')
   const { data, isLoading } = useQuery({ queryKey: ['reports', currentCarId], queryFn: () => api.reports(currentCarId) })
 
   const generate = useMutation({
-    mutationFn: (type: 'daily' | 'weekly' | 'monthly') => api.generateReport(type),
+    mutationFn: (type: 'daily' | 'weekly' | 'monthly' | 'annual') => api.generateReport(type),
     onSuccess: (res, type) => {
       // 日报不落归档、送达即全部 → 逐通道汇报结果（排障时一眼看出挂在哪个渠道）
       if (type === 'daily' && res.results) {
@@ -51,6 +51,7 @@ export default function ReportsPage() {
             ['all', t('rep.tab.all', '全部')],
             ['weekly', t('rep.tab.weekly', '周报')],
             ['monthly', t('rep.tab.monthly', '月报')],
+            ['annual', t('rep.tab.annual', '年报')],
           ] as const).map(([key, label]) => (
             <button
               key={key}
@@ -92,6 +93,15 @@ export default function ReportsPage() {
           >
             <Play className="h-3.5 w-3.5" />
             {t('rep.gen.monthly', '生成本月月报')}
+          </button>
+          <button
+            className="btn-ghost !px-3 !py-1.5 text-xs"
+            onClick={() => generate.mutate('annual')}
+            disabled={generate.isPending}
+            data-testid="generate-annual"
+          >
+            <Play className="h-3.5 w-3.5" />
+            {t('rep.gen.annual', '生成上年年报')}
           </button>
         </div>
       </div>

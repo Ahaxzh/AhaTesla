@@ -30,7 +30,7 @@ import { startReportScheduler } from "./core/report-engine.mjs";
 import { getBatteryHealth } from "./core/battery-health.mjs";
 import { carIdFromQuery } from "./api/car-scope.mjs";
 import { recordProbe, createOutageWatcher } from "./core/health.mjs";
-import { checkTirePressure } from "./core/alerts.mjs";
+import { checkTirePressure, checkBatteryLow } from "./core/alerts.mjs";
 import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
 import { createApp, parseCookies } from "./api/http-kit.mjs";
 import { createJwtMiddleware } from "./api/jwt.mjs";
@@ -152,6 +152,8 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
+  // habits 必须在 /:id 之前注册（手写路由按注册顺序匹配）
+  app.get("/api/charging/habits", requireAuth, (ctx) => charging.habits(ctx));
   app.get("/api/charging/:id", requireAuth, (ctx) => charging.detail(ctx));
   app.put("/api/charging/:id/cost", requireAuth, (ctx) => ledger.putChargeCost(ctx));
   app.post("/api/ledger/summary", requireAuth, (ctx) => ledger.summary(ctx));
@@ -544,6 +546,28 @@ async function main() {
     }
   }
 
+  // v2.5 低电量巡检(同款 24h kv 节流;充电中不告警——alerts.checkBatteryLow 内判定)。
+  // 场景:车在地库/机场静置掉电到 20% 以下,官方 App 之外统一从这收提醒。
+  async function patrolBatteryLow() {
+    const now = Date.now();
+    let lastAt = Number(store.kvGet("alerts:lastBatteryLowAlertAt")) || 0;
+    if (lastAt && now - lastAt < 24 * 3600_000) return;
+    let cars = [{ id: null }];
+    try {
+      cars = await carsListCached();
+      if (!cars?.length) cars = [{ id: null }];
+    } catch { /* 车表不可达 → 全库巡检 */ }
+    for (const car of cars) {
+      const r = await checkBatteryLow(db, { carId: car.id });
+      if (!r) continue;
+      store.kvPut("alerts:lastBatteryLowAlertAt", String(now));
+      await dispatchPush({
+        type: "batteryLow", carId: r.carId ?? car.id, batteryLevel: r.batteryLevel, thresholdPct: r.thresholdPct
+      }).catch(() => {});
+      break; // 一次巡检只推一条(24h 节流),多车问题明日再报
+    }
+  }
+
   const loop = startTripMonitorLoop({
     monitor,
     db,
@@ -553,6 +577,7 @@ async function main() {
       const result = recordProbe(ok);
       outageWatcher.observe(result);
       void patrolTirePressure();
+      void patrolBatteryLow();
     },
     logger: (message) => eventLog.log("monitor.error", { message })
   });

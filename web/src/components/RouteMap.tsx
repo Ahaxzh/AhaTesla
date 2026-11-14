@@ -259,7 +259,9 @@ export function RouteMap({
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-white/[0.06]"
+      // isolate：把 Leaflet 内部层叠（控件 z-index 可达 1000）锁进本卡片，
+      // 否则会盖住 z-30 的移动端底部导航栏（v2.5 线上反馈）
+      className="isolate overflow-hidden rounded-xl border border-white/[0.06]"
       data-testid="route-map"
     >
       <div className="relative" style={{ height }}>

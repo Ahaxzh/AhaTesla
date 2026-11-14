@@ -1,4 +1,4 @@
-// alerts.mjs — P2 告警巡检:胎压过低(独立于行程富化,车静置时也能发现)。
+// alerts.mjs — P2 告警巡检:胎压过低 + 低电量(独立于行程富化,车静置时也能发现)。
 //
 // 数据源:teslamate 只读库 positions 表最新一条带 tpms 的记录;
 // 阈值默认 2.6 bar,建议值取同车近 200 条读数的 P90(数据不足回落 2.9)。
@@ -6,6 +6,7 @@
 
 const TIRE_THRESHOLD_BAR = 2.6;
 const TIRE_DEFAULT_SUGGEST = 2.9;
+const BATTERY_LOW_PCT = 20;
 
 function finite(v) {
   const n = Number(v);
@@ -56,4 +57,41 @@ export async function checkTirePressure(db, { thresholdBar = TIRE_THRESHOLD_BAR,
   const min = Math.min(...vals);
   if (min >= thresholdBar) return null;
   return { carId: latest.car_id != null ? Number(latest.car_id) : null, ...tp, min: Math.round(min * 100) / 100, suggest };
+}
+
+/**
+ * 巡检低电量（v2.5）：最新电量读数低于阈值（默认 20%）且当前无进行中充电会话。
+ * 场景：车在地库/机场静置掉电，官方 App 通知装了 AhaTesla 想统一从这里收。
+ * 充电中不告警（电量回升；插枪后的异常由 chargeInterrupt/充电完成事件覆盖）。
+ * 返回 null(无数据/未越限/充电中)或 { carId, batteryLevel, thresholdPct }。
+ */
+export async function checkBatteryLow(db, { thresholdPct = BATTERY_LOW_PCT, carId = null } = {}) {
+  const car = Number.isInteger(Number(carId)) && Number(carId) > 0 ? Number(carId) : null;
+  try {
+    const rows = await db.query(`
+      SELECT p.car_id, p.battery_level::int AS battery_level
+      FROM positions p
+      WHERE p.battery_level IS NOT NULL
+        AND ($1::int IS NULL OR p.car_id = $1::int)
+      ORDER BY p.id DESC
+      LIMIT 1
+    `, [car]);
+    const latest = rows?.[0];
+    if (!latest || latest.battery_level == null) return null;
+    const charging = await db.queryOne(`
+      SELECT 1 AS charging FROM charging_processes
+      WHERE end_date IS NULL
+        AND ($1::int IS NULL OR car_id = $1::int)
+      LIMIT 1
+    `, [latest.car_id != null ? Number(latest.car_id) : car]);
+    if (charging) return null;
+    if (latest.battery_level >= thresholdPct) return null;
+    return {
+      carId: latest.car_id != null ? Number(latest.car_id) : null,
+      batteryLevel: latest.battery_level,
+      thresholdPct
+    };
+  } catch {
+    return null; // 巡检失败静默(断联告警另有 outage 事件负责)
+  }
 }

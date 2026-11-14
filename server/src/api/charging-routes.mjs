@@ -76,6 +76,43 @@ export function createChargingRoutes({ db, state, getStore }) {
       return { total, items: rows.map((r) => toChargeView(r, options)) };
     },
 
+    /** GET /api/charging/habits?days=180&carId —— 充电习惯画像（v2.5，电池保养视角）。
+     *  起始/结束 SoC 均值、充到 >90% 收枪与 <15% 起充的会话占比、起止 SoC 十格直方图。
+     *  老车主都懂"别充满、别耗尽"——这张卡回答"我实际做得怎样"。
+     *  只统计起止 SoC 齐备的会话；<10 个样本 sufficient=false（前端隐藏，同电池健康卡）。 */
+    async habits(ctx) {
+      const days = Math.max(30, Math.min(730, Number(ctx.query.days) || 180));
+      const sinceIso = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+      const carId = carIdFromQuery(ctx, state);
+      const rows = await listChargingForStats(db, { sinceIso, carId }).catch(() => []);
+      const pairs = [];
+      for (const r of rows) {
+        const s = finiteNumber(r.start_battery_level);
+        const e = finiteNumber(r.end_battery_level);
+        if (s != null && e != null) pairs.push({ s, e });
+      }
+      const n = pairs.length;
+      const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+      const hist = (arr) => {
+        const bins = Array.from({ length: 10 }, () => 0);
+        for (const v of arr) bins[Math.max(0, Math.min(9, Math.floor(v / 10)))] += 1;
+        return bins;
+      };
+      const avgStart = mean(pairs.map((p) => p.s));
+      const avgEnd = mean(pairs.map((p) => p.e));
+      return {
+        days,
+        sessions: n,
+        sufficient: n >= 10,
+        avgStartSoc: avgStart != null ? Math.round(avgStart) : null,
+        avgEndSoc: avgEnd != null ? Math.round(avgEnd) : null,
+        endAbove90Pct: n ? Math.round((pairs.filter((p) => p.e > 90).length / n) * 100) : null,
+        startBelow15Pct: n ? Math.round((pairs.filter((p) => p.s < 15).length / n) * 100) : null,
+        startHist: hist(pairs.map((p) => p.s)),
+        endHist: hist(pairs.map((p) => p.e)),
+      };
+    },
+
     // GET /api/charging/:id（契约 B6）：功率曲线 + 桩端效率 + 费用来源 + 补录回显
     async detail(ctx) {
       const id = Number(ctx.params.id);

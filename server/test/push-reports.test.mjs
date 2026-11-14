@@ -139,7 +139,7 @@ test("report-engine：buildReport 周期聚合 + 油车对比 + topRoutes", asyn
   assert.match(report.baselineNote, /8L\/100km/);
 });
 
-test("report-engine：nextReportRun 周一 08:00 / 月 1 日 08:00", () => {
+test("report-engine：nextReportRun 周一 08:00 / 月 1 日 08:00 / 年 1 月 1 日 08:00（v2.5）", () => {
   const thu = new Date("2026-10-15T10:00:00+08:00"); // 周四
   const nextWeekly = nextReportRun("weekly", thu, "Asia/Shanghai");
   assert.equal(nextWeekly.getDay(), 1); // 周一
@@ -147,6 +147,49 @@ test("report-engine：nextReportRun 周一 08:00 / 月 1 日 08:00", () => {
   const nextMonthly = nextReportRun("monthly", thu, "Asia/Shanghai");
   assert.equal(nextMonthly.getDate(), 1);
   assert.ok(nextMonthly > thu);
+  const nextAnnual = nextReportRun("annual", thu, "Asia/Shanghai");
+  // 次年 1 月 1 日 08:00:05 +08:00 ＝ 2027-01-01T00:00:05Z
+  assert.equal(nextAnnual.toISOString(), "2027-01-01T00:00:05.000Z");
+  const jan1 = new Date("2026-01-01T07:00:00+08:00"); // 元旦 08:00 前 → 当天
+  assert.equal(nextReportRun("annual", jan1, "Asia/Shanghai").getDate(), 1);
+  assert.equal(nextReportRun("annual", jan1, "Asia/Shanghai").getMonth(), 0);
+});
+
+test("report-engine：annual 上一自然年 + 年度之最（v2.5）", async () => {
+  useMemoryStore();
+  const now = new Date("2026-01-15T10:00:00+08:00");
+  const db = makeFakeDb([
+    {
+      match: (sql) => sql.includes("FROM drives"),
+      rows: () => ([
+        { id: 1, car_id: 1, start_at: "2025-05-01 01:00", end_at: "2025-05-01 02:00", distance_km: 120, duration_min: 60, start_address_id: null, end_address_id: null, efficiency: 0.15, ideal_used_km: 20, rated_used_km: 22, start_geofence_id: 1, end_geofence_id: 2 },
+        { id: 2, car_id: 1, start_at: "2025-05-01 03:00", end_at: "2025-05-01 04:00", distance_km: 30, duration_min: 40, start_address_id: null, end_address_id: null, efficiency: 0.15, ideal_used_km: 6, rated_used_km: 7, start_geofence_id: 2, end_geofence_id: 1 }
+      ])
+    },
+    { match: (sql) => sql.includes("charging_processes"), rows: () => [{ id: 1, end_date: "2025-06-01 20:00", charge_energy_added: 30, cost: 20, geofence_name: "超充 上海站", address_name: null }] },
+    { match: (sql) => sql.includes("FROM addresses"), rows: () => [] },
+    { match: (sql) => sql.includes("FROM geofences"), rows: () => [{ id: 1, name: "家" }, { id: 2, name: "公司" }] }
+  ]);
+  const deps = {
+    db,
+    state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
+    computeTripViews: async (_db, drives) => drives.map((d) => ({
+      id: d.id, startAt: d.start_at, distanceKm: d.distance_km, energyKWh: 3, costCny: 1.8,
+      routeKey: d.start_geofence_id === 1 ? "家 → 公司" : "公司 → 家"
+    })),
+    listDrivesSql: () => ({ sql: "SELECT * FROM drives", params: [] }),
+    listChargingForStats: async () => []
+  };
+  const report = await buildReport({ kind: "annual", now, deps });
+  assert.equal(report.periodLabel, "2025 年报");
+  assert.equal(report.kpi.distanceKm, 150);
+  // 年度之最：5/1 两天合计 150 为最长单日；120 单程为最长
+  assert.deepEqual(report.annual, {
+    maxDayKm: 150, maxTripKm: 120, maxTripRoute: "家 → 公司",
+    chargeSessions: 0, superPct: null
+  });
+  assert.match(report.closing, /最长单日 150 km/);
+  assert.match(report.closing, /最长单程 120 km/);
 });
 
 test("report 调度器：runKind 归档快照 + 同期去重", async () => {

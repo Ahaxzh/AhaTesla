@@ -64,6 +64,7 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
+  app.get("/api/charging/habits", requireAuth, (ctx) => charging.habits(ctx));
   const exportRoutes = createExportRoutes({ db, state });
   app.get("/api/export/trips", requireAuth, (ctx) => exportRoutes.trips(ctx));
   app.get("/api/export/charging", requireAuth, (ctx) => exportRoutes.charging(ctx));
@@ -185,6 +186,10 @@ function tripsFakeDb() {
         tp_fl: 3.1, tp_fr: 3.0, tp_rl: 2.9, tp_rr: 3.0
       }];
     }
+    if (/FROM positions p/.test(sql) && /battery_level/.test(sql)) {
+      // SoC 起止：首读 78% → 末读 31%
+      return [{ v: /ORDER BY p\.id ASC/.test(sql) ? 78 : 31 }];
+    }
     if (/ideal_used_km/.test(sql) && /FROM drives/.test(sql)) {
       // FIFO 回放轻量分页（无坐标 LATERAL）
       return [{
@@ -250,6 +255,8 @@ test("GET /api/trips/:id 返回路线点集", async () => {
   assert.equal(res.json.id, 3241);
   // 胎压（行程内最后有效读数，与推送同口径）：四轮 + 最低值着色由前端处理
   assert.deepEqual(res.json.tirePressure, { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0 });
+  // SoC 起止（v2.5）：行程首/末有效电量读数
+  assert.deepEqual(res.json.soc, { start: 78, end: 31 });
   const missing = await fetchApp(app, "GET", "/api/trips/999", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(missing.status, 404);
   assert.equal(missing.json.error.code, "not_found");
@@ -753,4 +760,47 @@ test("GET /api/export/charging：CSV 附件 + 费用来源三态", async () => {
   assert.match(lines[1], /CND/);
   assert.match(lines[1], /已录入/);   // cost=38 stated → manual
   assert.match(lines[2], /默认估算/); // 无 cost 无围栏价 → default
+});
+
+// ---- 充电习惯画像（v2.5） --------------------------------------------------
+
+test("GET /api/charging/habits：SoC 窗口/占比/十格直方图；起止缺失的会话不计入", async () => {
+  const db = createFakeDb((sql) => {
+    if (/FROM charging_processes cp/.test(sql) && /start_battery_level/.test(sql)) {
+      return [
+        { start_battery_level: 12, end_battery_level: 85 },
+        { start_battery_level: 20, end_battery_level: 95 },
+        { start_battery_level: 30, end_battery_level: 80 },
+        { start_battery_level: 45, end_battery_level: 90 },
+        { start_battery_level: null, end_battery_level: 70 }, // 起始缺失 → 剔除
+        { start_battery_level: 18, end_battery_level: 88 },
+        { start_battery_level: 22, end_battery_level: 92 },
+        { start_battery_level: 35, end_battery_level: 78 },
+        { start_battery_level: 28, end_battery_level: 83 },
+        { start_battery_level: 40, end_battery_level: 96 },
+        { start_battery_level: 15, end_battery_level: 75 },
+      ];
+    }
+    return [];
+  });
+  const { app } = buildTestApp({ db });
+  const res = await fetchApp(app, "GET", "/api/charging/habits", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  const j = res.json;
+  assert.equal(j.sessions, 10, "10 对齐备样本");
+  assert.equal(j.sufficient, true);
+  assert.equal(j.avgStartSoc, 27); // 265/10 = 26.5 → 四舍五入
+  assert.equal(j.avgEndSoc, 86);   // 862/10
+  assert.equal(j.endAbove90Pct, 30); // 95/92/96 三次
+  assert.equal(j.startBelow15Pct, 10); // 仅 12 一次
+  assert.deepEqual(j.startHist, [0, 3, 3, 2, 2, 0, 0, 0, 0, 0]);
+  assert.deepEqual(j.endHist, [0, 0, 0, 0, 0, 0, 0, 2, 4, 4]);
+});
+
+test("GET /api/charging/habits：样本不足 sufficient=false（前端隐藏依据）", async () => {
+  const { app } = buildTestApp({ db: chargingFakeDb() });
+  const res = await fetchApp(app, "GET", "/api/charging/habits", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.sufficient, false);
+  assert.equal(res.json.sessions, 0);
 });

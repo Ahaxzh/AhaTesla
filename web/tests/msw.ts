@@ -277,10 +277,24 @@ export const defaultHandlers = [
       fuelComparison: { baseline: '对比基准 8L/100km @ ¥8.2/L（¥0.656/km）', fuelCost: 6.56, saved: 2.21, savedPct: 33.7 },
       efficiency: { ratedKwh: 6.5, actualKwh: 7.0, ratio: 0.929 },
       environment: { avgTempC: 18.5, acEstimateKwh: 0.3, avgSpeedKmh: 32.5, maxSpeedKmh: 78 },
+      soc: { start: 78, end: 31 },
       tirePressure: { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0 },
     }),
   ),
   http.get('/api/charging', () => HttpResponse.json({ total: 1, items: [mockCharge] })),
+  http.get('/api/charging/habits', () =>
+    HttpResponse.json({
+      days: 180,
+      sessions: 24,
+      sufficient: true,
+      avgStartSoc: 32,
+      avgEndSoc: 81,
+      endAbove90Pct: 13,
+      startBelow15Pct: 4,
+      startHist: [0, 3, 6, 8, 4, 2, 1, 0, 0, 0],
+      endHist: [0, 0, 0, 1, 2, 4, 6, 7, 3, 1],
+    }),
+  ),
   http.get('/api/charging/stats', () =>
     HttpResponse.json({
       sessionCount: 24,

@@ -80,6 +80,34 @@ describe('ReportDetailPage（v2.4 快照字段全量露出）', () => {
     expect(routes).toHaveTextContent('¥28.90')
   })
 
+  it('年报：标题 + 年度之最四格（v2.5）', async () => {
+    server.use(http.get('/api/reports/14', () =>
+      HttpResponse.json({
+        ...monthlyDetail,
+        id: 14,
+        type: 'annual',
+        periodLabel: '2025 年报',
+        insights: null,
+        ytd: undefined,
+        annual: { maxDayKm: 620, maxTripKm: 412.5, maxTripRoute: '家 → 三亚', chargeSessions: 58, superPct: 22 },
+      }),
+    ))
+    renderWithProviders(
+      <Routes>
+        <Route path="/reports/:id" element={<ReportDetailPage />} />
+      </Routes>,
+      { route: '/reports/14' },
+    )
+    expect(await screen.findByText(/年报/)).toBeInTheDocument()
+    const annual = screen.getByTestId('report-annual')
+    expect(annual).toHaveTextContent('620 km')
+    expect(annual).toHaveTextContent('413 km') // fmtKm(412.5, 0) 四舍五入
+    expect(annual).toHaveTextContent('家 → 三亚')
+    expect(annual).toHaveTextContent('58')
+    expect(annual).toHaveTextContent('22%')
+    expect(screen.queryByTestId('report-ytd')).not.toBeInTheDocument()
+  })
+
   it('日报：标题 + 上周同日环比 + 本月累计；无 insights 时不渲染洞察区', async () => {
     server.use(http.get('/api/reports/13', () => HttpResponse.json(dailyDetail)))
     renderWithProviders(

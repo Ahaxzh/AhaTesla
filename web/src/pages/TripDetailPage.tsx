@@ -98,6 +98,16 @@ export default function TripDetailPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <EfficiencyBadge ratio={trip.efficiency?.ratio} />
+            {/* SoC 起止（v2.5）："这趟从 78% 开到 31%"——车主本能语言 */}
+            {trip.soc && (
+              <span
+                className="num rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs text-slate-300"
+                data-testid="trip-soc"
+                title={t('tripDetail.socNote', '行程首/末有效电量读数')}
+              >
+                🔋 {trip.soc.start}% <span className="text-slate-500">→</span> {trip.soc.end}%
+              </span>
+            )}
             {/* 口径标注（AC-6.3） */}
             <span className="text-[11px] text-slate-400" data-testid="energy-formula-note">
               {t('tripDetail.energyNote', '耗电口径：基于起止表显续航差 × 车辆效率系数')}

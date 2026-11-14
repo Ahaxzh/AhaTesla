@@ -47,6 +47,9 @@ describe('TripDetailPage', () => {
     expect(screen.getByTestId('fifo-card')).toHaveTextContent('综合单价')
     expect(screen.getByTestId('fuel-compare')).toHaveTextContent('净节省 ¥2.21')
     expect(screen.getByTestId('efficiency-badge')).toHaveTextContent('能效达成 93%')
+    // v2.5 SoC 起止：78% → 31%
+    expect(screen.getByTestId('trip-soc')).toHaveTextContent('78%')
+    expect(screen.getByTestId('trip-soc')).toHaveTextContent('31%')
     expect(screen.getByTestId('energy-formula-note')).toHaveTextContent('耗电口径')
     expect(screen.getByTestId('environment-card')).toHaveTextContent('18.5')
     // 胎压卡（行程末）：最低值 + FL/RL 缩写明细（语言中立缩写）

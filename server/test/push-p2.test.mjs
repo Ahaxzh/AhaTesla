@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createOutageWatcher, resetHealth, recordProbe } from "../src/core/health.mjs";
-import { checkTirePressure } from "../src/core/alerts.mjs";
+import { checkTirePressure, checkBatteryLow } from "../src/core/alerts.mjs";
 import { createNotifier, PUSH_EVENTS, defaultMatrix, matrixFromRules } from "../src/core/push-channels.mjs";
 
 // ---- outage watcher 边沿 ----
@@ -84,11 +84,39 @@ test("checkTirePressure:越限返回四轮+建议值(P90);正常返回 null;异�
   assert.equal(await checkTirePressure(brokenDb), null, "查询异常静默");
 });
 
-// ---- 9×6 矩阵 ----
-test("矩阵 9 事件 × 6 渠道;告警三事件默认 webpush/telegram/feishu 开;outage_recovered 复用 outage 行", () => {
-  assert.equal(PUSH_EVENTS.length, 9);
+// ---- 低电量巡检判定（v2.5） ----
+function batteryDb({ latest, charging }) {
+  return {
+    query: async (sql) => (/FROM positions p/.test(sql) && /battery_level/.test(sql) ? (latest ? [latest] : []) : []),
+    queryOne: async (sql) => (/FROM charging_processes/.test(sql) && /end_date IS NULL/.test(sql) ? (charging ? { charging: 1 } : null) : null)
+  };
+}
+
+test("checkBatteryLow:低于阈值且未充电 → 告警;充电中/正常/无数据 → null", async () => {
+  const r = await checkBatteryLow(batteryDb({ latest: { car_id: 1, battery_level: 17 }, charging: false }));
+  assert.deepEqual(r, { carId: 1, batteryLevel: 17, thresholdPct: 20 });
+  assert.equal(await checkBatteryLow(batteryDb({ latest: { car_id: 1, battery_level: 17 }, charging: true })), null, "充电中不告警(电量回升)");
+  assert.equal(await checkBatteryLow(batteryDb({ latest: { car_id: 1, battery_level: 55 }, charging: false })), null, "电量正常不告警");
+  assert.equal(await checkBatteryLow(batteryDb({ latest: null, charging: false })), null, "无读数不告警");
+  const brokenDb = { query: async () => { throw new Error("db down"); }, queryOne: async () => null };
+  assert.equal(await checkBatteryLow(brokenDb), null, "查询异常静默");
+  // 推送正文:电量 + 阈值 + 补电提示
+  const { createNotifier } = await import("../src/core/push-channels.mjs");
+  const bodies = [];
+  const ntfy = { send: async (e) => { bodies.push(e); return { ok: true }; } };
+  const notifier = createNotifier({ state: { pushRules: {} }, ntfy });
+  await notifier.dispatch({ type: "batteryLow", batteryLevel: 17, thresholdPct: 20 }, { matrix: { batteryLow: { webpush: false, telegram: false, feishu: false, wecom: false, ntfy: true, bark: false } } });
+  assert.match(bodies[0].title, /电量偏低/);
+  assert.match(bodies[0].body, /17%/);
+  assert.match(bodies[0].body, /20%/);
+  assert.match(bodies[0].body, /补电/);
+});
+
+// ---- 11×6 矩阵（v2.5 +batteryLow 告警 +annual 年报） ----
+test("矩阵 11 事件 × 6 渠道;告警四事件默认 webpush/telegram/feishu 开;outage_recovered 复用 outage 行", () => {
+  assert.equal(PUSH_EVENTS.length, 11);
   const m = defaultMatrix();
-  for (const ev of ["outage", "chargeInterrupt", "tirePressure"]) {
+  for (const ev of ["outage", "chargeInterrupt", "tirePressure", "batteryLow"]) {
     assert.deepEqual(
       [m[ev].webpush, m[ev].telegram, m[ev].feishu],
       [true, true, true],
@@ -97,9 +125,12 @@ test("矩阵 9 事件 × 6 渠道;告警三事件默认 webpush/telegram/feishu 
     assert.equal(m[ev].wecom, false);
   }
   assert.equal(m.tripEnd.feishu, true, "内容事件默认不变");
+  assert.equal(m.annual.feishu, true, "年报与周/月报同默认（仅飞书）");
   // 归一:存量矩阵(无新键)补齐后告警行保持默认开
   const legacy = { matrix: { tripEnd: { feishu: true } } };
   const normalized = matrixFromRules(legacy);
   assert.equal(normalized.outage.telegram, true, "存量用户升级后告警默认开");
+  assert.equal(normalized.batteryLow.telegram, true, "v2.5 新告警对存量用户也默认开");
+  assert.equal(normalized.annual.feishu, true, "v2.5 新年报默认仅飞书");
   assert.equal(normalized.tripEnd.webpush, false, "内容事件存量语义不变");
 });

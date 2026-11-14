@@ -422,14 +422,14 @@ export function createBarkChannel({ fetchImpl = globalThis.fetch, logger = () =>
 // ---- Notifier 门面：矩阵化 dispatch + SLA 埋点 -------------------------------
 
 export const PUSH_EVENTS = [
-  "tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly",
+  "tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly", "annual",
   // P2 告警事件群(不受 quietHours 静音约束;默认 webpush/telegram/feishu 全开)
-  "outage", "chargeInterrupt", "tirePressure"
+  "outage", "chargeInterrupt", "tirePressure", "batteryLow"
 ];
 export const PUSH_CHANNELS = ["webpush", "telegram", "feishu", "wecom", "ntfy", "bark"];
 
 // 告警事件默认矩阵:主要即时渠道全开(用户显式关)
-const ALARM_EVENTS = new Set(["outage", "chargeInterrupt", "tirePressure"]);
+const ALARM_EVENTS = new Set(["outage", "chargeInterrupt", "tirePressure", "batteryLow"]);
 
 // state.pushRules v2：{matrix:{tripEnd:{webpush,…,bark},…}, weeklyReportDay}；新渠道默认关（用户显式开）
 export function defaultMatrix() {
@@ -508,10 +508,12 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       case "daily": return `昨日用车日报 · ${event.dateLabel || ts}${carSuffix}`;
       case "weekly": return `每周用车周报${carSuffix}`;
       case "monthly": return `每月账本月报${carSuffix}`;
+      case "annual": return `每年账本年报${carSuffix}`;
       case "outage": return `⚠ 数据断联 · ${ts}`;
       case "outage_recovered": return `✅ 数据已恢复 · ${ts}`;
       case "chargeInterrupt": return `⚠ 充电提前中止 · ${ts}${carSuffix}`;
       case "tirePressure": return `🛞 胎压偏低 · ${ts}${carSuffix}`;
+      case "batteryLow": return `🪫 电量偏低 · ${ts}${carSuffix}`;
       default: return `AhaTesla 通知 · ${ts}${carSuffix}`;
     }
   }
@@ -592,6 +594,13 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       if (event.estimate) bits.push(`⏱ ${event.estimate}`);
       return bits.join("\n");
     }
+    if (event.type === "batteryLow") {
+      // v2.5 低电量告警：静置掉电场景（充电中不触发），提示补电防深度放电
+      const lines = [`🔋 当前 ${Math.round(event.batteryLevel ?? 0)}%（低于 ${event.thresholdPct ?? 20}%）`];
+      lines.push(`⚠️ 长时间静置会持续掉电，建议尽快补电`);
+      if (event.positionLabel) lines.push(`📍 ${event.positionLabel}`);
+      return lines.join("\n");
+    }
     if (event.type === "daily") {
       // m4c-c1 昨日日报：核心一句话 → 行程/充电 → 对比 → 本月累计 → 异常提醒（~10 行）
       const k = event.kpi || {};
@@ -657,7 +666,7 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       }
       return lines.join("\n");
     }
-    if (event.type === "weekly" || event.type === "monthly") return event.summary || "";
+    if (event.type === "weekly" || event.type === "monthly" || event.type === "annual") return event.summary || "";
     // ---- P2 告警事件群 ----
     if (event.type === "outage") {
       const min = Math.max(1, Math.round((event.outageMs ?? 0) / 60_000));
@@ -686,7 +695,7 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
   function eventUrl(event) {
     if (event.type === "trip_end" && event.driveIds?.length) return `/trips/${event.driveIds[0]}`;
     if (event.type === "charging_done" || event.type === "chargeInterrupt") return `/charging?focus=${event.charging_process_id}`;
-    if (event.type === "weekly" || event.type === "monthly") return "/reports";
+    if (event.type === "weekly" || event.type === "monthly" || event.type === "annual") return "/reports";
     if (event.type === "outage" || event.type === "outage_recovered") return "/settings#settings-system";
     return "/";
   }

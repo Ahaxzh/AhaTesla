@@ -39,10 +39,24 @@ const EVENTS: { id: PushEventId; labelKey: string; label: string; descKey: strin
   { id: 'outage', labelKey: 'settings.ev.outage', label: '数据断联告警', descKey: 'settings.ev.outage.desc', desc: '告警 · TeslaMate 断联≥10 分钟/恢复,不受静音时段影响' },
   { id: 'chargeInterrupt', labelKey: 'settings.ev.chargeInterrupt', label: '充电提前中止', descKey: 'settings.ev.chargeInterrupt.desc', desc: '告警 · 充电未到 80% 即停止时提醒检查枪桩' },
   { id: 'tirePressure', labelKey: 'settings.ev.tirePressure', label: '胎压过低', descKey: 'settings.ev.tirePressure.desc', desc: '告警 · 四轮最低低于 2.6 bar 时提醒(24h 一次)' },
+  { id: 'batteryLow', labelKey: 'settings.ev.batteryLow', label: '电量偏低', descKey: 'settings.ev.batteryLow.desc', desc: '告警 · 电量低于 20% 且未在充电时提醒(24h 一次)' },
   { id: 'daily', labelKey: 'settings.ev.daily', label: '每日早报', descKey: 'settings.ev.daily.desc', desc: '每天 08:00 汇总昨日用车与充电' },
   { id: 'weekly', labelKey: 'settings.ev.weekly', label: '每周周报', descKey: 'settings.ev.weekly.desc', desc: '每周一 08:00 汇总上周' },
   { id: 'monthly', labelKey: 'settings.ev.monthly', label: '每月月报', descKey: 'settings.ev.monthly.desc', desc: '每月 1 日 08:00 汇总上月' },
+  { id: 'annual', labelKey: 'settings.ev.annual', label: '每年年报', descKey: 'settings.ev.annual.desc', desc: '每年 1 月 1 日汇总上年(含年度之最)' },
 ]
+
+/** 事件默认行（与服务端 defaultMatrix 同口径）：存量矩阵缺行时回退默认。
+ *  否则 UI 显示「已静音」而服务端实际按默认推送（v2.5 新增事件的存量用户会踩）。
+ *  告警事件默认即时渠道全开；内容事件默认仅飞书。 */
+const EVENT_MATRIX_DEFAULTS: Record<string, Record<string, boolean>> = (() => {
+  const alarm = { webpush: true, telegram: true, feishu: true, wecom: false, ntfy: false, bark: false }
+  const content = { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false }
+  const rows: Record<string, Record<string, boolean>> = { tripEnd: { ...content }, chargingStart: { ...content }, chargingDone: { ...content } }
+  for (const ev of ['outage', 'chargeInterrupt', 'tirePressure', 'batteryLow']) rows[ev] = { ...alarm }
+  for (const ev of ['daily', 'weekly', 'monthly', 'annual']) rows[ev] = { ...content }
+  return rows
+})()
 const CHANNELS: { id: PushChannelId; labelKey: string; label: string }[] = [
   { id: 'webpush', labelKey: 'settings.ch.webpush', label: 'Web Push' },
   { id: 'telegram', labelKey: 'settings.ch.telegram', label: 'Telegram' },
@@ -616,7 +630,8 @@ export default function SettingsPage() {
             {matrix ? (
               <div className="mt-4 divide-y divide-white/[0.05]" data-testid="push-matrix-list">
                 {EVENTS.map((ev) => {
-                  const enabled = CHANNELS.filter((ch) => matrix[ev.id]?.[ch.id])
+                  const row = matrix[ev.id] ?? EVENT_MATRIX_DEFAULTS[ev.id] ?? {}
+                  const enabled = CHANNELS.filter((ch) => row[ch.id])
                   const on = enabled.length > 0
                   return (
                     <div key={ev.id} className="flex items-center justify-between gap-3 py-3">

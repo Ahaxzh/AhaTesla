@@ -6,6 +6,7 @@ import type {
   ChargeDetail,
   ChannelsData,
   Charge,
+  ChargingHabits,
   ChargingStats,
   ChannelStatus,
   DashboardData,
@@ -199,6 +200,7 @@ export const api = {
     return get<Paged<Charge>>(`/api/charging?${q.toString()}`)
   },
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
+  chargingHabits: (carId?: number) => get<ChargingHabits>(withCar('/api/charging/habits', carId)),
   chargingStats: (params: { from?: string; to?: string; month?: string; carId?: number } = {}) => {
     const q = new URLSearchParams({ period: 'month' })
     if (params.month) q.set('month', params.month)
@@ -258,7 +260,7 @@ export const api = {
   aiTest: () => post<{ ok: boolean; preview?: string; error?: string }>('/api/ai/test'),
   reports: (carId?: number) => get<{ items: ReportListItem[] }>(withCar('/api/reports', carId)),
   reportDetail: (id: number | string) => get<ReportDetail>(`/api/reports/${id}`),
-  generateReport: (type: 'daily' | 'weekly' | 'monthly') =>
+  generateReport: (type: 'daily' | 'weekly' | 'monthly' | 'annual') =>
     post<{
       ok: boolean
       id?: number

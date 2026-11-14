@@ -135,28 +135,31 @@ export default function TripsPage() {
             onChange={(e) => applyFilter(from, e.target.value)}
           />
         </div>
-        {(from || to) && (
-          <button
+        {/* 动作组（清除 + 导出）整体成块：窄屏换行时两个按钮一起落到第二行右缘，不散落 */}
+        <div className="ml-auto flex items-center gap-1.5">
+          {(from || to) && (
+            <button
+              className="btn-ghost !px-2.5 !py-2"
+              onClick={() => { setFrom(''); setTo('') }}
+              aria-label={t('trips.filter.clear', '清除筛选')}
+              title={t('trips.filter.clear', '清除筛选')}
+              data-testid="filter-clear"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+          {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径 */}
+          <a
             className="btn-ghost !px-2.5 !py-2"
-            onClick={() => { setFrom(''); setTo('') }}
-            aria-label={t('trips.filter.clear', '清除筛选')}
-            title={t('trips.filter.clear', '清除筛选')}
-            data-testid="filter-clear"
+            href={`/api/export/trips${buildExportQuery(from, to, currentCarId)}`}
+            download
+            aria-label={t('trips.export', '导出 CSV')}
+            title={t('trips.export', '导出 CSV')}
+            data-testid="trip-export"
           >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-        {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径 */}
-        <a
-          className="btn-ghost !px-2.5 !py-2"
-          href={`/api/export/trips${buildExportQuery(from, to, currentCarId)}`}
-          download
-          aria-label={t('trips.export', '导出 CSV')}
-          title={t('trips.export', '导出 CSV')}
-          data-testid="trip-export"
-        >
-          <Download className="h-4 w-4" />
-        </a>
+            <Download className="h-4 w-4" />
+          </a>
+        </div>
       </div>
 
       {/* 顶部汇总（Grafana trip.json 提炼）：KPI 行 + 状态占比条 + 区间轨迹汇总图 */}

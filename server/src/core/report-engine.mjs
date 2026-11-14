@@ -29,7 +29,7 @@ function tzParts(ms, tz) {
 }
 
 function periodRange(now, kind, tz = "Asia/Shanghai") {
-  // 周报：上一周（周一 00:00 ~ 周日 24:00）；月报：上一自然月；日报：昨日 0~24 点。
+  // 周报：上一周（周一 00:00 ~ 周日 24:00）；月报：上一自然月；日报：昨日 0~24 点；年报：上一自然年。
   const zone = safeLocale(tz);
   const p = tzParts(now.getTime(), zone);
   if (kind === "daily") {
@@ -44,6 +44,15 @@ function periodRange(now, kind, tz = "Asia/Shanghai") {
       start: new Date(startMs),
       end: new Date(thisMondayMs),
       label: fmtLabel(new Date(startMs), "weekly", zone)
+    };
+  }
+  if (kind === "annual") {
+    // 年报：上一自然年（1 月 1 日与 1 月 1 日之间，tz 墙钟）
+    const startMs = wallClockToUtcMs(zone, p.y - 1, 1, 1);
+    return {
+      start: new Date(startMs),
+      end: new Date(wallClockToUtcMs(zone, p.y, 1, 1)),
+      label: fmtLabel(new Date(startMs), "annual", zone)
     };
   }
   const startMs = wallClockToUtcMs(zone, p.y, p.mo - 1, 1);
@@ -67,6 +76,9 @@ function fmtLabel(start, kind, tz) {
     const y = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric" }).format(start);
     const w = isoWeek(start);
     return `${y}-W${String(w).padStart(2, "0")}：${fmt(start, { month: "2-digit", day: "numeric" })} ~ ${fmt(new Date(start.getTime() + 6 * DAY_MS), { month: "2-digit", day: "numeric" })}`;
+  }
+  if (kind === "annual") {
+    return `${new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric" }).format(start)} 年报`;
   }
   return `${fmt(start, { year: "numeric", month: "long" })}月报`;
 }
@@ -141,6 +153,33 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
       energyKwh: round(a.energyKwh, 1),
       costCny: round(a.costCny, 2),
     }));
+
+  // ---- 年报专属（v2.5）：最长单日 / 最长单程 / 充电构成（朋友圈年度账单的料） ----
+  let annual = null;
+  if (kind === "annual") {
+    const dayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: safeLocale(tz), year: "numeric", month: "2-digit", day: "2-digit" });
+    const byDay = new Map();
+    for (const v of views) {
+      if (!v.startAt) continue;
+      const key = dayFmt.format(new Date(v.startAt));
+      byDay.set(key, (byDay.get(key) || 0) + (v.distanceKm ?? 0));
+    }
+    let maxDayKm = 0;
+    for (const km of byDay.values()) if (km > maxDayKm) maxDayKm = km;
+    let maxTrip = null;
+    for (const v of views) {
+      if ((v.distanceKm ?? 0) > (maxTrip?.distanceKm ?? 0)) maxTrip = { distanceKm: v.distanceKm, route: v.routeKey || null };
+    }
+    const superRe = /supercharger|super charger|超充/i;
+    const superCount = inWindow.filter((r) => superRe.test(`${r.geofence_name ?? ""}${r.address_name ?? ""}`)).length;
+    annual = {
+      maxDayKm: round(maxDayKm, 1),
+      maxTripKm: maxTrip ? round(maxTrip.distanceKm, 1) : null,
+      maxTripRoute: maxTrip?.route ?? null,
+      chargeSessions: inWindow.length,
+      superPct: inWindow.length ? Math.round((superCount / inWindow.length) * 100) : null,
+    };
+  }
 
   // 驻车损耗（可选注入）
   let parkingLoss = null;
@@ -285,8 +324,9 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
     ...(chargeSummary ? { chargeSummary } : {}),
     ...(plugHint ? { plugHint } : {}),
     ...(ytd ? { ytd } : {}),
+    ...(annual ? { annual } : {}),
     baselineNote: `对比基准：${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L`,
-    closing: buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss, kind, ytd })
+    closing: buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss, kind, ytd, annual })
   };
 }
 
@@ -347,14 +387,21 @@ function summarizeCharging(rows) {
   return { count: rows.length, kwh, locations: names.slice(0, 2), lastEndTime };
 }
 
-/** v2.2 结语：核心数字 + 洞察要点（温度/胎压/拥堵/能耗）；月报附年度累计（P1-f） */
-function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss, kind, ytd }) {
+/** v2.2 结语：核心数字 + 洞察要点（温度/胎压/拥堵/能耗）；月报附年度累计（P1-f）；年报附年度之最（v2.5） */
+function buildClosing({ distanceKm, totalCost, saved, insights, energyKwh, parkingLoss, kind, ytd, annual }) {
   if (!(distanceKm > 0)) return "本期无行程记录";
   const lines = [
     `本期行驶 ${distanceKm} km · 电费 ¥${totalCost.toFixed(2)} · 较油车${saved >= 0 ? "省" : "多花"} ¥${Math.abs(saved).toFixed(2)}（每公里 ¥${(totalCost / Math.max(distanceKm, 0.1)).toFixed(2)}）`
   ];
   if (kind === "monthly" && ytd) {
     lines.push(`📈 年度至今 ${ytd.distanceKm} km · 电费 ¥${ytd.totalCost.toFixed(2)} · 较油车${ytd.saved >= 0 ? "省" : "多花"} ¥${Math.abs(ytd.saved).toFixed(2)}`);
+  }
+  if (kind === "annual" && annual) {
+    const bits = [];
+    if (annual.maxDayKm > 0) bits.push(`最长单日 ${annual.maxDayKm} km`);
+    if (annual.maxTripKm > 0) bits.push(`最长单程 ${annual.maxTripKm} km${annual.maxTripRoute ? `（${annual.maxTripRoute}）` : ""}`);
+    if (annual.chargeSessions > 0) bits.push(`充电 ${annual.chargeSessions} 次${annual.superPct != null ? ` · 超充占 ${annual.superPct}%` : ""}`);
+    if (bits.length) lines.push(`🏆 ${bits.join(" · ")}`);
   }
   if (insights) {
     const bits = [];
@@ -392,6 +439,14 @@ export function nextReportRun(kind, now = new Date(), tz = "Asia/Shanghai") {
     const at = daysToMonday === 0 && p.h >= 8
       ? new Date(wallClockToUtcMs(zone, p.y, p.mo, p.d + 7, 8, 0) + 5_000)
       : new Date(wallClockToUtcMs(zone, p.y, p.mo, p.d + daysToMonday, 8, 0) + 5_000);
+    return at;
+  }
+  if (kind === "annual") {
+    // 年报：每年 1 月 1 日 08:00（实例时区）；今年已过 08:00 则排到次年
+    let at = new Date(wallClockToUtcMs(zone, p.y, 1, 1, 8, 0) + 5_000);
+    if (at.getTime() <= now.getTime()) {
+      at = new Date(wallClockToUtcMs(zone, p.y + 1, 1, 1, 8, 0) + 5_000);
+    }
     return at;
   }
   let at = new Date(wallClockToUtcMs(zone, p.y, p.mo + 1, 1, 8, 0) + 5_000);
@@ -531,6 +586,7 @@ export function startReportScheduler({
   schedule("daily");
   schedule("weekly");
   schedule("monthly");
+  schedule("annual");
   return {
     runKind,
     stop() {

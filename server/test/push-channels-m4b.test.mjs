@@ -143,11 +143,11 @@ test("dispatch：企微失败不阻塞 ntfy 投递（失败隔离，AC-12.2）",
   assert.equal(results.ntfy.sent, true);
 });
 
-test("矩阵 9×6：内容事件新渠道全关、告警事件即时渠道全开；PUT 归一化布尔；常量一致(P2)", () => {
+test("矩阵 11×6：内容事件新渠道全关、告警事件即时渠道全开；PUT 归一化布尔；常量一致(P2+v2.5)", () => {
   useMemoryStore();
   assert.equal(PUSH_CHANNELS.length, 6);
-  assert.equal(PUSH_EVENTS.length, 9);
-  const ALARMS = new Set(["outage", "chargeInterrupt", "tirePressure"]);
+  assert.equal(PUSH_EVENTS.length, 11);
+  const ALARMS = new Set(["outage", "chargeInterrupt", "tirePressure", "batteryLow"]);
   const dm = defaultMatrix();
   for (const ev of PUSH_EVENTS) {
     assert.deepEqual(Object.keys(dm[ev]).sort(), [...PUSH_CHANNELS].sort(), `${ev} 行应含六渠道`);

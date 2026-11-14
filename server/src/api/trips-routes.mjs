@@ -474,8 +474,20 @@ export function createTripsRoutes({ db, state }) {
         .filter((p) => Number.isFinite(p.x));
       const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null }));
 
+      // SoC 起止（v2.5）："这趟从 78% 开到 31%"是车主本能语言——取行程首/末有效电量读数；
+      // 两点索引查询（positions.drive_id 有索引）；缺列/无读数 → null 不渲染
+      let soc = null;
+      try {
+        const [first, last] = await Promise.all([
+          db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.id ASC LIMIT 1`, [drive.id]),
+          db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.id DESC LIMIT 1`, [drive.id]),
+        ]);
+        if (first?.v != null && last?.v != null) soc = { start: first.v, end: last.v };
+      } catch { /* positions 缺列时忽略 */ }
+
       return {
         ...view,
+        soc,
         route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null })),
         positionCount: points.length,
         fifo: {

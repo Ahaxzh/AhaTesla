@@ -4,6 +4,7 @@ import { AlertTriangle, BatteryCharging, Coins, Download, MapPin, Pencil, Repeat
 import { api, buildExportQuery } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { BatteryHealthCard } from '@/components/BatteryHealthCard'
+import { ChargingHabitsCard } from '@/components/ChargingHabitsCard'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
@@ -209,28 +210,31 @@ export default function ChargingPage() {
             data-testid="charge-to"
           />
         </div>
-        {(from || to) && (
-          <button
+        {/* 动作组（清除 + 导出）整体成块：窄屏换行时一起落到第二行右缘（同行程页） */}
+        <div className="ml-auto flex items-center gap-1.5">
+          {(from || to) && (
+            <button
+              className="btn-ghost !px-2.5 !py-2"
+              onClick={() => { setFrom(''); setTo('') }}
+              aria-label={t('charging.clear', '清除')}
+              title={t('charging.clear', '清除')}
+              data-testid="charge-filter-clear"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+          {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径；同源 cookie 直下 attachment */}
+          <a
             className="btn-ghost !px-2.5 !py-2"
-            onClick={() => { setFrom(''); setTo('') }}
-            aria-label={t('charging.clear', '清除')}
-            title={t('charging.clear', '清除')}
-            data-testid="charge-filter-clear"
+            href={`/api/export/charging${buildExportQuery(from, to, currentCarId)}`}
+            download
+            aria-label={t('charging.export', '导出 CSV')}
+            title={t('charging.export', '导出 CSV')}
+            data-testid="charge-export"
           >
-            <X className="h-4 w-4" />
-          </button>
-        )}
-        {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径；同源 cookie 直下 attachment */}
-        <a
-          className="btn-ghost !px-2.5 !py-2"
-          href={`/api/export/charging${buildExportQuery(from, to, currentCarId)}`}
-          download
-          aria-label={t('charging.export', '导出 CSV')}
-          title={t('charging.export', '导出 CSV')}
-          data-testid="charge-export"
-        >
-          <Download className="h-4 w-4" />
-        </a>
+            <Download className="h-4 w-4" />
+          </a>
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="charge-stats">
@@ -257,6 +261,11 @@ export default function ChargingPage() {
       {/* 电池健康（v0.3 调换：充电页放完整大卡——电池语境；首页为紧凑可展开行） */}
       <div className="mb-4">
         <BatteryHealthCard />
+      </div>
+
+      {/* 充电习惯画像（v2.5）：与电池健康同语境；样本不足时组件自隐藏 */}
+      <div className="mb-4">
+        <ChargingHabitsCard />
       </div>
 
       {/* 成本构成三分 + 免费充电 + 月度趋势（Grafana charging-costs-stats 提炼） */}

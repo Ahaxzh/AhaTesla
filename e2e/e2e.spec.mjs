@@ -70,6 +70,12 @@ test("行程页：列表加载、分页、详情路线", async ({ page }) => {
   if (await tp.isVisible().catch(() => false)) {
     await expect(tp).toContainText(/bar/);
   }
+  // v2.5 SoC 起止胶囊：库内该行程有电量读数 → 78% → 31% 形态（无读数属预期不渲染）
+  const soc = page.getByTestId("trip-soc");
+  if (await soc.isVisible().catch(() => false)) {
+    await expect(soc).toContainText(/%/);
+    await expect(soc).toContainText(/→/);
+  }
   const empty = await page.locator("[data-testid='route-map-empty']").isVisible().catch(() => false);
   if (!empty) {
     // preferCanvas: true → 轨迹画在 canvas（svg 仅在无 canvas 渲染器时出现）
@@ -200,7 +206,7 @@ test("移动端：底部导航栏固定不随页面滚动 + viewport 禁缩放",
   expect(Math.abs(after.y - before.y)).toBeLessThan(2);
 });
 
-test("充电页：充电次数第四卡 + 电池健康卡", async ({ page }) => {
+test("充电页：充电次数第四卡 + 电池健康卡 + 充电习惯画像", async ({ page }) => {
   await login(page);
   await navigate(page, "charging");
   await page.waitForSelector("[data-testid='charge-stats']", { timeout: 15000 });
@@ -211,13 +217,31 @@ test("充电页：充电次数第四卡 + 电池健康卡", async ({ page }) => 
     await expect(bh).toContainText(/%/);
     await expect(page.getByTestId("battery-trend").first()).toBeVisible();
   }
-  // v0.3 日期区间筛选（默认近 90 天，清除=全部）；v2.4 KPI 标签随区间 + CSV 导出
+  // v2.5 充电习惯画像：样本 ≥10 才渲染（起充/收枪 SoC 直方图）
+  const habits = page.getByTestId("habits-card");
+  if (await habits.isVisible().catch(() => false)) {
+    await expect(habits).toContainText(/平均起充|Avg start/);
+    await expect(page.getByTestId("habits-histogram")).toBeVisible();
+  }
+  // v0.3 日期区间筛选（默认近 90 天，清除=全部）；v2.4 KPI 标签随区间 + CSV 导出；
+  // v2.5 动作组：清除与导出同块渲染（窄屏一起换行，不再散落）
   await expect(page.getByTestId("charge-filter")).toBeVisible();
   await expect(page.getByTestId("charge-stats")).toContainText(/近90天|Last 90 days/);
   await expect(page.getByTestId("charge-export")).toHaveAttribute("href", /\/api\/export\/charging\?from=/);
   await page.getByTestId("charge-filter-clear").click();
   await page.waitForTimeout(800);
   await expect(page.getByTestId("charge-filter-clear")).not.toBeVisible();
+});
+
+test("报告页：年报 tab + 生成入口（v2.5）", async ({ page }) => {
+  await login(page);
+  await navigate(page, "reports");
+  await page.waitForSelector("[data-testid='report-tabs']", { timeout: 15000 });
+  await expect(page.getByTestId("generate-annual")).toBeVisible();
+  await page.getByTestId("report-tabs").getByText(/年报|Annual/).click();
+  await page.waitForTimeout(600);
+  // 空归档属预期（年报仅每年生成）；列表不报错即可
+  await expect(page.getByTestId("report-tabs")).toBeVisible();
 });
 
 test("行程页：顶部汇总（KPI/每日活跃柱状图/轨迹图）+ 无限滚动替代页码", async ({ page }) => {

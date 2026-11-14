@@ -81,6 +81,8 @@ export interface TripDetail extends Trip {
   /** 能效达成率（P3 模块1） */
   efficiency?: { ratedKwh: number | null; actualKwh: number | null; ratio: number | null }
   /** 环境剖析（P3 模块3） */
+  /** v2.5 SoC 起止：行程首/末有效电量读数（%）——"这趟从 78% 开到 31%"；无读数 null */
+  soc?: { start: number; end: number } | null
   /** 胎压四轮（bar，行程内最后有效读数；与推送行程小结同口径）；无数据省略 */
   tirePressure?: { fl: number; fr: number; rl: number; rr: number } | null
   environment?: {
@@ -107,6 +109,21 @@ export interface Charge {
   powerMaxKw: number | null
   /** 费用来源三态（P4）：manual=已录入 / geofence=规则计价 / default=默认估算 */
   costSource?: 'manual' | 'geofence' | 'default' | 'unknown'
+}
+
+/** GET /api/charging/habits → 充电习惯画像（v2.5，电池保养视角）。
+ *  起止 SoC 齐备的会话才计入；<10 样本 sufficient=false → 前端整卡隐藏（同电池健康卡） */
+export interface ChargingHabits {
+  days: number
+  sessions: number
+  sufficient: boolean
+  avgStartSoc: number | null
+  avgEndSoc: number | null
+  endAbove90Pct: number | null
+  startBelow15Pct: number | null
+  /** 十格直方图（bin = floor(SoC/10)），起 / 止各一组 */
+  startHist: number[]
+  endHist: number[]
 }
 
 export interface ChargeDetail extends Charge {
@@ -323,7 +340,7 @@ export interface LedgerSummary {
 }
 
 export type PushChannelId = 'webpush' | 'telegram' | 'feishu' | 'wecom' | 'ntfy' | 'bark'
-export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly' | 'outage' | 'chargeInterrupt' | 'tirePressure'
+export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly' | 'annual' | 'outage' | 'chargeInterrupt' | 'tirePressure' | 'batteryLow'
 
 export interface PushMatrix {
   [event: string]: { [channel: string]: boolean }
@@ -355,7 +372,7 @@ export interface ChannelStatus {
 
 export interface ReportListItem {
   id: number
-  type: 'daily' | 'weekly' | 'monthly'
+  type: 'daily' | 'weekly' | 'monthly' | 'annual'
   periodLabel: string
   distanceKm: number | null
   totalCost: number | null
@@ -397,6 +414,14 @@ export interface ReportDetail extends ReportListItem {
   insights?: ReportInsights | null
   /** 月报：年度累计 */
   ytd?: { distanceKm: number; totalCost: number; saved: number }
+  /** 年报：年度之最（v2.5） */
+  annual?: {
+    maxDayKm: number
+    maxTripKm: number | null
+    maxTripRoute: string | null
+    chargeSessions: number
+    superPct: number | null
+  }
   /** 日报：上周同日环比 + 本月累计 */
   compare?: {
     lastWeek: { distanceKm: number; totalCost: number }

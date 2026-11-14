@@ -262,6 +262,7 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
       const limit = Math.max(1, Math.min(100, Number(ctx.query.limit) || 50));
       const weekly = store.listReportSnapshots("weekly", limit);
       const monthly = store.listReportSnapshots("monthly", limit);
+      const annual = store.listReportSnapshots("annual", limit);
       const toRow = (r) => ({
         id: r.id,
         type: r.kind,
@@ -271,20 +272,20 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
         saved: r.payload?.kpi?.saved ?? null,
         createdAt: r.createdAt
       });
-      return { items: [...monthly, ...weekly].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(toRow) };
+      return { items: [...monthly, ...weekly, ...annual].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).map(toRow) };
     },
 
     async reportDetail(ctx) {
       const id = Number(ctx.params.id);
       if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, "bad_request", "invalid report id");
-      const all = [...store.listReportSnapshots("weekly", 500), ...store.listReportSnapshots("monthly", 500)];
+      const all = [...store.listReportSnapshots("weekly", 500), ...store.listReportSnapshots("monthly", 500), ...store.listReportSnapshots("annual", 500)];
       const hit = all.find((r) => r.id === id);
       if (!hit) throw new HttpError(404, "not_found", "report not found");
       return { id: hit.id, type: hit.kind, createdAt: hit.createdAt, ...hit.payload };
     },
 
     async generateReport(ctx) {
-      const type = ["daily", "weekly", "monthly"].includes(ctx.body?.type) ? ctx.body.type : "weekly";
+      const type = ["daily", "weekly", "monthly", "annual"].includes(ctx.body?.type) ? ctx.body.type : "weekly";
       if (!reportScheduler) throw new HttpError(500, "internal", "report engine unavailable");
       // 日报手动触发 = 立即重发（绕过当日去重；不消费昨夜 backlog，那是定时早报的职责）。
       // 日报不落归档 → 返回各通道送达结果而非快照 id；昨日无数据 → 409 report_empty。
