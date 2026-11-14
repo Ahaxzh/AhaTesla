@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, BatteryMedium, LifeBuoy } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -105,7 +105,7 @@ export default function TripDetailPage() {
                 data-testid="trip-soc"
                 title={t('tripDetail.socNote', '行程首/末有效电量读数')}
               >
-                🔋 {trip.soc.start}% <span className="text-slate-500">→</span> {trip.soc.end}%
+                <BatteryMedium className="h-3.5 w-3.5 text-emerald-400" /> {trip.soc.start}% <span className="text-slate-500">→</span> {trip.soc.end}%
               </span>
             )}
             {/* 急刹次数（v2.6）：降速 ≥8km/h/s 差分判定 */}
@@ -115,7 +115,7 @@ export default function TripDetailPage() {
                 data-testid="trip-braking"
                 title={t('tripDetail.brakingNote', '降速 ≥8 km/h/s 判定，同一次刹车不重复计')}
               >
-                🛑 {t('tripDetail.braking', '急刹')} {trip.hardBraking}
+                <AlertTriangle className="h-3.5 w-3.5" /> {t('tripDetail.braking', '急刹')} {trip.hardBraking}
               </span>
             )}
             {/* 行程内胎压变化（v2.6）：行驶升温升压 */}
@@ -125,7 +125,7 @@ export default function TripDetailPage() {
                 data-testid="trip-tp-change"
                 title={t('tripDetail.tpChangeNote', '行程首/末 TPMS 对比——行驶升温胎压会自然上升')}
               >
-                🛞 {trip.tirePressureChange.start.fl?.toFixed(1) ?? '--'} → {trip.tirePressureChange.end.fl?.toFixed(1) ?? '--'} bar
+                <LifeBuoy className="h-3.5 w-3.5 text-slate-400" /> {trip.tirePressureChange.start.fl?.toFixed(1) ?? '--'} → {trip.tirePressureChange.end.fl?.toFixed(1) ?? '--'} bar
                 <span className={trip.tirePressureChange.deltaBar >= 0 ? 'text-emerald-400' : 'text-amber-400'}>
                   {' '}({trip.tirePressureChange.deltaBar >= 0 ? '+' : ''}{trip.tirePressureChange.deltaBar.toFixed(2)})
                 </span>

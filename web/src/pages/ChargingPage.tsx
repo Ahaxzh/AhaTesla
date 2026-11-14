@@ -181,7 +181,24 @@ export default function ChargingPage() {
 
   return (
     <div>
-      <PageHeader icon={BatteryCharging} title={t('charging.title', '充电')} subtitle={t('charging.subtitle', '充电账本与站点统计')} />
+      <PageHeader
+        icon={BatteryCharging}
+        title={t('charging.title', '充电')}
+        subtitle={t('charging.subtitle', '充电账本与站点统计')}
+        action={(
+          // v2.6.1 导出挪到标题行右缘（与行程页一致）
+          <a
+            className="btn-ghost !px-2.5 !py-2"
+            href={`/api/export/charging${buildExportQuery(from, to, currentCarId)}`}
+            download
+            aria-label={t('charging.export', '导出 CSV')}
+            title={t('charging.export', '导出 CSV')}
+            data-testid="charge-export"
+          >
+            <Download className="h-4 w-4" />
+          </a>
+        )}
+      />
 
       {/* 日期区间筛选（v0.3：与行程页统一；默认近 90 天，清除=全部） */}
       <div className="glass-card-flat mb-4 flex flex-wrap items-end gap-3 p-4" data-testid="charge-filter">
@@ -210,31 +227,17 @@ export default function ChargingPage() {
             data-testid="charge-to"
           />
         </div>
-        {/* 动作组（清除 + 导出）整体成块：窄屏换行时一起落到第二行右缘（同行程页） */}
-        <div className="ml-auto flex items-center gap-1.5">
-          {(from || to) && (
-            <button
-              className="btn-ghost !px-2.5 !py-2"
-              onClick={() => { setFrom(''); setTo('') }}
-              aria-label={t('charging.clear', '清除')}
-              title={t('charging.clear', '清除')}
-              data-testid="charge-filter-clear"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-          {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径；同源 cookie 直下 attachment */}
-          <a
+        {(from || to) && (
+          <button
             className="btn-ghost !px-2.5 !py-2"
-            href={`/api/export/charging${buildExportQuery(from, to, currentCarId)}`}
-            download
-            aria-label={t('charging.export', '导出 CSV')}
-            title={t('charging.export', '导出 CSV')}
-            data-testid="charge-export"
+            onClick={() => { setFrom(''); setTo('') }}
+            aria-label={t('charging.clear', '清除')}
+            title={t('charging.clear', '清除')}
+            data-testid="charge-filter-clear"
           >
-            <Download className="h-4 w-4" />
-          </a>
-        </div>
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="charge-stats">
@@ -263,9 +266,9 @@ export default function ChargingPage() {
         <BatteryHealthCard />
       </div>
 
-      {/* 充电习惯画像（v2.5）：与电池健康同语境；样本不足时组件自隐藏 */}
+      {/* 充电习惯画像（v2.5；v2.6.1 起跟随筛选区间）：与电池健康同语境；样本不足自隐藏 */}
       <div className="mb-4">
-        <ChargingHabitsCard />
+        <ChargingHabitsCard from={rangeParams.from} to={rangeParams.to} />
       </div>
 
       {/* 成本构成三分 + 免费充电 + 月度趋势（Grafana charging-costs-stats 提炼） */}

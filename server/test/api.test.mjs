@@ -193,18 +193,6 @@ function tripsFakeDb() {
       // SoC 起止：首读 78% → 末读 31%
       return [{ v: /ORDER BY p\.id ASC/.test(sql) ? 78 : 31 }];
     }
-    if (/FROM positions p/.test(sql) && /tpms_pressure_fl/.test(sql)) {
-      // 急刹 + 胎压变化：6 点各隔 1s（秒级精度）——50→30(急刹1) 30→25 25→20 20→19(重新武装) 19→5(急刹2)
-      const t = (i) => `2026-10-13 02:11:${String(i).padStart(2, "0")}`;
-      return [
-        { date: t(0), speed: 50, fl: 2.8, fr: 2.8, rl: 2.9, rr: 2.9 },
-        { date: t(1), speed: 30, fl: 2.85, fr: 2.85, rl: 2.9, rr: 2.9 },
-        { date: t(2), speed: 25, fl: null, fr: null, rl: null, rr: null },
-        { date: t(3), speed: 20, fl: null, fr: null, rl: null, rr: null },
-        { date: t(4), speed: 19, fl: 3.0, fr: 3.0, rl: 3.1, rr: 3.1 },
-        { date: t(5), speed: 5, fl: 3.0, fr: 3.0, rl: 3.1, rr: 3.1 },
-      ];
-    }
     if (/GREATEST\(d\.start_rated_range_km/.test(sql) && !/outside_temp_avg/.test(sql)) {
       // 表显偏差：9 月 100/105、10 月 90/100、11 月微样本(rated 9 <50 剔除)
       return [
@@ -249,9 +237,11 @@ function tripsFakeDb() {
       }];
     }
     if (/FROM positions/.test(sql)) {
+      // 轨迹点（v2.6.1 起兼供急刹/胎压变化计算）：2s 内 50→20 = 15 km/h/s ≥12 → 1 次急刹；
+      // tpms 2.8→3.0（行驶升温）
       return [
-        { date: "2026-10-13 02:11:40", lat: 24.48, lng: 118.09, odometer: 30000 },
-        { date: "2026-10-13 02:58:09", lat: 24.51, lng: 118.12, odometer: 30021 }
+        { date: "2026-10-13 02:11:40", lat: 24.48, lng: 118.09, odometer: 30000, speed: 50, tp_fl: 2.8, tp_fr: 2.8, tp_rl: 2.9, tp_rr: 2.9 },
+        { date: "2026-10-13 02:11:42", lat: 24.51, lng: 118.12, odometer: 30021, speed: 20, tp_fl: 3.0, tp_fr: 3.0, tp_rl: 3.1, tp_rr: 3.1 }
       ];
     }
     return [];
@@ -289,8 +279,8 @@ test("GET /api/trips/:id 返回路线点集", async () => {
   assert.deepEqual(res.json.tirePressure, { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0 });
   // SoC 起止（v2.5）：行程首/末有效电量读数
   assert.deepEqual(res.json.soc, { start: 78, end: 31 });
-  // 急刹次数（v2.6）：50→30 与 19→5 两次（中间减速未重新武装不重复计）
-  assert.equal(res.json.hardBraking, 2);
+  // 急刹次数（v2.6.1 阈值 12 + 初速≥30）：50→20（2s，15 km/h/s）恰 1 次
+  assert.equal(res.json.hardBraking, 1);
   // 行程内胎压变化（v2.6）：首 2.85 → 末 3.05（行驶升温升压）
   assert.equal(res.json.tirePressureChange.deltaBar, 0.2);
   assert.equal(res.json.tirePressureChange.start.fl, 2.8);

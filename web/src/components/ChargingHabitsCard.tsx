@@ -3,74 +3,60 @@ import { BatteryCharging } from 'lucide-react'
 import { api } from '@/api/client'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import type { ChargingHabits } from '@/types'
 
 /**
- * 充电习惯画像卡（v2.5，电池保养视角）——老车主都懂"别充满、别耗尽"，
- * 这张卡回答"我实际做得怎样"：起止 SoC 均值、充到 >90% 收枪 / <15% 起充占比、
- * 起/止 SoC 十格直方图（收枪高度集中在哪个档一看便知）。
- * 样本 <10（sufficient=false）或查询失败 → 整卡隐藏（同电池健康卡，不占版面）。
+ * 充电习惯画像卡（v2.6.1 重设计）——"别充满、别耗尽，我实际做得怎样？"
+ * ① 四个指标：平均起充 / 平均收枪 / 充到 >90% 占比 / <15% 才充占比（超阈值琥珀提醒）
+ * ② 两张**独立标注**的分布图（v2.6 起止叠加在同一坐标里意义不明已废）：
+ *    「从多少开始充」「充到多少收枪」各一行 10 格，格子高度=占区间次数比例，
+ *    0-20% 与 90-100% 两端（深充深放区）底色微红提示。
+ * 数据跟随充电页筛选区间（from/to）；样本 <10 整卡隐藏。
  */
 
-/** 双直方图行：起始(天蓝描边)与结束(翠绿填充)叠加，bin 高度按各自 max 归一 */
-function SocHistogram({ habits }: { habits: ChargingHabits }) {
-  const { t } = useI18n()
-  const max = Math.max(...habits.startHist, ...habits.endHist, 1)
+function DistRow({ title, hist, total }: { title: string; hist: number[]; total: number }) {
+  const max = Math.max(...hist, 1)
   return (
-    <div data-testid="habits-histogram">
-      <div className="flex h-16 items-end gap-[3px]">
-        {habits.endHist.map((end, i) => {
-          const start = habits.startHist[i]
+    <div>
+      <p className="mb-1 text-[11px] text-slate-400">{title}</p>
+      <div className="flex h-12 items-end gap-[3px]">
+        {hist.map((n, i) => {
+          const pct = total > 0 ? (n / total) * 100 : 0
+          const edge = i <= 1 || i >= 9 // 0-20% / 90-100% 深充深放区
           return (
-            <div key={i} className="relative flex h-full min-w-[2px] flex-1 flex-col justify-end">
-              {/* 结束 SoC：实心翠绿柱 */}
-              <div className="w-full rounded-t-[2px] bg-emerald-500/80" style={{ height: `${Math.max((end / max) * 100, end > 0 ? 4 : 0)}%` }} />
-              {/* 起始 SoC：底部天蓝条（贴柱根，起充档位一眼可辨） */}
-              {start > 0 && (
-                <div
-                  className="absolute bottom-0 w-full rounded-[2px] bg-sky-500"
-                  style={{ height: `${Math.max((start / max) * 100, 5)}%` }}
-                  title={`${i * 10}~${i * 10 + 10}%`}
-                />
-              )}
-            </div>
+            <div
+              key={i}
+              className={`min-w-[8px] flex-1 rounded-t-[3px] ${n > 0 ? (edge ? 'bg-amber-500/70' : 'bg-emerald-500/75') : 'bg-white/[0.05]'}`}
+              style={{ height: `${Math.max((n / max) * 100, n > 0 ? 8 : 4)}%` }}
+              title={`${i * 10}~${i * 10 + 10}%：${n} 次（${pct.toFixed(0)}%）`}
+            />
           )
         })}
       </div>
-      <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+      <div className="num mt-1 flex justify-between text-[10px] text-slate-500">
         <span>0%</span>
         <span>50%</span>
         <span>100%</span>
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-sm bg-sky-500" />
-          {t('habits.legend.start', '起充 SoC')}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500" />
-          {t('habits.legend.end', '收枪 SoC')}
-        </span>
-      </div>
     </div>
   )
 }
 
-function Chip({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
+function Metric({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 rounded-xl bg-white/[0.04] px-3 py-2" data-testid="habits-chip">
-      <span className="shrink-0 text-[11px] text-slate-400">{label}</span>
-      <span className={`num text-sm font-medium ${warn ? 'text-amber-400' : 'text-slate-200'}`}>{value}</span>
+    <div className="rounded-xl bg-white/[0.04] px-3 py-2" data-testid="habits-chip">
+      <div className="text-[11px] text-slate-400">{label}</div>
+      <div className={`num mt-0.5 text-sm font-semibold ${warn ? 'text-amber-400' : 'text-slate-200'}`}>{value}</div>
     </div>
   )
 }
 
-export function ChargingHabitsCard() {
+export function ChargingHabitsCard({ from, to }: { from?: string; to?: string }) {
   const { t } = useI18n()
   const { currentCarId } = useCar()
+  const params = { from, to, carId: currentCarId ?? undefined }
   const { data } = useQuery({
-    queryKey: ['charging-habits', currentCarId],
-    queryFn: () => api.chargingHabits(currentCarId ?? undefined),
+    queryKey: ['charging-habits', params],
+    queryFn: () => api.chargingHabits(params),
     staleTime: 10 * 60_000,
     retry: false,
   })
@@ -84,18 +70,21 @@ export function ChargingHabitsCard() {
           <BatteryCharging className="h-4 w-4 text-tesla" /> {t('habits.title', '充电习惯')}
         </h2>
         <span className="num text-[11px] text-slate-500">
-          {t('habits.samples', '近{d}天 · {n}次').replace('{d}', String(data.days)).replace('{n}', String(data.sessions))}
+          {t('habits.samples', '{d} 天 · {n} 次').replace('{d}', String(data.days)).replace('{n}', String(data.sessions))}
         </span>
       </div>
-      <p className="mb-3 text-xs text-slate-500">{t('habits.desc', '别充满、别耗尽——看看实际做得怎样')}</p>
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <Chip label={t('habits.avgStart', '平均起充')} value={data.avgStartSoc != null ? `${data.avgStartSoc}%` : '--'} warn={data.avgStartSoc != null && data.avgStartSoc < 20} />
-        <Chip label={t('habits.avgEnd', '平均收枪')} value={data.avgEndSoc != null ? `${data.avgEndSoc}%` : '--'} warn={data.avgEndSoc != null && data.avgEndSoc > 90} />
-        <Chip label={t('habits.above90', '充到 >90%')} value={data.endAbove90Pct != null ? `${data.endAbove90Pct}%` : '--'} warn={data.endAbove90Pct != null && data.endAbove90Pct >= 30} />
-        <Chip label={t('habits.below15', '<15% 才充')} value={data.startBelow15Pct != null ? `${data.startBelow15Pct}%` : '--'} warn={data.startBelow15Pct != null && data.startBelow15Pct >= 30} />
+      <p className="mb-3 text-xs text-slate-500">{t('habits.desc', '别充满、别耗尽——看看实际做得怎样（两端格子=深充深放）')}</p>
+
+      <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <Metric label={t('habits.avgStart', '平均起充')} value={data.avgStartSoc != null ? `${data.avgStartSoc}%` : '--'} warn={data.avgStartSoc != null && data.avgStartSoc < 20} />
+        <Metric label={t('habits.avgEnd', '平均收枪')} value={data.avgEndSoc != null ? `${data.avgEndSoc}%` : '--'} warn={data.avgEndSoc != null && data.avgEndSoc > 90} />
+        <Metric label={t('habits.above90', '充到 >90%')} value={data.endAbove90Pct != null ? `${data.endAbove90Pct}%` : '--'} warn={data.endAbove90Pct != null && data.endAbove90Pct >= 30} />
+        <Metric label={t('habits.below15', '<15% 才充')} value={data.startBelow15Pct != null ? `${data.startBelow15Pct}%` : '--'} warn={data.startBelow15Pct != null && data.startBelow15Pct >= 30} />
       </div>
-      <div className="mt-4">
-        <SocHistogram habits={data} />
+
+      <div className="space-y-4">
+        <DistRow title={t('habits.startDist', '从多少开始充（每格 = 次数占比）')} hist={data.startHist} total={data.sessions} />
+        <DistRow title={t('habits.endDist', '充到多少收枪（每格 = 次数占比）')} hist={data.endHist} total={data.sessions} />
       </div>
     </section>
   )

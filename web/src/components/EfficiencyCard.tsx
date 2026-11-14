@@ -6,133 +6,111 @@ import { useCar } from '@/contexts/CarContext'
 import type { DisplayAccuracy } from '@/types'
 
 /**
- * 能效画像卡（v2.6，行程页）——车主第一关注："能否跑赢表显？什么情况能耗最低？"
- * 三块：① 个人最佳战绩（Wh/km 最低一程 + 当时温度/均速）② 表显达成率月趋势
- * （实际 ÷ 表显消耗，>100% = 跑赢）③ 温度/均速分箱能耗（冷天热泵、高速风阻一目了然）。
- * 数据不足（<2 个月 / 无样本）整卡隐藏。
+ * 能效画像卡（v2.6.1 重设计，行程页）——只回答车主关心的两件事，一眼可读：
+ * ① 跑赢表显了吗？→「表显达成率」一个大数（实际里程 ÷ 表显续航消耗，>100% = 跑赢）
+ * ② 什么情况最省？→ 温度/均速分箱，**相对区间平均的 Δ**（绿=更省 红/琥珀=更费），
+ *    每行：区间标签 · Wh/km · Δ% · 条长按能耗比例——"冷天比平均费 14%"这种结论直接可读。
+ * 数据完全跟随页面筛选区间（from/to）；样本不足（<5 趟）整卡隐藏。
+ * v2.6 的月度柱状图已删——无坐标无标注，看不出在说什么（用户反馈）。
  */
 
-const fmtDate = (iso: string | null): string => {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
-
-function BinRow({ label, whPerKm, max }: { label: string; whPerKm: number | null; max: number }) {
+function DeltaBinRow({ label, whPerKm, avg, max }: { label: string; whPerKm: number | null; avg: number | null; max: number }) {
   const pct = whPerKm != null && max > 0 ? Math.min((whPerKm / max) * 100, 100) : 0
+  const delta = whPerKm != null && avg ? Math.round(((whPerKm - avg) / avg) * 100) : null
+  const better = delta != null && delta < 0
+  const notable = delta != null && Math.abs(delta) >= 5
   return (
-    <div className="flex items-center gap-2">
-      <span className="num w-[64px] shrink-0 text-right text-[11px] text-slate-400">{label}</span>
+    <div className="flex items-center gap-2" title={`${label} · ${whPerKm ?? '--'} Wh/km`}>
+      <span className="num w-[68px] shrink-0 text-right text-[11px] text-slate-400">{label}</span>
       <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.05]" role="presentation">
         {whPerKm != null && (
-          <div
-            className={`h-full rounded-full ${whPerKm <= 150 ? 'bg-emerald-500/80' : whPerKm <= 200 ? 'bg-sky-500/80' : 'bg-amber-500/80'}`}
-            style={{ width: `${Math.max(pct, 4)}%` }}
-          />
+          <div className={`h-full rounded-full ${better ? 'bg-emerald-500/80' : 'bg-amber-500/70'}`} style={{ width: `${Math.max(pct, 4)}%` }} />
         )}
       </div>
-      <span className="num w-[52px] shrink-0 text-[11px] text-slate-300">{whPerKm ?? '--'}</span>
+      <span className="num w-[46px] shrink-0 text-[11px] text-slate-300">{whPerKm ?? '--'}</span>
+      <span className={`num w-[44px] shrink-0 text-right text-[11px] ${delta == null ? 'text-slate-500' : notable ? (better ? 'text-emerald-400' : 'text-amber-400') : 'text-slate-400'}`}>
+        {delta == null ? '--' : `${delta > 0 ? '+' : ''}${delta}%`}
+      </span>
     </div>
   )
 }
 
-export function EfficiencyCard() {
+export function EfficiencyCard({ from, to }: { from?: string; to?: string }) {
   const { t } = useI18n()
   const { currentCarId } = useCar()
+  const params = { from, to, carId: currentCarId ?? undefined }
   const { data: profile } = useQuery({
-    queryKey: ['efficiency-profile', currentCarId],
-    queryFn: () => api.efficiencyProfile(currentCarId ?? undefined),
+    queryKey: ['efficiency-profile', params],
+    queryFn: () => api.efficiencyProfile(params),
     staleTime: 10 * 60_000,
     retry: false,
   })
   const { data: accuracy } = useQuery({
-    queryKey: ['display-accuracy', currentCarId],
-    queryFn: () => api.displayAccuracy(currentCarId ?? undefined),
+    queryKey: ['display-accuracy', params],
+    queryFn: () => api.displayAccuracy(params),
     staleTime: 10 * 60_000,
     retry: false,
   })
 
-  // 防御：bins 缺失（异常响应/旧缓存）不渲染，不白屏
   if (!profile || !Array.isArray(profile.tempBins) || !Array.isArray(profile.speedBins) || profile.samples < 5) return null
-  const binsMax = Math.max(
-    ...profile.tempBins.map((b) => b.whPerKm ?? 0),
-    ...profile.speedBins.map((b) => b.whPerKm ?? 0),
-    1,
-  )
-  const months = (accuracy as DisplayAccuracy | undefined)?.months ?? []
+
   const avgRatio = (accuracy as DisplayAccuracy | undefined)?.avgRatio ?? null
+  const avg = profile.avgWhPerKm ?? null
+  const binsMax = Math.max(...profile.tempBins.map((b) => b.whPerKm ?? 0), ...profile.speedBins.map((b) => b.whPerKm ?? 0), 1)
 
   return (
     <section className="glass-card-flat p-4" data-testid="trip-efficiency-card">
-      <div className="mb-2.5 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-sm font-medium text-slate-200">
           <Gauge className="h-4 w-4 text-tesla" /> {t('eff.title', '能效画像')}
         </h3>
         <span className="num text-[11px] text-slate-500">
-          {t('eff.samples', '近一年 {n} 趟').replace('{n}', String(profile.samples))}
+          {t('eff.samples', '{d} 天 · {n} 趟').replace('{d}', String(profile.days)).replace('{n}', String(profile.samples))}
         </span>
       </div>
 
-      {/* 个人最佳 + 表显达成均值 */}
-      <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {profile.best && (
-          <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2" data-testid="eff-best">
-            <Trophy className="h-4 w-4 shrink-0 text-amber-400" />
-            <p className="num min-w-0 truncate text-xs text-slate-300">
-              {t('eff.best', '最佳')} <span className="font-semibold text-amber-300">{profile.best.whPerKm} Wh/km</span>
-              {profile.best.at && <span className="text-slate-500"> · {fmtDate(profile.best.at)}</span>}
-              {profile.best.tempC != null && <span className="text-slate-500"> · {profile.best.tempC}°C</span>}
-              {profile.best.avgSpeedKmh != null && <span className="text-slate-500"> · {t('eff.avgSpeed', '均')} {profile.best.avgSpeedKmh} km/h</span>}
-            </p>
-          </div>
-        )}
-        {avgRatio != null && months.length >= 2 && (
-          <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2" data-testid="eff-accuracy">
-            <p className="num min-w-0 truncate text-xs text-slate-300">
-              {t('eff.displayRatio', '表显达成率')}
-              <span className={`ml-1.5 font-semibold ${avgRatio >= 1 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {(avgRatio * 100).toFixed(0)}%
+      {/* 两个大结论：表显达成率 + 个人最佳 */}
+      <div className="mb-4 grid grid-cols-2 gap-2.5">
+        <div className="rounded-xl bg-white/[0.04] px-3 py-2.5" data-testid="eff-accuracy">
+          <p className="text-[11px] text-slate-400">{t('eff.displayRatio', '表显达成率')}</p>
+          <p className="num mt-0.5 text-lg font-semibold">
+            {avgRatio != null ? (
+              <span className={avgRatio >= 1 ? 'text-emerald-400' : 'text-amber-400'}>{(avgRatio * 100).toFixed(0)}%</span>
+            ) : '--'}
+            {avgRatio != null && (
+              <span className="ml-1.5 text-[11px] font-normal text-slate-500">
+                {avgRatio >= 1 ? t('eff.beats', '跑赢表显') : t('eff.behind', '未跑赢')}
               </span>
-              <span className="ml-1.5 text-slate-500">{t('eff.displayRatioHint', avgRatio >= 1 ? '跑赢表显' : '未跑赢')}</span>
+            )}
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-500">{t('eff.displayRatioDesc', '实际里程 ÷ 表显续航消耗，>100% 为跑赢')}</p>
+        </div>
+        {profile.best && (
+          <div className="rounded-xl bg-white/[0.04] px-3 py-2.5" data-testid="eff-best">
+            <p className="flex items-center gap-1 text-[11px] text-slate-400">
+              <Trophy className="h-3 w-3 text-amber-400" /> {t('eff.bestLabel', '个人最佳')}
+            </p>
+            <p className="num mt-0.5 text-lg font-semibold text-amber-300">{profile.best.whPerKm} <span className="text-[11px] font-normal text-slate-400">Wh/km</span></p>
+            <p className="num mt-0.5 truncate text-[10px] text-slate-500">
+              {profile.best.distanceKm} km
+              {profile.best.tempC != null && ` · ${profile.best.tempC}°C`}
+              {profile.best.avgSpeedKmh != null && ` · ${t('eff.avgSpeed', '均')} ${profile.best.avgSpeedKmh} km/h`}
             </p>
           </div>
         )}
       </div>
 
-      {/* 表显达成率月趋势：细柱 + 100% 参考线 */}
-      {months.length >= 2 && (
-        <div className="mb-3" data-testid="eff-monthly">
-          <div className="relative h-12">
-            <div className="absolute inset-x-0 border-t border-dashed border-white/20" style={{ top: `${100 - Math.min((100 / 1.3) * 100, 92)}%` }} />
-            <div className="flex h-full items-end gap-[2px]">
-              {months.map((m) => {
-                const pct = Math.min((m.ratio / 1.3) * 100, 100)
-                return (
-                  <div
-                    key={m.month}
-                    className={`min-w-[3px] flex-1 rounded-t-[2px] ${m.ratio >= 1 ? 'bg-emerald-500/70' : 'bg-sky-500/60'}`}
-                    style={{ height: `${Math.max(pct, 4)}%` }}
-                    title={`${m.month} · ${(m.ratio * 100).toFixed(0)}% · ${m.trips} 趟`}
-                  />
-                )
-              })}
-            </div>
-          </div>
-          <div className="num mt-1 flex justify-between text-[10px] text-slate-500">
-            <span>{months[0].month}</span>
-            <span>{t('eff.monthly', '月度表显达成率（虚线 100%）')}</span>
-            <span>{months[months.length - 1].month}</span>
-          </div>
-        </div>
-      )}
-
-      {/* 温度 / 速度分箱 */}
+      {/* 什么情况最省：分箱 Δ 相对区间平均 */}
+      <p className="mb-2 text-[11px] font-medium text-slate-300">
+        {t('eff.whenBest', '什么情况最省？')}
+        <span className="ml-1.5 font-normal text-slate-500">{t('eff.whenBestHint', '相对区间平均能耗（Wh/km），绿=更省 · 琥珀=更费')}</span>
+      </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <p className="mb-1.5 text-[11px] text-slate-400">{t('eff.byTemp', '按气温')}</p>
           <div className="space-y-1.5">
             {profile.tempBins.filter((b) => b.count > 0).map((b) => (
-              <BinRow key={b.label} label={b.label} whPerKm={b.whPerKm} max={binsMax} />
+              <DeltaBinRow key={b.label} label={b.label} whPerKm={b.whPerKm} avg={avg} max={binsMax} />
             ))}
           </div>
         </div>
@@ -140,7 +118,7 @@ export function EfficiencyCard() {
           <p className="mb-1.5 text-[11px] text-slate-400">{t('eff.bySpeed', '按均速')}</p>
           <div className="space-y-1.5">
             {profile.speedBins.filter((b) => b.count > 0).map((b) => (
-              <BinRow key={b.label} label={b.label} whPerKm={b.whPerKm} max={binsMax} />
+              <DeltaBinRow key={b.label} label={b.label} whPerKm={b.whPerKm} avg={avg} max={binsMax} />
             ))}
           </div>
         </div>

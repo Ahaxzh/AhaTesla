@@ -226,11 +226,11 @@ test("充电页：充电次数第四卡 + 电池健康卡 + 充电习惯画像",
     await expect(bh).toContainText(/%/);
     await expect(page.getByTestId("battery-trend").first()).toBeVisible();
   }
-  // v2.5 充电习惯画像：样本 ≥10 才渲染（起充/收枪 SoC 直方图）
+  // v2.5 充电习惯画像：样本 ≥10 才渲染（v2.6.1 起为两张独立标注的分布图）
   const habits = page.getByTestId("habits-card");
   if (await habits.isVisible().catch(() => false)) {
     await expect(habits).toContainText(/平均起充|Avg start/);
-    await expect(page.getByTestId("habits-histogram")).toBeVisible();
+    await expect(habits).toContainText(/从多少开始充|Where you start/);
   }
   // v0.3 日期区间筛选（默认近 90 天，清除=全部）；v2.4 KPI 标签随区间 + CSV 导出；
   // v2.5 动作组：清除与导出同块渲染（窄屏一起换行，不再散落）
@@ -271,13 +271,17 @@ test("行程页：顶部汇总（KPI/每日活跃柱状图/轨迹图）+ 无限�
   if (await eff.isVisible().catch(() => false)) {
     await expect(eff).toContainText(/Wh\/km|按气温/);
   }
-  // 无限滚动：滚到底触发加载（真实库 90 天通常 >20 条；滚动后条数增加或已显示全部）
+  // 无限滚动：滚到底触发加载。expect.poll 轮询"条数增加或已显示全部"——
+  // 固定 sleep+单次读在慢机/大库下反复假失败（三连 flaky 后治本）
   const before = await page.getByTestId("trip-item").count();
   await page.mouse.wheel(0, 6000);
-  await page.waitForTimeout(1500);
-  const after = await page.getByTestId("trip-item").count();
-  const allLoaded = await page.getByTestId("trip-load-state").textContent().catch(() => "");
-  expect(after > before || /已加载全部|All/.test(allLoaded || "")).toBeTruthy();
+  await expect
+    .poll(async () => {
+      const after = await page.getByTestId("trip-item").count();
+      const state = await page.getByTestId("trip-load-state").textContent().catch(() => "");
+      return after > before || /已加载全部|All/.test(state || "");
+    }, { timeout: 20_000 })
+    .toBeTruthy();
   // 底部不再有分页页码
   await expect(page.getByTestId("pagination")).not.toBeVisible();
 });

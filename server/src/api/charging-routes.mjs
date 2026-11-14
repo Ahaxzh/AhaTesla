@@ -82,10 +82,15 @@ export function createChargingRoutes({ db, state, getStore }) {
      *  老车主都懂"别充满、别耗尽"——这张卡回答"我实际做得怎样"。
      *  只统计起止 SoC 齐备的会话；<10 个样本 sufficient=false（前端隐藏，同电池健康卡）。 */
     async habits(ctx) {
-      const days = Math.max(30, Math.min(730, Number(ctx.query.days) || 180));
-      const sinceIso = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+      // v2.6.1：from/to（页面筛选区间）优先，缺省回落近 180 天——有筛选的页面数据必须随筛选走
+      const from = validIso(ctx.query.from, "from");
+      const to = validIso(ctx.query.to, "to");
+      const daysParam = Math.max(30, Math.min(730, Number(ctx.query.days) || 180));
+      const sinceIso = from ?? new Date(Date.now() - daysParam * 24 * 3600 * 1000).toISOString();
+      const untilIso = to ?? null;
+      const days = Math.max(1, Math.round(((to ? new Date(to).getTime() : Date.now()) - new Date(sinceIso).getTime()) / 86400_000));
       const carId = carIdFromQuery(ctx, state);
-      const rows = await listChargingForStats(db, { sinceIso, carId }).catch(() => []);
+      const rows = await listChargingForStats(db, { sinceIso, untilIso, carId }).catch(() => []);
       const pairs = [];
       for (const r of rows) {
         const s = finiteNumber(r.start_battery_level);

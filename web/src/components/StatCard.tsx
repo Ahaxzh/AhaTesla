@@ -27,7 +27,8 @@ export function StatCard({ icon: Icon, label, value, hint, accent, ...rest }: St
         <div className="num mt-0.5 truncate text-base font-semibold text-slate-100" title={value}>
           {value}
         </div>
-        {hint && <div className="mt-0.5 truncate text-[11px] text-slate-400">{hint}</div>}
+        {/* hint 行恒占位（无 hint 也保留行高）：同排卡片尺寸一致（v2.6.1） */}
+        <div className="num mt-0.5 min-h-[15px] truncate text-[11px] text-slate-400">{hint ?? ' '}</div>
       </div>
     </div>
   )

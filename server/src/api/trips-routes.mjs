@@ -334,13 +334,19 @@ export function createTripsRoutes({ db, state }) {
     async displayAccuracy(ctx) {
       const months = Math.max(6, Math.min(24, Number(ctx.query.months) || 12));
       const carId = carIdFromQuery(ctx, state);
-      const since = new Date(Date.now() - months * 31 * 86400_000).toISOString();
+      // v2.6.1：from/to（页面筛选区间）优先；缺省回落近 N 月——有筛选的页面数据必须随筛选走
+      const from = validateIso(ctx.query.from, "from");
+      const to = validateIso(ctx.query.to, "to");
+      const since = from ?? new Date(Date.now() - months * 31 * 86400_000).toISOString();
+      const until = to ? `AND d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')` : "";
+      const days = Math.max(1, Math.round(((to ? new Date(to).getTime() : Date.now()) - new Date(since).getTime()) / 86400_000));
       const rows = await db.query(`
         SELECT d.end_date AS end_at,
                d.distance::float8 AS distance_km,
                GREATEST(d.start_rated_range_km - d.end_rated_range_km, 0)::float8 AS rated_used_km
         FROM drives d
         WHERE d.end_date IS NOT NULL AND d.end_date >= ('${since}'::timestamptz AT TIME ZONE 'UTC')
+          ${until}
           ${carFilterSql(carId)}
       `).catch(() => []);
       const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: state.settings?.timezone || "Asia/Shanghai", year: "numeric", month: "2-digit" });
@@ -368,7 +374,7 @@ export function createTripsRoutes({ db, state }) {
         totalRated += v.rated;
         out.push({ month, actualKm: round(v.actual, 1), ratedKm: round(v.rated, 1), trips: v.trips, ratio: round(v.actual / v.rated, 3) });
       }
-      return { months: out.slice(-months), avgRatio: totalRated > 0 ? round(totalActual / totalRated, 3) : null };
+      return { days, months: out.slice(-months), avgRatio: totalRated > 0 ? round(totalActual / totalRated, 3) : null };
     },
 
     /** GET /api/trips/efficiency-profile?days=365&carId —— 能效画像（v2.6，车主第一关注）。
@@ -376,9 +382,14 @@ export function createTripsRoutes({ db, state }) {
      *  ②什么情况下能耗最低——温度/均速分箱的加权平均 Wh/km（冷天热泵、高速风阻一目了然）。
      *  能耗口径与全站一致：表显续航消耗 × 车辆效率；短程(<1km)与离群值(50~400 Wh/km 外)剔除。 */
     async efficiencyProfile(ctx) {
-      const days = Math.max(90, Math.min(730, Number(ctx.query.days) || 365));
+      const daysParam = Math.max(90, Math.min(730, Number(ctx.query.days) || 365));
       const carId = carIdFromQuery(ctx, state);
-      const since = new Date(Date.now() - days * 86400_000).toISOString();
+      // v2.6.1：from/to（页面筛选区间）优先，缺省回落近一年
+      const from = validateIso(ctx.query.from, "from");
+      const to = validateIso(ctx.query.to, "to");
+      const since = from ?? new Date(Date.now() - daysParam * 86400_000).toISOString();
+      const until = to ? `AND d.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')` : "";
+      const days = Math.max(1, Math.round(((to ? new Date(to).getTime() : Date.now()) - new Date(since).getTime()) / 86400_000));
       const rows = await db.query(`
         SELECT d.end_date AS end_at, d.distance::float8 AS distance_km, d.duration_min::float8 AS duration_min,
                d.outside_temp_avg::float8 AS temp_c,
@@ -386,6 +397,7 @@ export function createTripsRoutes({ db, state }) {
                c.efficiency::float8 AS efficiency
         FROM drives d JOIN cars c ON c.id = d.car_id
         WHERE d.end_date IS NOT NULL AND d.distance >= 1 AND d.end_date >= ('${since}'::timestamptz AT TIME ZONE 'UTC')
+          ${until}
           ${carFilterSql(carId).replace(/^\s*AND\s+/i, "AND ")}
       `).catch(() => []);
       const msOf = (v) => (v instanceof Date ? v.getTime() : new Date(/[Z+]/.test(String(v)) ? v : `${v}Z`).getTime());
@@ -407,6 +419,9 @@ export function createTripsRoutes({ db, state }) {
           endMs: msOf(r.end_at),
         });
       }
+      // 区间平均（里程加权）：分箱 Δ 的基准
+      let sumWhKm = 0, sumKm = 0;
+      for (const t of trips) { sumWhKm += t.whPerKm * t.km; sumKm += t.km; }
       // 个人最佳：≥5km 的行程里 Wh/km 最低的一程（短程能耗噪声大）
       let best = null;
       for (const t of trips) {
@@ -432,6 +447,7 @@ export function createTripsRoutes({ db, state }) {
       return {
         days,
         samples: trips.length,
+        avgWhPerKm: sumKm > 0 ? Math.round(sumWhKm / sumKm) : null,
         best: best ? {
           whPerKm: best.whPerKm, distanceKm: round(best.km, 1), tempC: best.tempC,
           avgSpeedKmh: best.avgSpeedKmh, at: Number.isFinite(best.endMs) ? new Date(best.endMs).toISOString() : null,
@@ -588,6 +604,44 @@ export function createTripsRoutes({ db, state }) {
         .filter((p) => Number.isFinite(p.x));
       const polyline = lttbDownsample(poly, 300).map((p) => ({ t: new Date(p.x).toISOString(), lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null }));
 
+      // 急刹次数 + 行程内胎压变化（v2.6.1 修）：复用上面已取的 points（≤1200，含 speed/tpms），
+      // 不再单独全量扫 positions（详情打开变卡）。阈值 ≥12 km/h/s（≈3.3 m/s² 真急刹；
+      // v2.6 的 8 连红灯减速都算，计数虚高）且初速 ≥30 km/h（低速挪车噪声）；
+      // 同刹多采样去重：触发后须待减速 <6 才重新武装。降采样会拉大 dt 低估减速——保守可接受。
+      let hardBraking = null;
+      let tirePressureChange = null;
+      {
+        const msOf = (v) => new Date(String(v).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(v)) ? v : `${v}Z`).getTime() || 0;
+        let armed = true;
+        for (let i = 1; i < points.length; i++) {
+          const v1 = finiteNumber(points[i - 1]?.speed);
+          const v2 = finiteNumber(points[i]?.speed);
+          if (v1 == null || v2 == null) continue;
+          const dt = (msOf(points[i].date) - msOf(points[i - 1].date)) / 1000;
+          if (dt <= 0 || dt > 10) continue;
+          const decel = (v1 - v2) / dt;
+          if (decel >= 12 && v1 >= 30) {
+            if (armed) { hardBraking = (hardBraking ?? 0) + 1; armed = false; }
+          } else if (decel < 6) {
+            armed = true;
+          }
+        }
+        const tpmsAvg = (r) => {
+          const vals = [r?.tp_fl, r?.tp_fr, r?.tp_rl, r?.tp_rr].map(finiteNumber).filter((v) => v != null);
+          return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+        };
+        let firstTp = null, lastTp = null;
+        for (const r of points) { if (tpmsAvg(r) != null) { firstTp ??= r; lastTp = r; } }
+        if (firstTp && lastTp) {
+          const startAvg = tpmsAvg(firstTp), endAvg = tpmsAvg(lastTp);
+          tirePressureChange = {
+            start: { fl: finiteNumber(firstTp.tp_fl), fr: finiteNumber(firstTp.tp_fr), rl: finiteNumber(firstTp.tp_rl), rr: finiteNumber(firstTp.tp_rr) },
+            end: { fl: finiteNumber(lastTp.tp_fl), fr: finiteNumber(lastTp.tp_fr), rl: finiteNumber(lastTp.tp_rl), rr: finiteNumber(lastTp.tp_rr) },
+            deltaBar: startAvg != null && endAvg != null ? round(endAvg - startAvg, 2) : null,
+          };
+        }
+      }
+
       // SoC 起止（v2.5）："这趟从 78% 开到 31%"是车主本能语言——取行程首/末有效电量读数；
       // 两点索引查询（positions.drive_id 有索引）；缺列/无读数 → null 不渲染
       let soc = null;
@@ -597,50 +651,6 @@ export function createTripsRoutes({ db, state }) {
           db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.id DESC LIMIT 1`, [drive.id]),
         ]);
         if (first?.v != null && last?.v != null) soc = { start: first.v, end: last.v };
-      } catch { /* positions 缺列时忽略 */ }
-
-      // 急刹次数 + 行程内胎压变化（v2.6，车主核心关注）：positions 逐点速度差分 +
-      // 首/末 TPMS 读数。急刹 = 降速 ≥8 km/h/s（≈2.2 m/s²），同一次刹车多采样去重：
-      // 触发后须待减速 <3 km/h/s 才重新武装。速度数据缺失 → null。
-      let hardBraking = null;
-      let tirePressureChange = null;
-      try {
-        const rows = await db.query(`
-          SELECT p.date, p.speed::float8 AS speed,
-                 p.tpms_pressure_fl::float8 AS fl, p.tpms_pressure_fr::float8 AS fr,
-                 p.tpms_pressure_rl::float8 AS rl, p.tpms_pressure_rr::float8 AS rr
-          FROM positions p WHERE p.drive_id = $1
-          ORDER BY p.date ASC, p.id ASC
-        `, [drive.id]);
-        const msOf = (v) => (v instanceof Date ? v.getTime() : new Date(/[Z+]/.test(String(v)) ? v : `${v}Z`).getTime());
-        let armed = true;
-        for (let i = 1; i < rows.length; i++) {
-          const v1 = finiteNumber(rows[i - 1]?.speed);
-          const v2 = finiteNumber(rows[i]?.speed);
-          if (v1 == null || v2 == null) continue;
-          const dt = (msOf(rows[i].date) - msOf(rows[i - 1].date)) / 1000;
-          if (dt <= 0 || dt > 5) continue;
-          const decel = (v1 - v2) / dt;
-          if (decel >= 8) {
-            if (armed) { hardBraking = (hardBraking ?? 0) + 1; armed = false; }
-          } else if (decel < 3) {
-            armed = true;
-          }
-        }
-        const tpmsAvg = (r) => {
-          const vals = [r?.fl, r?.fr, r?.rl, r?.rr].map(finiteNumber).filter((v) => v != null);
-          return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-        };
-        let firstTp = null, lastTp = null;
-        for (const r of rows) { if (tpmsAvg(r) != null) { firstTp ??= r; lastTp = r; } }
-        if (firstTp && lastTp && rows.length) {
-          const startAvg = tpmsAvg(firstTp), endAvg = tpmsAvg(lastTp);
-          tirePressureChange = {
-            start: { fl: finiteNumber(firstTp.fl), fr: finiteNumber(firstTp.fr), rl: finiteNumber(firstTp.rl), rr: finiteNumber(firstTp.rr) },
-            end: { fl: finiteNumber(lastTp.fl), fr: finiteNumber(lastTp.fr), rl: finiteNumber(lastTp.rl), rr: finiteNumber(lastTp.rr) },
-            deltaBar: startAvg != null && endAvg != null ? round(endAvg - startAvg, 2) : null,
-          };
-        }
       } catch { /* positions 缺列时忽略 */ }
 
       return {

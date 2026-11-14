@@ -203,9 +203,12 @@ export const api = {
     return get<Paged<Charge>>(`/api/charging?${q.toString()}`)
   },
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
-  chargingHabits: (carId?: number) => get<ChargingHabits>(withCar('/api/charging/habits', carId)),
-  displayAccuracy: (carId?: number) => get<DisplayAccuracy>(withCar('/api/trips/display-accuracy', carId)),
-  efficiencyProfile: (carId?: number) => get<EfficiencyProfile>(withCar('/api/trips/efficiency-profile', carId)),
+  chargingHabits: (params: { from?: string; to?: string; carId?: number } = {}) =>
+    get<ChargingHabits>(`/api/charging/habits${buildRangeQuery(params)}`),
+  displayAccuracy: (params: { from?: string; to?: string; carId?: number } = {}) =>
+    get<DisplayAccuracy>(`/api/trips/display-accuracy${buildRangeQuery(params)}`),
+  efficiencyProfile: (params: { from?: string; to?: string; carId?: number } = {}) =>
+    get<EfficiencyProfile>(`/api/trips/efficiency-profile${buildRangeQuery(params)}`),
   maintenanceGet: () => get<MaintenanceStatus>('/api/maintenance'),
   maintenancePut: (items: Array<{ key: string; intervalKm?: number; lastAtKm?: number | null }>) =>
     put<{ ok: boolean }>('/api/maintenance', { items }),
@@ -289,6 +292,16 @@ export const api = {
     // API 契约返回 { items: [...] }，容错直接数组
     return Array.isArray(r) ? r : ((r as { items?: SystemEvent[] }).items ?? []);
   }),
+}
+
+/** 分析端点 query 串（from/to ISO + carId；空参数剔除）——能效画像/充电习惯/表显达成随筛选走 */
+function buildRangeQuery({ from, to, carId }: { from?: string; to?: string; carId?: number }): string {
+  const q = new URLSearchParams()
+  if (from) q.set('from', from)
+  if (to) q.set('to', to)
+  if (carId) q.set('carId', String(carId))
+  const str = q.toString()
+  return str ? `?${str}` : ''
 }
 
 /** CSV 导出链接 query 串（trips/charging 两页共用；日期串→ISO，空参数剔除）。

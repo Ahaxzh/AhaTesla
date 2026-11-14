@@ -257,6 +257,7 @@ export const defaultHandlers = [
   ),
   http.get('/api/trips/display-accuracy', () =>
     HttpResponse.json({
+      days: 90,
       months: [
         { month: '2026-09', actualKm: 900, ratedKm: 940, trips: 30, ratio: 0.957 },
         { month: '2026-10', actualKm: 1240, ratedKm: 1260, trips: 42, ratio: 0.984 },
@@ -267,8 +268,9 @@ export const defaultHandlers = [
   ),
   http.get('/api/trips/efficiency-profile', () =>
     HttpResponse.json({
-      days: 365,
+      days: 90,
       samples: 93,
+      avgWhPerKm: 146,
       best: { whPerKm: 121, distanceKm: 86.2, tempC: 18, avgSpeedKmh: 62, at: '2026-10-12T01:30:00Z' },
       tempBins: [
         { label: '<0°C', whPerKm: 182, count: 8 },

@@ -121,6 +121,7 @@ export interface Charge {
 
 /** GET /api/trips/display-accuracy → 表显 vs 实际月趋势（v2.5）。ratio>100 = 跑赢表显 */
 export interface DisplayAccuracy {
+  days: number
   months: Array<{ month: string; actualKm: number; ratedKm: number; trips: number; ratio: number }>
   avgRatio: number | null
 }
@@ -129,6 +130,8 @@ export interface DisplayAccuracy {
 export interface EfficiencyProfile {
   days: number
   samples: number
+  /** 区间平均（里程加权），分箱 Δ 基准 */
+  avgWhPerKm: number | null
   best: { whPerKm: number; distanceKm: number; tempC: number | null; avgSpeedKmh: number | null; at: string | null } | null
   tempBins: Array<{ label: string; whPerKm: number | null; count: number }>
   speedBins: Array<{ label: string; whPerKm: number | null; count: number }>

@@ -59,8 +59,8 @@
 - `GET /api/dashboard/heatmap`（v2.1 新增，P2 模块4）→ {days:[{date:"YYYY-MM-DD", distanceKm}], maxKm}（最近 90 天按实例时区聚合，date 为本地日期）
 - `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
 - `GET /api/trips/overview?from=ISO&to=ISO` → {tripCount, distanceKm, durationMin, energyKwh, costCny, maxSpeedKmh, stateShare:{driveMin, chargeMin, parkedMin}, daily:{bucket:"day"|"week", points:[{date:"YYYY-MM-DD", driveMin, chargeMin, trips}]}}（v0.3 行程页顶部汇总 + v0.4 时间分布改每日活跃柱状图：能耗电费与列表同 FIFO 口径；stateShare 为时长 SUM 近似（驻车=区间−行驶−充电，仅作小字）；daily 供柱状图——按**结束时刻**归日（实例时区，同 heatmap 口径）、区间 ≤150 天按日零填充、更长自动按周聚合（周一起，date=桶起始日）防长区间点数爆炸）
-- `GET /api/trips/display-accuracy?months=12&carId`（**v2.5**）→ {months:[{month:"YYYY-MM",actualKm,ratedKm,trips,ratio}],avgRatio}（表显 vs 实际：实际里程 ÷ 表显续航消耗按月聚合，ratio>100=跑赢表显；单月表显消耗 <50km 剔除；months 6~24 钳制）
-- `GET /api/trips/efficiency-profile?days=365&carId`（**v2.6** 能效画像）→ {days,samples,best:{whPerKm,distanceKm,tempC,avgSpeedKmh,at}|null,tempBins:[{label,whPerKm,count}],speedBins:[...]}（个人最佳 = ≥5km 行程最低 Wh/km 及当时条件；温度/均速分箱按里程加权平均；能耗口径 = 表显续航消耗 × 车辆效率；50~400 Wh/km 外离群剔除；days 90~730 钳制）
+- `GET /api/trips/display-accuracy?from=ISO&to=ISO&months=12&carId`（**v2.5**；v2.6.1 from/to 优先——页面筛选区间）→ {days,months:[{month:"YYYY-MM",actualKm,ratedKm,trips,ratio}],avgRatio}（表显 vs 实际：实际里程 ÷ 表显续航消耗按月聚合，ratio>100=跑赢表显；单月表显消耗 <50km 剔除；months 6~24 钳制）
+- `GET /api/trips/efficiency-profile?from=ISO&to=ISO&days=365&carId`（**v2.6** 能效画像；v2.6.1 from/to 优先，分箱 Δ 基准 avgWhPerKm 为区间里程加权平均）→ {days,samples,avgWhPerKm,best:{whPerKm,distanceKm,tempC,avgSpeedKmh,at}|null,tempBins:[{label,whPerKm,count}],speedBins:[...]}（个人最佳 = ≥5km 行程最低 Wh/km 及当时条件；温度/均速分箱按里程加权平均；能耗口径 = 表显续航消耗 × 车辆效率；50~400 Wh/km 外离群剔除；days 90~730 钳制）
 - `GET /api/trips/route-summary?from=ISO&to=ISO` → {tripCount, segments:[{driveId, points:[{lat,lng,speed}]}]}（v0.3.1 按行程分组抽样：最长 ≤400 段、每段 ≤10 点含首尾；前端逐段画线，段间不连线。旧版全局取模抽样的单 polyline 已废——跨行程连线产生满屏飞线）
 - `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}, tirePressure:{fl,fr,rl,rr}|null（bar，行程内最后有效读数，与推送行程小结同口径）, soc:{start,end}|null（**v2.5** 行程首/末有效电量读数 %，positions 两点索引查询；无读数 null）, hardBraking:int|null（**v2.6** 急刹次数——降速 ≥8km/h/s 触发、同刹多采样去重；无速度数据 null）, tirePressureChange:{start:{fl,fr,rl,rr},end:{fl,fr,rl,rr},deltaBar}|null（**v2.6** 行程首/末 TPMS 对比——行驶升温升压幅度）}
 - Trip: {id, startAt, endAt, distanceKm, durationMin, energyKwh, **cost**（原 costCny）, startAddress, endAddress, kwhPer100km, routeKey}
@@ -68,7 +68,7 @@
 ## 4. 充电（v1 演进）
 
 - `GET /api/charging?limit=50&offset=0&month=YYYY-MM&from=ISO&to=ISO` → {total, items:[Charge]}（v0.3 日期区间，优先于 month）
-- `GET /api/charging/habits?days=180&carId=`（**v2.5** 充电习惯画像，电池保养视角）→ {days, sessions, sufficient, avgStartSoc, avgEndSoc, endAbove90Pct, startBelow15Pct, startHist:[10], endHist:[10]}（起止 SoC 齐备的会话才计入；<10 样本 sufficient=false 前端隐藏；days 30~730 钳制；十格直方图 bin=floor(SoC/10)）
+- `GET /api/charging/habits?from=ISO&to=ISO&days=180&carId=`（**v2.5** 充电习惯画像；v2.6.1 from/to 优先——随充电页筛选）→ {days, sessions, sufficient, avgStartSoc, avgEndSoc, endAbove90Pct, startBelow15Pct, startHist:[10], endHist:[10]}（起止 SoC 齐备的会话才计入；<10 样本 sufficient=false 前端隐藏；days 30~730 钳制；十格直方图 bin=floor(SoC/10)）
 - `GET /api/charging/:id` → 充电会话详情（功率曲线/桩端效率/费用三态/补录回显；**v2.5** 新增 priceCmp:{pct,avgPrice,samples}|null——与推送 charging_done 同款同站近 5 次均价对比，能力倒挂修复）
 - `GET /api/charging/stats?period=month|all&month=YYYY-MM&from=ISO&to=ISO` → {totalKwh, **totalCost**, **avgPrice**, sessionCount, byLocation:[{name, count, kwh, cost, pricePerUnit}]}（v0.3 from/to 优先于 month/period）
 - `GET /api/charging/:id` → {**...Charge, powerCurve:[{soc, kw}]（峰值打点 maxKw@soc）**, efficiency:{meterKwh, batteryKwh, ratio, lossKwh}, costSource:"manual"|"geofence"|"default"}

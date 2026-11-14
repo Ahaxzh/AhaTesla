@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ChargingHabitsCard } from '@/components/ChargingHabitsCard'
@@ -47,10 +47,11 @@ describe('ChargingHabitsCard（v2.5 充电习惯画像）', () => {
     expect(card).toHaveTextContent('81%')
     expect(card).toHaveTextContent('13%')
     expect(card).toHaveTextContent('4%')
-    expect(card).toHaveTextContent('近180天 · 24次')
-    const hist = within(card).getByTestId('habits-histogram')
-    expect(hist).toHaveTextContent('起充 SoC')
-    expect(hist).toHaveTextContent('收枪 SoC')
+    expect(card).toHaveTextContent('180 天 · 24 次')
+    // v2.6.1：两张独立标注的分布图（起/止各一行，不再叠加）
+    expect(card).toHaveTextContent('从多少开始充')
+    expect(card).toHaveTextContent('充到多少收枪')
+    expect(card).toHaveTextContent('深充深放')
   })
 
   it('样本不足（sufficient=false）→ 整卡隐藏不占版面', async () => {

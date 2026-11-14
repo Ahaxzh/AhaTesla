@@ -20,8 +20,9 @@ function renderCard(ui: ReactElement) {
 }
 
 const profile = {
-  days: 365,
+  days: 90,
   samples: 93,
+  avgWhPerKm: 146,
   best: { whPerKm: 121, distanceKm: 86.2, tempC: 18, avgSpeedKmh: 62, at: '2026-10-12T01:30:00Z' },
   tempBins: [
     { label: '<0°C', whPerKm: 182, count: 8 },
@@ -41,19 +42,28 @@ afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
 describe('EfficiencyCard（v2.6 能效画像）', () => {
-  it('最佳战绩 + 表显达成率 + 温度/速度分箱', async () => {
+  it('表显达成率大数 + 最佳战绩 + 分箱 Δ 相对区间平均（v2.6.1 重设计）', async () => {
     renderCard(<EfficiencyCard />)
     const card = await screen.findByTestId('trip-efficiency-card')
     expect(card).toHaveTextContent('能效画像')
+    expect(card).toHaveTextContent('90 天 · 93 趟')
+    // 表显达成率大数（msw avgRatio 0.975 → 98%）+ 结论词
+    expect(screen.getByTestId('eff-accuracy')).toHaveTextContent('98%')
+    expect(screen.getByTestId('eff-accuracy')).toHaveTextContent('未跑赢')
+    // 最佳战绩
     const best = screen.getByTestId('eff-best')
-    expect(best).toHaveTextContent('121 Wh/km')
+    expect(best).toHaveTextContent('121')
     expect(best).toHaveTextContent('18°C')
     expect(best).toHaveTextContent('62 km/h')
-    expect(screen.getByTestId('eff-accuracy')).toHaveTextContent('98%')
-    expect(screen.getByTestId('eff-monthly')).toBeInTheDocument()
+    // 什么情况最省：分箱带 Δ（<0°C 182 vs 平均 146 → +25%）
+    expect(card).toHaveTextContent('什么情况最省')
     expect(card).toHaveTextContent('按气温')
     expect(card).toHaveTextContent('按均速')
-    expect(card).toHaveTextContent('60~80 km/h')
+    expect(card).toHaveTextContent('+25%')
+    // 60~80（129 vs 146）→ -12% 更省
+    expect(card).toHaveTextContent('-12%')
+    // v2.6 月度柱状图已删
+    expect(screen.queryByTestId('eff-monthly')).not.toBeInTheDocument()
   })
 
   it('样本不足 → 整卡隐藏', async () => {

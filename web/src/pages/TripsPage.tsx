@@ -109,6 +109,19 @@ export default function TripsPage() {
         icon={Route}
         title={t('trips.title', '行程')}
         subtitle={data ? `${t('trips.subtitle.totalPrefix', '共')} ${total} ${t('trips.subtitle.totalSuffix', '条记录')}` : t('trips.subtitle.loading', '行车记录')}
+        action={(
+          // v2.6.1 导出挪到标题行右缘（用户反馈：筛选卡被挤换行不美观）
+          <a
+            className="btn-ghost !px-2.5 !py-2"
+            href={`/api/export/trips${buildExportQuery(from, to, currentCarId)}`}
+            download
+            aria-label={t('trips.export', '导出 CSV')}
+            title={t('trips.export', '导出 CSV')}
+            data-testid="trip-export"
+          >
+            <Download className="h-4 w-4" />
+          </a>
+        )}
       />
 
       {/* 日期筛选（默认近 90 天；清除=全部） */}
@@ -136,7 +149,6 @@ export default function TripsPage() {
             onChange={(e) => applyFilter(from, e.target.value)}
           />
         </div>
-        {/* 动作组（清除 + 导出）整体成块：窄屏换行时两个按钮一起落到第二行右缘，不散落 */}
         <div className="ml-auto flex items-center gap-1.5">
           {(from || to) && (
             <button
@@ -149,17 +161,6 @@ export default function TripsPage() {
               <X className="h-4 w-4" />
             </button>
           )}
-          {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径 */}
-          <a
-            className="btn-ghost !px-2.5 !py-2"
-            href={`/api/export/trips${buildExportQuery(from, to, currentCarId)}`}
-            download
-            aria-label={t('trips.export', '导出 CSV')}
-            title={t('trips.export', '导出 CSV')}
-            data-testid="trip-export"
-          >
-            <Download className="h-4 w-4" />
-          </a>
         </div>
       </div>
 
@@ -198,10 +199,9 @@ export default function TripsPage() {
         </div>
       )}
 
-      {/* v2.6 能效画像：最佳战绩 + 表显达成 + 温度/速度分箱。
-          独立于区间筛选（固定近一年），样本不足自隐藏——区间无行程也照常展示 */}
+      {/* v2.6.1 能效画像：数据跟随筛选区间（v2.6 固定近一年已废——有筛选的页面数据必须随筛选走） */}
       <div className="mb-4">
-        <EfficiencyCard />
+        <EfficiencyCard from={rangeParams.from} to={rangeParams.to} />
       </div>
 
       {isLoading ? (
