@@ -132,6 +132,9 @@ test("report-engine：buildReport 周期聚合 + 油车对比 + topRoutes", asyn
   assert.equal(report.kpi.driveCount, 2);
   assert.equal(report.kpi.fuelCost, 39.36); // 60km × 0.656
   assert.equal(report.topRoutes.length, 2);
+  // v2.4：topRoutes 补里程/能耗/电费（两条路线各 1 次 30km · 3kWh · ¥1.8）
+  const home = report.topRoutes.find((r) => r.route === "家 → 公司");
+  assert.deepEqual(home, { route: "家 → 公司", count: 1, distanceKm: 30, energyKwh: 3, costCny: 1.8 });
   assert.match(report.periodLabel, /W\d+/);
   assert.match(report.baselineNote, /8L\/100km/);
 });

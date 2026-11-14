@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { HeatmapData } from '@/types'
 import { useI18n } from '@/i18n'
 
@@ -102,7 +103,14 @@ function WeekdayBars({ daysData }: { daysData: HeatmapData['daysData'] }) {
 
 export function HeatmapCalendar({ data, onDaysChange }: { data: HeatmapData; onDaysChange?: (d: number) => void }) {
   const { t, lang } = useI18n()
+  const navigate = useNavigate()
   const [tip, setTip] = useState<Tip | null>(null)
+  // 点击直达 vs 先看 tooltip：hover 设备悬停已给出信息 → 点击直达当日行程；
+  // 触屏（无 hover）点按先 tooltip，tooltip 内「查看当日行程」跳转（jsdom matchMedia 全 false → 走触屏路径）
+  const canHover = useMemo(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(hover: hover)').matches,
+    [],
+  )
   const today = todayStr()
   const compact = data.days <= 14 // 近7天等短区间：周历网格只有 1~2 列，改条形
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -226,7 +234,14 @@ export function HeatmapCalendar({ data, onDaysChange }: { data: HeatmapData; onD
                     ? `${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dow]} ${dt.getMonth() + 1}/${dt.getDate()}`
                     : `周${'一二三四五六日'[dow]} ${dt.getMonth() + 1}/${dt.getDate()}`
                 return (
-                  <div key={day.date} className="flex items-center gap-3 py-[5px]" data-testid="heatmap-daily-row">
+                  <button
+                    key={day.date}
+                    type="button"
+                    className="flex w-full items-center gap-3 py-[5px] text-left transition-colors hover:bg-white/[0.03]"
+                    onClick={() => navigate(`/trips?from=${day.date}&to=${day.date}`)}
+                    aria-label={`${day.date} ${day.distanceKm > 0 ? `${day.distanceKm.toFixed(1)} km` : t('heatmap.noDrive', '未出行')} · ${t('heatmap.viewDay', '查看当日行程')}`}
+                    data-testid="heatmap-daily-row"
+                  >
                     <span className={`w-[76px] shrink-0 text-[11px] ${isToday ? 'font-semibold text-slate-200' : 'text-slate-400'}`}>
                       {label}
                     </span>
@@ -241,7 +256,7 @@ export function HeatmapCalendar({ data, onDaysChange }: { data: HeatmapData; onD
                     <span className={`num w-[64px] shrink-0 text-right text-[11px] ${day.distanceKm > 0 ? 'text-slate-300' : 'text-slate-500'}`}>
                       {day.distanceKm > 0 ? `${day.distanceKm.toFixed(1)} km` : t('heatmap.noDrive', '未出行')}
                     </span>
-                  </div>
+                  </button>
                 )
               })}
             </div>
@@ -312,24 +327,24 @@ export function HeatmapCalendar({ data, onDaysChange }: { data: HeatmapData; onD
                                 isToday ? 'ring-1 ring-white/90' : ''
                               }`}
                               style={{ width: 'var(--cell)', height: 'var(--cell)', background: LEVEL_COLORS[level] }}
-                              aria-label={`${cell.date} ${cell.distanceKm.toFixed(1)} km`}
+                              aria-label={`${cell.date} ${cell.distanceKm.toFixed(1)} km · ${t('heatmap.viewDay', '查看当日行程')}`}
                               data-testid="heatmap-cell"
                               data-level={level}
                               onMouseEnter={(e) => showTip(e.currentTarget, cell.date, cell.distanceKm)}
                               onFocus={(e) => showTip(e.currentTarget, cell.date, cell.distanceKm)}
                               onBlur={() => setTip(null)}
-                              onClick={(e) =>
-                                tip?.date === cell.date
-                                  ? setTip(null)
-                                  : showTip(e.currentTarget, cell.date, cell.distanceKm)
-                              }
+                              onClick={(e) => {
+                                if (canHover) navigate(`/trips?from=${cell.date}&to=${cell.date}`)
+                                else if (tip?.date === cell.date) setTip(null)
+                                else showTip(e.currentTarget, cell.date, cell.distanceKm)
+                              }}
                             />
                           )
                         })}
                       </div>
                     ))}
                   </div>
-                  {/* tooltip：跟随格子，值为主、日期为辅 */}
+                  {/* tooltip：跟随格子，值为主、日期为辅；触屏路径带「查看当日行程」跳转（PRD P2 模块4） */}
                   {tip && (
                     <div
                       data-testid="heatmap-hover"
@@ -341,6 +356,14 @@ export function HeatmapCalendar({ data, onDaysChange }: { data: HeatmapData; onD
                         {tip.km > 0 ? `${tip.km.toFixed(1)} km` : t('heatmap.noDrive', '未出行')}
                       </span>
                       <span className="num text-[11px] text-slate-400">{fmtDate(tip.date)}</span>
+                      <button
+                        type="button"
+                        className="pointer-events-auto -my-0.5 rounded-md bg-white/10 px-2 py-0.5 text-[11px] text-slate-200 hover:bg-white/20"
+                        onClick={() => navigate(`/trips?from=${tip.date}&to=${tip.date}`)}
+                        data-testid="heatmap-view-day"
+                      >
+                        {t('heatmap.viewDay', '查看当日行程')} →
+                      </button>
                     </div>
                   )}
 

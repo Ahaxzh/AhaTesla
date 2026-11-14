@@ -155,12 +155,16 @@ export default function DashboardPage() {
                   ) : null}
                 </div>
               ) : null}
-              {/* 里程行：左总里程，右数据同步时间（两者都是元数据，凑一对） */}
+              {/* 里程行：左总里程，右数据同步时间（两者都是元数据，凑一对）。
+                  v2.4 口径修正：同步时间取最新定位/胎压读数时刻（车安静睡一天 ≠ 断联），
+                  旧口径用最近行程结束时间会把"没开车"误报成"数据 1 天前"制造恐慌 */}
               <div className="flex items-center justify-between gap-2 text-[11px]">
                 <span className="shrink-0 text-slate-400">{t('dash.odometer', '总里程')} <span className="num text-slate-300">{fmtKm(car!.odometerKm, 0)} km</span></span>
                 {car && (
                   <span className="truncate text-slate-500" data-testid="car-synced">
-                    {t('dash.syncedPrefix', '数据同步于')} {timeAgo(data.recentTrips[0]?.endAt ?? null)}
+                    {car.state === 'asleep'
+                      ? <>{t('dash.asleepPrefix', '睡眠中 · 最后在线')} {timeAgo(car.position?.at ?? car.tirePressure?.at ?? data.recentTrips[0]?.endAt ?? null)}</>
+                      : <>{t('dash.syncedPrefix', '数据同步于')} {timeAgo(car.position?.at ?? car.tirePressure?.at ?? data.recentTrips[0]?.endAt ?? null)}</>}
                   </span>
                 )}
               </div>

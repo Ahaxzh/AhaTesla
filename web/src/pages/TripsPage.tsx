@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { ChevronRight, Clock, Coins, Gauge, MapPinned, Route, TrendingUp, X } from 'lucide-react'
-import { api } from '@/api/client'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ChevronRight, Clock, Coins, Download, Gauge, MapPinned, Route, TrendingUp, X } from 'lucide-react'
+import { api, buildExportQuery } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
@@ -19,6 +19,8 @@ const PAGE_SIZE = 20
 /** 默认筛选窗口（v0.3）：近 90 天——手机端首屏 & 列表噪音双优；「清除」可看全部 */
 const DEFAULT_WINDOW_DAYS = 90
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 export default function TripsPage() {
   const { t } = useI18n()
   const today = useMemo(() => new Date(), [])
@@ -28,8 +30,23 @@ export default function TripsPage() {
     return toInputDate(d)
   }, [])
   const { currentCarId } = useCar()
-  const [from, setFrom] = useState(defaultFrom)
-  const [to, setTo] = useState('')
+  // URL ?from&to（YYYY-MM-DD）：仪表盘热力图点格子跳当日行程的入口（PRD P2 模块4）
+  const [searchParams] = useSearchParams()
+  const [from, setFrom] = useState(() => {
+    const p = searchParams.get('from')
+    return p && DATE_RE.test(p) ? p : defaultFrom
+  })
+  const [to, setTo] = useState(() => {
+    const p = searchParams.get('to')
+    return p && DATE_RE.test(p) ? p : ''
+  })
+  // 已在本页时 URL 再变化（浏览器前进/后退）跟随；手动改日期不写回 URL
+  useEffect(() => {
+    const pf = searchParams.get('from')
+    const pt = searchParams.get('to')
+    if (pf && DATE_RE.test(pf)) setFrom(pf)
+    if (pt && DATE_RE.test(pt)) setTo(pt)
+  }, [searchParams])
 
   const rangeParams = useMemo(
     () => ({
@@ -129,6 +146,17 @@ export default function TripsPage() {
             <X className="h-4 w-4" />
           </button>
         )}
+        {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径 */}
+        <a
+          className="btn-ghost !px-2.5 !py-2"
+          href={`/api/export/trips${buildExportQuery(from, to, currentCarId)}`}
+          download
+          aria-label={t('trips.export', '导出 CSV')}
+          title={t('trips.export', '导出 CSV')}
+          data-testid="trip-export"
+        >
+          <Download className="h-4 w-4" />
+        </a>
       </div>
 
       {/* 顶部汇总（Grafana trip.json 提炼）：KPI 行 + 状态占比条 + 区间轨迹汇总图 */}

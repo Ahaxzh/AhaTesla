@@ -168,9 +168,13 @@ test("总览页：状态胶囊右上角（活跃态带 ping 状态点）+ 胎压
   await page.getByTestId("heatmap-range-7").click();
   await page.waitForSelector("[data-testid='heatmap-daily-bars']", { timeout: 8000 });
   await expect(page.getByTestId("heatmap-daily-row").first()).toBeVisible();
-  // 切回近3月 → 周历网格恢复
-  await page.getByTestId("heatmap-range-90").click();
-  await page.waitForSelector("[data-testid='heatmap-grid']", { timeout: 8000 });
+  // v2.4：点紧凑行 → 跳当日行程（PRD P2 模块4 断链补全）
+  await page.getByTestId("heatmap-daily-row").first().click();
+  await page.waitForURL(/\/trips\?from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}/, { timeout: 8000 });
+  await expect(page.getByTestId("trip-filter")).toBeVisible();
+  // 回仪表盘（默认近 3 月）→ 周历网格恢复（切换行为组件测试已覆盖）
+  await navigate(page, "dashboard");
+  await page.waitForSelector("[data-testid='heatmap-grid']", { timeout: 10000 });
 });
 
 test("移动端：底部导航栏固定不随页面滚动 + viewport 禁缩放", async ({ page }) => {
@@ -207,19 +211,23 @@ test("充电页：充电次数第四卡 + 电池健康卡", async ({ page }) => 
     await expect(bh).toContainText(/%/);
     await expect(page.getByTestId("battery-trend").first()).toBeVisible();
   }
-  // v0.3 日期区间筛选（默认近 90 天，清除=全部）
+  // v0.3 日期区间筛选（默认近 90 天，清除=全部）；v2.4 KPI 标签随区间 + CSV 导出
   await expect(page.getByTestId("charge-filter")).toBeVisible();
+  await expect(page.getByTestId("charge-stats")).toContainText(/近90天|Last 90 days/);
+  await expect(page.getByTestId("charge-export")).toHaveAttribute("href", /\/api\/export\/charging\?from=/);
   await page.getByTestId("charge-filter-clear").click();
   await page.waitForTimeout(800);
   await expect(page.getByTestId("charge-filter-clear")).not.toBeVisible();
 });
 
-test("行程页：顶部汇总（KPI/状态占比/轨迹图）+ 无限滚动替代页码", async ({ page }) => {
+test("行程页：顶部汇总（KPI/每日活跃柱状图/轨迹图）+ 无限滚动替代页码", async ({ page }) => {
   await login(page);
   await navigate(page, "trips");
   // 列表行出现（默认近 90 天）
   await page.waitForSelector("[data-testid='trip-item']", { timeout: 20000 });
-  // 顶部汇总卡：区间内有行程才渲染（KPI + 占比条 + 轨迹汇总图）
+  // CSV 导出入口（v2.4）：同筛选区间
+  await expect(page.getByTestId("trip-export")).toHaveAttribute("href", /\/api\/export\/trips\?from=/);
+  // 顶部汇总卡：区间内有行程才渲染（KPI + 每日活跃柱状图 + 轨迹汇总图）
   const overview = page.getByTestId("trip-overview");
   if (await overview.isVisible().catch(() => false)) {
     await expect(page.getByTestId("trip-daily-activity")).toBeVisible();

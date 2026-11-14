@@ -120,16 +120,27 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
   const fuelCost = round(distanceKm * perKm, 2);
   const saved = round(fuelCost - totalCost, 2);
 
-  // 主跑路线 TOP3（Q4 决策：routeKey 聚合）
-  const routeCount = new Map();
+  // 主跑路线 TOP3（Q4 决策：routeKey 聚合；v2.4 补里程/能耗/电费——字段本就在 views 里，
+  // 此前只数次数，报告页与推送文案信息不对称）
+  const routeAgg = new Map();
   for (const v of views) {
     if (!v.routeKey) continue;
-    routeCount.set(v.routeKey, (routeCount.get(v.routeKey) || 0) + 1);
+    const cur = routeAgg.get(v.routeKey) || { count: 0, distanceKm: 0, energyKwh: 0, costCny: 0 };
+    cur.count += 1;
+    cur.distanceKm += v.distanceKm ?? 0;
+    cur.energyKwh += v.energyKWh ?? 0;
+    cur.costCny += v.costCny ?? 0;
+    routeAgg.set(v.routeKey, cur);
   }
-  const topRoutes = [...routeCount.entries()]
-    .sort((a, b) => b[1] - a[1])
+  const topRoutes = [...routeAgg.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
     .slice(0, 3)
-    .map(([route, count]) => ({ route, count }));
+    .map(([route, a]) => ({
+      route, count: a.count,
+      distanceKm: round(a.distanceKm, 1),
+      energyKwh: round(a.energyKwh, 1),
+      costCny: round(a.costCny, 2),
+    }));
 
   // 驻车损耗（可选注入）
   let parkingLoss = null;

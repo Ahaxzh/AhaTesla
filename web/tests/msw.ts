@@ -68,6 +68,7 @@ export const mockDashboard: DashboardData = {
     rangeKm: 358,
     state: 'online',
     odometerKm: 24560,
+    position: { lat: 31.22, lng: 121.44, at: '2026-11-15T01:00:00Z', label: '家庭充电桩' },
     tirePressure: { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0, at: '2026-11-10T03:00:00Z' },
   },
   monthStats: { distanceKm: 1240.5, energyKWh: 223.1, costCny: 168.4, driveCount: 42, driveHours: 28.5 },

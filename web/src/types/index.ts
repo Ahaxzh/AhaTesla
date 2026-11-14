@@ -355,12 +355,26 @@ export interface ChannelStatus {
 
 export interface ReportListItem {
   id: number
-  type: 'weekly' | 'monthly'
+  type: 'daily' | 'weekly' | 'monthly'
   periodLabel: string
   distanceKm: number | null
   totalCost: number | null
   saved: number | null
   createdAt: string
+}
+
+/** v2.2 驾驶洞察（server report-engine 早已随快照返回，v2.4 前端才接住；旧快照可能缺字段 → 全可空） */
+export interface ReportInsights {
+  avgTempC: number | null
+  tempRangeC: string | null
+  avgSpeedKmh: number | null
+  maxSpeedKmh: number | null
+  idlePct: number | null
+  powerMaxKw: number | null
+  tireFlBar: number | null
+  tireRrBar: number | null
+  tireMinBar: number | null
+  kwhPer100km: number | null
 }
 
 export interface ReportDetail extends ReportListItem {
@@ -378,7 +392,18 @@ export interface ReportDetail extends ReportListItem {
     saved: number
     savedPct: number | null
   }
-  topRoutes: { route: string; count: number }[]
+  /** v2.4 补里程/能耗/电费（旧快照只有 count → 字段可空降级） */
+  topRoutes: { route: string; count: number; distanceKm?: number; energyKwh?: number; costCny?: number }[]
+  insights?: ReportInsights | null
+  /** 月报：年度累计 */
+  ytd?: { distanceKm: number; totalCost: number; saved: number }
+  /** 日报：上周同日环比 + 本月累计 */
+  compare?: {
+    lastWeek: { distanceKm: number; totalCost: number }
+    kmDeltaPct: number | null
+    costDeltaPct: number | null
+    month: { distanceKm: number; totalCost: number }
+  }
   baselineNote: string
   closing: string
 }

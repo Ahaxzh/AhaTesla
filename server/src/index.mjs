@@ -39,6 +39,7 @@ import { createTripsRoutes } from "./api/trips-routes.mjs";
 import { createChargingRoutes } from "./api/charging-routes.mjs";
 import { createPricingRoutes } from "./api/pricing-routes.mjs";
 import { createLedgerRoutes } from "./api/ledger-routes.mjs";
+import { createExportRoutes } from "./api/export-routes.mjs";
 import { createChannelRoutes } from "./api/channel-routes.mjs";
 import { createDashboardRoutes, createSystemRoutes } from "./api/dashboard-routes.mjs";
 import { createDashboardExtraRoutes, createSettingsRoutes, createHealthLiteRoutes } from "./api/dashboard-extra-routes.mjs";
@@ -110,6 +111,7 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   const charging = createChargingRoutes({ db, state, getStore });
   const pricing = createPricingRoutes({ db, state, getStore });
   const ledger = createLedgerRoutes({ db, state, getStore });
+  const exportRoutes = createExportRoutes({ db, state });
   const channels = createChannelRoutes({ state, feishu, eventLog });
   const dashboard = createDashboardRoutes({ db, state });
   const dashboardExtra = createDashboardExtraRoutes({ db, state });
@@ -153,6 +155,9 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/charging/:id", requireAuth, (ctx) => charging.detail(ctx));
   app.put("/api/charging/:id/cost", requireAuth, (ctx) => ledger.putChargeCost(ctx));
   app.post("/api/ledger/summary", requireAuth, (ctx) => ledger.summary(ctx));
+  // CSV 导出（v2.4）：attachment 响应（ctx.res.end 原生写，不走 ctx.json）
+  app.get("/api/export/trips", requireAuth, (ctx) => exportRoutes.trips(ctx));
+  app.get("/api/export/charging", requireAuth, (ctx) => exportRoutes.charging(ctx));
   app.post("/api/ledger/recalculate", requireAuth, (ctx) => ledger.startRecalculate(ctx));
   app.get("/api/ledger/recalculate/:jobId", requireAuth, (ctx) => ledger.recalculateStatus(ctx));
   app.get("/api/pricing", requireAuth, (ctx) => pricing.list(ctx));

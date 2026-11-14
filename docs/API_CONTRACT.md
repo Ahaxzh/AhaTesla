@@ -111,8 +111,13 @@
 
 ### 报告（v2 新增）
 - `GET /api/reports` → {items:[{id, type:"weekly"|"monthly", periodLabel, distanceKm, totalCost, saved}]}
-- `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）
+- `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）。**v2.4 快照已含字段全量露出**：topRoutes:[{route, count, distanceKm, energyKwh, costCny}]；insights:{avgTempC, tempRangeC, avgSpeedKmh, maxSpeedKmh, idlePct, powerMaxKw, tireFlBar, tireRrBar, tireMinBar, kwhPer100km}|null；日报 compare:{lastWeek:{distanceKm,totalCost}, kmDeltaPct, costDeltaPct, month:{distanceKm,totalCost}}；月报 ytd:{distanceKm, totalCost, saved}（旧快照缺新字段的兼容：前端判空隐藏区块）
 - `POST /api/reports/generate` {type:"daily"|"weekly"|"monthly"}（手动触发，调试用）
+
+### 导出（v2.4 新增）
+- `GET /api/export/trips?from=ISO&to=ISO&carId=` → `text/csv` attachment（UTF-8 BOM + RFC 4180 转义；列：开始/结束时间、起点、终点、里程、时长、能耗、电费、kWh/100km、路线；电费与列表同 FIFO 回放口径；≤20000 行防呆）
+- `GET /api/export/charging?from=ISO&to=ISO&carId=` → 同上；列：开始/结束时间、地点、充入 kWh、电费、单价、SoC 起止、时长、峰值功率、费用来源三态
+- 两者只含 UI 已展示口径（地址标签，**无 GPS 坐标/VIN**，红线 2），requireAuth
   - weekly/monthly：同期幂等（已有快照则返回既有 id，`deduplicated:true`）→ {ok, id, deduplicated?}
   - daily：立即重发昨日日报（绕过当日去重；不消费昨夜静音 backlog）→ {ok, type:"daily", periodLabel, results:{渠道:{sent,reason?}}}；昨日无行程且无充电 → 409 `report_empty`
 

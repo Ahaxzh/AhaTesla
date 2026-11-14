@@ -6,6 +6,31 @@ import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { pricingOptionsFor, overridesMapFromStore, instanceTimezone } from "../core/pricing-options.mjs";
 import { isoFromTeslaMate, round, finiteNumber, wallClockToUtcMs } from "../core/util.mjs";
 
+/** 充电会话 → 前端视图（列表/详情/CSV 导出共用，防三处口径漂移） */
+export function chargeRowToView(row, options, defaultRateCnyPerKwh) {
+  const priced = priceChargingSession(row, defaultRateCnyPerKwh, options);
+  const energy = finiteNumber(row.charge_energy_added);
+  const costSource = priced.source === "manual" || priced.source === "stated"
+    ? "manual"
+    : priced.source === "geofence" || priced.source === "geofence-tou"
+      ? "geofence"
+      : priced.source === "default" ? "default" : "unknown";
+  return {
+    id: row.id,
+    startAt: isoFromTeslaMate(row.start_at),
+    endAt: isoFromTeslaMate(row.end_at),
+    locationName: row.geofence_name || row.address_name || "未知地点",
+    energyAddedKWh: energy,
+    costCny: priced.costCny,
+    pricePerUnit: priced.pricePerUnit,
+    startBattery: row.start_battery_level ?? null,
+    endBattery: row.end_battery_level ?? null,
+    durationMin: Number(row.duration_min) || 0,
+    powerMaxKw: finiteNumber(row.power_max_kw),
+    costSource
+  };
+}
+
 export function createChargingRoutes({ db, state, getStore }) {
   function defaultRate() {
     return state.pricing.defaultRateCnyPerKwh;
@@ -34,27 +59,7 @@ export function createChargingRoutes({ db, state, getStore }) {
 
   // 费用来源 → 三态标记（P4 视图A）：manual（TeslaMate 已录 + 本地补录）/ geofence / default
   function toChargeView(row, options) {
-    const priced = priceChargingSession(row, defaultRate(), options);
-    const energy = finiteNumber(row.charge_energy_added);
-    const costSource = priced.source === "manual" || priced.source === "stated"
-      ? "manual"
-      : priced.source === "geofence" || priced.source === "geofence-tou"
-        ? "geofence"
-        : priced.source === "default" ? "default" : "unknown";
-    return {
-      id: row.id,
-      startAt: isoFromTeslaMate(row.start_at),
-      endAt: isoFromTeslaMate(row.end_at),
-      locationName: row.geofence_name || row.address_name || "未知地点",
-      energyAddedKWh: energy,
-      costCny: priced.costCny,
-      pricePerUnit: priced.pricePerUnit,
-      startBattery: row.start_battery_level ?? null,
-      endBattery: row.end_battery_level ?? null,
-      durationMin: Number(row.duration_min) || 0,
-      powerMaxKw: finiteNumber(row.power_max_kw),
-      costSource
-    };
+    return chargeRowToView(row, options, defaultRate());
   }
 
   return {

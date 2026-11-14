@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, BatteryCharging, Coins, MapPin, Pencil, Repeat, X, Zap } from 'lucide-react'
-import { api } from '@/api/client'
+import { AlertTriangle, BatteryCharging, Coins, Download, MapPin, Pencil, Repeat, X, Zap } from 'lucide-react'
+import { api, buildExportQuery } from '@/api/client'
 import { PageHeader } from '@/components/PageHeader'
 import { BatteryHealthCard } from '@/components/BatteryHealthCard'
 import { EmptyState } from '@/components/EmptyState'
@@ -71,7 +71,7 @@ function PowerCurve({ detail }: { detail: ChargeDetail }) {
 }
 
 export default function ChargingPage() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const today = useMemo(() => new Date(), [])
   const defaultFrom = useMemo(() => {
     const d = new Date()
@@ -86,6 +86,24 @@ export default function ChargingPage() {
   const queryClient = useQueryClient()
 
   const { currentCarId } = useCar()
+
+  /** KPI/标题的区间口径文案（v2.4 修正：旧文案写死"本月"，默认却是近 90 天——账本口径错误伤信任） */
+  const rangeText = useMemo(() => {
+    const monthEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    if (!from && !to) return t('charging.range.all', '全部')
+    if (from && !to) {
+      // 日历日差（今天零点 − from 零点）：默认窗口 today−90 → 「近90天」全天稳定，不受时刻影响
+      const days = Math.max(1, Math.round((new Date(`${toInputDate(today)}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400_000))
+      return t('charging.range.lastN', '近{n}天').replace('{n}', String(days))
+    }
+    if (!from && to) return to.slice(5).replace('-', '/')
+    if (from.slice(0, 7) === to.slice(0, 7)) {
+      const m = Number(to.slice(5, 7)) - 1
+      return lang === 'en' ? monthEn[m] : `${m + 1}月`
+    }
+    const md = (s: string) => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`
+    return `${md(from)}–${md(to)}`
+  }, [from, to, lang, t, today])
   const rangeParams = useMemo(
     () => ({
       from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
@@ -202,13 +220,24 @@ export default function ChargingPage() {
             <X className="h-4 w-4" />
           </button>
         )}
+        {/* CSV 导出（v2.4）：同筛选区间/同 FIFO 口径；同源 cookie 直下 attachment */}
+        <a
+          className="btn-ghost !px-2.5 !py-2"
+          href={`/api/export/charging${buildExportQuery(from, to, currentCarId)}`}
+          download
+          aria-label={t('charging.export', '导出 CSV')}
+          title={t('charging.export', '导出 CSV')}
+          data-testid="charge-export"
+        >
+          <Download className="h-4 w-4" />
+        </a>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="charge-stats">
         {stats ? (
           <>
-            <StatCard icon={Zap} label={t('charging.stat.kwh', '本月充电量')} value={fmtKwh(stats.totalKWh)} />
-            <StatCard icon={Coins} label={t('charging.stat.cost', '本月电费')} value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
+            <StatCard icon={Zap} label={t('charging.stat.kwh', '{r}充电量').replace('{r}', rangeText)} value={fmtKwh(stats.totalKWh)} />
+            <StatCard icon={Coins} label={t('charging.stat.cost', '{r}电费').replace('{r}', rangeText)} value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
             <StatCard icon={BatteryCharging} label={t('charging.stat.price', '平均单价')} value={`${getCurrencySymbol()}${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
             {/* 会话数（server stats.sessionCount；月份筛选联动） */}
             <StatCard
@@ -283,7 +312,7 @@ export default function ChargingPage() {
 
       {/* 按地点统计条形图（纯 CSS） */}
       <section className="glass-card-flat mb-4 p-5" data-testid="location-chart">
-        <h2 className="mb-4 text-sm font-medium text-slate-200">{t('charging.chart.title', '按地点统计（本月）')}</h2>
+        <h2 className="mb-4 text-sm font-medium text-slate-200">{t('charging.chart.title', '按地点统计（{r}）').replace('{r}', rangeText)}</h2>
         {byLocation.length === 0 ? (
           <EmptyState icon={MapPin} title={t('charging.chart.empty.title', '暂无地点数据')} description={t('charging.chart.empty.desc', '充电后按地点聚合的统计会显示在这里')} />
         ) : (

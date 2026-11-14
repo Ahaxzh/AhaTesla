@@ -28,7 +28,19 @@ describe('DashboardPage', () => {
     expect(tp).toHaveTextContent('2.9')
     // v0.2.x：状态胶囊与「数据同步于」合并为底部一行（省一行）
     expect(screen.getByTestId('car-state-pill')).toHaveTextContent('哨兵/在线')
+    // v2.4：同步时间取最新定位时刻（position.at），不再用最近行程结束时间（车没开 ≠ 断联）
     expect(screen.getByTestId('car-synced')).toHaveTextContent('数据同步于')
+    expect(screen.getByTestId('car-synced')).not.toHaveTextContent('undefined')
+  })
+
+  it('睡眠态显示「睡眠中 · 最后在线」而非同步恐慌文案', async () => {
+    server.use(
+      http.get('/api/dashboard', () =>
+        HttpResponse.json({ ...mockDashboard, car: { ...mockDashboard.car, state: 'asleep' } }),
+      ),
+    )
+    renderWithProviders(<DashboardPage />)
+    expect(await screen.findByTestId('car-synced')).toHaveTextContent('睡眠中 · 最后在线')
   })
 
   it('渲染本月统计卡（里程/能耗/电费）与油车对比', async () => {

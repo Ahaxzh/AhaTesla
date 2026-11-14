@@ -280,3 +280,14 @@ export const api = {
     return Array.isArray(r) ? r : ((r as { items?: SystemEvent[] }).items ?? []);
   }),
 }
+
+/** CSV 导出链接 query 串（trips/charging 两页共用；日期串→ISO，空参数剔除）。
+ *  同源 cookie 自动带上 → <a href download> 直下 attachment，无需 fetch+blob */
+export function buildExportQuery(from?: string, to?: string, carId?: number | null): string {
+  const q = new URLSearchParams()
+  if (from) q.set('from', new Date(`${from}T00:00:00`).toISOString())
+  if (to) q.set('to', new Date(`${to}T23:59:59`).toISOString())
+  if (carId) q.set('carId', String(carId))
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}

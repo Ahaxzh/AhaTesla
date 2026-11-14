@@ -12,9 +12,13 @@ describe('ChargingPage', () => {
   it('渲染统计卡（含量/价/次数四卡）、电池健康卡、地点条形图与充电列表', async () => {
     renderWithProviders(<ChargingPage />)
     expect(await screen.findByTestId('charge-total-cost')).toHaveTextContent('¥168.40')
-    // v0.3 调换：第四张「充电次数」卡 + 电池健康完整大卡（电池语境在此，首页为紧凑行）
+    // v2.4：KPI 标签随筛选区间（默认近 90 天），不再写死「本月」
     const stats = screen.getByTestId('charge-stats')
-    expect(stats).toHaveTextContent('24 次')
+    expect(stats).toHaveTextContent('近90天')
+    expect(screen.getByTestId('location-chart')).toHaveTextContent('按地点统计（近90天）')
+    // CSV 导出入口（同区间）
+    expect(screen.getByTestId('charge-export')).toHaveAttribute('href', expect.stringMatching(/^\/api\/export\/charging\?from=/))
+    expect(screen.getByTestId('charge-stats')).toHaveTextContent('24 次')
     const bh = await screen.findByTestId('battery-health-card')
     expect(bh).toHaveTextContent('98.2')
     expect(bh).toHaveTextContent('50.7')

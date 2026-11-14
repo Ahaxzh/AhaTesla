@@ -75,4 +75,15 @@ describe('TripsPage（v0.3：默认近90天 + 顶部汇总 + 无限滚动）', (
     await user.click(screen.getByTestId('filter-clear'))
     expect(screen.queryByTestId('filter-clear')).not.toBeInTheDocument()
   })
+
+  it('URL ?from&to 预填筛选（热力图点格子的入口）+ CSV 导出链接同区间', async () => {
+    renderWithProviders(<TripsPage />, { route: '/trips?from=2026-10-01&to=2026-10-02' })
+    await waitFor(() => expect(screen.getAllByTestId('trip-item').length).toBeGreaterThan(0))
+    expect((screen.getByLabelText('开始日期') as HTMLInputElement).value).toBe('2026-10-01')
+    expect((screen.getByLabelText('结束日期') as HTMLInputElement).value).toBe('2026-10-02')
+    const href = screen.getByTestId('trip-export').getAttribute('href') ?? ''
+    expect(href).toMatch(/^\/api\/export\/trips\?from=/)
+    expect(href).toContain('&to=')
+    expect(href).toContain('carId=')
+  })
 })

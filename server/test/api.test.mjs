@@ -9,6 +9,7 @@ import { hashPassword, signJwt } from "../src/api/auth.mjs";
 import { createAuthRoutes } from "../src/api/auth-routes.mjs";
 import { createTripsRoutes } from "../src/api/trips-routes.mjs";
 import { createChargingRoutes } from "../src/api/charging-routes.mjs";
+import { createExportRoutes } from "../src/api/export-routes.mjs";
 import { createPricingRoutes } from "../src/api/pricing-routes.mjs";
 import { createChannelRoutes } from "../src/api/channel-routes.mjs";
 import { createPushRoutes } from "../src/api/push-routes.mjs";
@@ -63,6 +64,9 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
+  const exportRoutes = createExportRoutes({ db, state });
+  app.get("/api/export/trips", requireAuth, (ctx) => exportRoutes.trips(ctx));
+  app.get("/api/export/charging", requireAuth, (ctx) => exportRoutes.charging(ctx));
   app.get("/api/pricing", requireAuth, (ctx) => pricing.list(ctx));
   app.put("/api/pricing/default", requireAuth, (ctx) => pricing.setDefault(ctx));
   app.get("/api/pricing/history", requireAuth, (ctx) => pricing.history(ctx));
@@ -699,4 +703,54 @@ test("PUT /api/push-rules 矩阵变更 → push.rules_updated 事件记录变更
   assert.ok(hit.changed.includes("daily.telegram"));
   assert.ok(hit.changed.includes("daily.webpush"));
   assert.ok(!hit.changed.includes("daily.feishu"), "未变的格子不记录");
+});
+
+// ---- CSV 导出（v2.4） ------------------------------------------------------
+
+test("GET /api/export/trips：CSV 附件（BOM/表头/FIFO 口径行），未登录 401", async () => {
+  const { app } = buildTestApp({ db: tripsFakeDb() });
+  const anon = await fetchApp(app, "GET", "/api/export/trips");
+  assert.equal(anon.status, 401);
+
+  const res = await fetchApp(app, "GET", "/api/export/trips", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers["content-type"], "text/csv; charset=utf-8");
+  assert.match(res.headers["content-disposition"], /^attachment; filename="ahatesla-trips-\d{4}-\d{2}-\d{2}\.csv"$/);
+  assert.ok(res.text.startsWith("﻿"), "UTF-8 BOM（Excel 中文不乱码）");
+  const lines = res.text.slice(1).trimEnd().split(/\r\n/);
+  assert.equal(lines[0], "开始时间,结束时间,起点,终点,里程(km),时长(分),能耗(kWh),电费(元),kWh/100km,路线");
+  assert.equal(lines.length, 2, "tripsFakeDb 单行程 → 表头 + 1 行");
+  assert.ok(lines[1].includes("家里"));
+  assert.ok(lines[1].includes("21.5"));
+});
+
+test("GET /api/export/trips：含逗号/引号的围栏名按 RFC 4180 转义", async () => {
+  // 地址列走 shortAddressLabel（按逗号拆段压缩，逗号进不来）；用户自建围栏名原样透传 → 转义必须在此生效
+  const db = createFakeDb((sql) => {
+    if (/FROM drives/.test(sql) && /LIMIT \$2 OFFSET \$3/.test(sql)) {
+      return [{ id: 7, car_id: 1, start_at: "2026-10-13 02:00", end_at: "2026-10-13 03:00", distance_km: 10, duration_min: 60, start_address_id: null, end_address_id: 2, start_geofence_id: 5, end_geofence_id: null, efficiency: 150, ideal_used_km: 8, rated_used_km: 9 }];
+    }
+    if (/FROM addresses/.test(sql)) return [];
+    if (/FROM charging_processes/.test(sql)) return [];
+    if (/FROM geofences/.test(sql)) return [{ id: 5, name: '园区充电, "东门"侧', latitude: 31.2, longitude: 121.4 }];
+    return [];
+  });
+  const { app } = buildTestApp({ db });
+  const res = await fetchApp(app, "GET", "/api/export/trips", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  const dataLine = res.text.slice(1).trimEnd().split(/\r\n/)[1];
+  assert.ok(dataLine.includes('"园区充电, ""东门""侧"'), "逗号包裹 + 内嵌引号翻倍");
+});
+
+test("GET /api/export/charging：CSV 附件 + 费用来源三态", async () => {
+  const { app } = buildTestApp({ db: chargingFakeDb() });
+  const res = await fetchApp(app, "GET", "/api/export/charging", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.match(res.headers["content-disposition"], /^attachment; filename="ahatesla-charging-\d{4}-\d{2}-\d{2}\.csv"$/);
+  const lines = res.text.slice(1).trimEnd().split(/\r\n/);
+  assert.equal(lines[0], "开始时间,结束时间,地点,充入(kWh),电费(元),单价(元/kWh),SoC起(%),SoC止(%),时长(分),峰值功率(kW),费用来源");
+  assert.equal(lines.length, 3, "chargingFakeDb 2 会话 → 表头 + 2 行");
+  assert.match(lines[1], /CND/);
+  assert.match(lines[1], /已录入/);   // cost=38 stated → manual
+  assert.match(lines[2], /默认估算/); // 无 cost 无围栏价 → default
 });

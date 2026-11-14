@@ -1,14 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { HeatmapCalendar } from '@/components/HeatmapCalendar'
 import { I18nProvider } from '@/i18n'
 import type { ReactElement } from 'react'
 import type { HeatmapData } from '@/types'
 
-/** 组件 v5 起文案走 useI18n，测试需包 Provider（默认 zh，断言中文文案不变） */
+/** 组件 v5 起文案走 useI18n，测试需包 Provider（默认 zh，断言中文文案不变）；
+ *  v2.4 格子可跳 /trips → 包 MemoryRouter 并挂探针路由 */
 function renderCalendar(ui: ReactElement) {
-  return render(<I18nProvider>{ui}</I18nProvider>)
+  return render(
+    <I18nProvider>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={ui} />
+          <Route path="/trips" element={<div data-testid="trips-probe" />} />
+        </Routes>
+      </MemoryRouter>
+    </I18nProvider>,
+  )
 }
+
+/** aria 匹配助手：格子 aria-label 已带「· 查看当日行程」后缀，用前缀正则匹配 */
+const labelOf = (date: string, km: string) => new RegExp(`^${date} ${km} km`)
 
 /** 确定性造数：LCG 种子=距今天数；今天固定 42.5 km、第 8 天前固定 152.3 km（最高单日） */
 function makeData(days: number): HeatmapData {
@@ -56,14 +70,14 @@ describe('HeatmapCalendar', () => {
 
   it('今天的格子有白描边（ring）与 aria 语义', () => {
     renderCalendar(<HeatmapCalendar data={makeData(90)} />)
-    const today = screen.getByLabelText(`${todayDate} 42.5 km`)
+    const today = screen.getByLabelText(labelOf(todayDate, '42.5'))
     expect(today).toHaveAttribute('data-level', '3')
     expect(today.className).toContain('ring')
   })
 
   it('点按格子出现 tooltip（值为强、日期为辅），再点同一格关闭', () => {
     renderCalendar(<HeatmapCalendar data={makeData(90)} />)
-    const today = screen.getByLabelText(`${todayDate} 42.5 km`)
+    const today = screen.getByLabelText(labelOf(todayDate, '42.5'))
     fireEvent.click(today)
     const tip = screen.getByTestId('heatmap-hover')
     expect(tip).toHaveTextContent('42.5 km')
@@ -74,11 +88,19 @@ describe('HeatmapCalendar', () => {
     expect(screen.queryByTestId('heatmap-hover')).not.toBeInTheDocument()
   })
 
+  it('tooltip 内「查看当日行程」跳转 /trips?from=当日&to=当日（触屏路径，PRD P2 模块4）', () => {
+    renderCalendar(<HeatmapCalendar data={makeData(90)} />)
+    fireEvent.click(screen.getByLabelText(labelOf(todayDate, '42.5')))
+    fireEvent.click(screen.getByTestId('heatmap-view-day'))
+    // 探针路由渲染 = 已跳到 /trips（query 由 TripsPage 消费，组件测试只验跳转发生）
+    expect(screen.getByTestId('trips-probe')).toBeInTheDocument()
+  })
+
   it('未出行日 tooltip 显示「未出行」而非 0 km', () => {
     const data = makeData(90)
     const zeroDay = data.daysData.find((d) => d.distanceKm === 0)!
     renderCalendar(<HeatmapCalendar data={data} />)
-    fireEvent.click(screen.getByLabelText(`${zeroDay.date} 0.0 km`))
+    fireEvent.click(screen.getByLabelText(labelOf(zeroDay.date, '0.0')))
     expect(screen.getByTestId('heatmap-hover')).toHaveTextContent('未出行')
   })
 
@@ -117,5 +139,8 @@ describe('HeatmapCalendar', () => {
     // 未出行日显示文案而非 0 km
     const zeroDay = data.daysData.find((d) => d.distanceKm === 0)
     if (zeroDay) expect(screen.getByText('未出行')).toBeTruthy()
+    // 紧凑行整体可点 → 跳当日行程（放末尾：跳转后日历卸载）
+    fireEvent.click(rows[0])
+    expect(screen.getByTestId('trips-probe')).toBeInTheDocument()
   })
 })
