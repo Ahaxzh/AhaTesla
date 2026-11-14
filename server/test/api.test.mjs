@@ -10,6 +10,7 @@ import { createAuthRoutes } from "../src/api/auth-routes.mjs";
 import { createTripsRoutes } from "../src/api/trips-routes.mjs";
 import { createChargingRoutes } from "../src/api/charging-routes.mjs";
 import { createExportRoutes } from "../src/api/export-routes.mjs";
+import { createMaintenanceRoutes } from "../src/api/maintenance-routes.mjs";
 import { createPricingRoutes } from "../src/api/pricing-routes.mjs";
 import { createChannelRoutes } from "../src/api/channel-routes.mjs";
 import { createPushRoutes } from "../src/api/push-routes.mjs";
@@ -61,6 +62,8 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
   app.get("/api/trips", requireAuth, (ctx) => trips.list(ctx));
   app.get("/api/trips/overview", requireAuth, (ctx) => trips.overview(ctx));
   app.get("/api/trips/route-summary", requireAuth, (ctx) => trips.routeSummary(ctx));
+  app.get("/api/trips/display-accuracy", requireAuth, (ctx) => trips.displayAccuracy(ctx));
+  app.get("/api/trips/efficiency-profile", requireAuth, (ctx) => trips.efficiencyProfile(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
@@ -190,6 +193,35 @@ function tripsFakeDb() {
       // SoC 起止：首读 78% → 末读 31%
       return [{ v: /ORDER BY p\.id ASC/.test(sql) ? 78 : 31 }];
     }
+    if (/FROM positions p/.test(sql) && /tpms_pressure_fl/.test(sql)) {
+      // 急刹 + 胎压变化：6 点各隔 1s（秒级精度）——50→30(急刹1) 30→25 25→20 20→19(重新武装) 19→5(急刹2)
+      const t = (i) => `2026-10-13 02:11:${String(i).padStart(2, "0")}`;
+      return [
+        { date: t(0), speed: 50, fl: 2.8, fr: 2.8, rl: 2.9, rr: 2.9 },
+        { date: t(1), speed: 30, fl: 2.85, fr: 2.85, rl: 2.9, rr: 2.9 },
+        { date: t(2), speed: 25, fl: null, fr: null, rl: null, rr: null },
+        { date: t(3), speed: 20, fl: null, fr: null, rl: null, rr: null },
+        { date: t(4), speed: 19, fl: 3.0, fr: 3.0, rl: 3.1, rr: 3.1 },
+        { date: t(5), speed: 5, fl: 3.0, fr: 3.0, rl: 3.1, rr: 3.1 },
+      ];
+    }
+    if (/GREATEST\(d\.start_rated_range_km/.test(sql) && !/outside_temp_avg/.test(sql)) {
+      // 表显偏差：9 月 100/105、10 月 90/100、11 月微样本(rated 9 <50 剔除)
+      return [
+        { end_at: "2026-09-05T02:00:00Z", distance_km: 100, rated_used_km: 105 },
+        { end_at: "2026-10-05T02:00:00Z", distance_km: 90, rated_used_km: 100 },
+        { end_at: "2026-11-05T02:00:00Z", distance_km: 8, rated_used_km: 9 },
+      ];
+    }
+    if (/outside_temp_avg/.test(sql) && /JOIN cars c ON c\.id = d\.car_id/.test(sql)) {
+      // 能效画像：r2 是最佳(139)；r1/r2 均 60km/h；eff 0.152 kWh/km
+      return [
+        { end_at: "2026-05-01T02:00:00Z", distance_km: 100, duration_min: 100, temp_c: 15, rated_used_km: 105, efficiency: 0.152 },
+        { end_at: "2026-06-01T02:00:00Z", distance_km: 60, duration_min: 60, temp_c: 19, rated_used_km: 55, efficiency: 0.152 },
+        { end_at: "2026-07-01T02:00:00Z", distance_km: 50, duration_min: 30, temp_c: 25, rated_used_km: 55, efficiency: 0.152 },
+        { end_at: "2026-08-01T02:00:00Z", distance_km: 40, duration_min: 80, temp_c: 5, rated_used_km: 60, efficiency: 0.152 },
+      ];
+    }
     if (/ideal_used_km/.test(sql) && /FROM drives/.test(sql)) {
       // FIFO 回放轻量分页（无坐标 LATERAL）
       return [{
@@ -257,6 +289,12 @@ test("GET /api/trips/:id 返回路线点集", async () => {
   assert.deepEqual(res.json.tirePressure, { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0 });
   // SoC 起止（v2.5）：行程首/末有效电量读数
   assert.deepEqual(res.json.soc, { start: 78, end: 31 });
+  // 急刹次数（v2.6）：50→30 与 19→5 两次（中间减速未重新武装不重复计）
+  assert.equal(res.json.hardBraking, 2);
+  // 行程内胎压变化（v2.6）：首 2.85 → 末 3.05（行驶升温升压）
+  assert.equal(res.json.tirePressureChange.deltaBar, 0.2);
+  assert.equal(res.json.tirePressureChange.start.fl, 2.8);
+  assert.equal(res.json.tirePressureChange.end.fl, 3.0);
   const missing = await fetchApp(app, "GET", "/api/trips/999", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(missing.status, 404);
   assert.equal(missing.json.error.code, "not_found");
@@ -803,4 +841,66 @@ test("GET /api/charging/habits：样本不足 sufficient=false（前端隐藏依
   assert.equal(res.status, 200);
   assert.equal(res.json.sufficient, false);
   assert.equal(res.json.sessions, 0);
+});
+
+// ---- 表显偏差 / 能效画像 / 保养提醒（v2.5/v2.6） --------------------------
+
+test("GET /api/trips/display-accuracy：月度 ratio + 微样本月剔除", async () => {
+  const { app } = buildTestApp({ db: tripsFakeDb() });
+  const res = await fetchApp(app, "GET", "/api/trips/display-accuracy", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  const ms = res.json.months;
+  assert.equal(ms.length, 2, "11 月 rated 9km < 50 剔除");
+  assert.deepEqual(ms[0], { month: "2026-09", actualKm: 100, ratedKm: 105, trips: 1, ratio: 0.952 });
+  assert.equal(ms[1].ratio, 0.9);
+  assert.equal(res.json.avgRatio, 0.927); // 190/205
+});
+
+test("GET /api/trips/efficiency-profile：个人最佳 + 温度/速度分箱（里程加权）", async () => {
+  const { app } = buildTestApp({ db: tripsFakeDb() });
+  const res = await fetchApp(app, "GET", "/api/trips/efficiency-profile", { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.samples, 4);
+  // 最佳：60km @ 55km表显 × 0.152 → 139 Wh/km，20°C 均 60 km/h
+  assert.equal(res.json.best.whPerKm, 139);
+  assert.equal(res.json.best.tempC, 19);
+  assert.equal(res.json.best.avgSpeedKmh, 60);
+  // 温度箱：10~20°C = r1(160,100km)+r2(139,60km) 里程加权 → 152
+  assert.equal(res.json.tempBins.find((b) => b.label === "10~20°C").whPerKm, 152);
+  assert.equal(res.json.tempBins.find((b) => b.label === "0~10°C").whPerKm, 228);
+  // 速度箱：60km/h 的两程落 60~80 → 152；100km/h 落 80+ → 167
+  assert.equal(res.json.speedBins.find((b) => b.label === "60~80 km/h").whPerKm, 152);
+  assert.equal(res.json.speedBins.find((b) => b.label === "80+ km/h").whPerKm, 167);
+});
+
+test("maintenance：默认配置 GET → PUT 持久化 → 到期判定；非法值 400", async () => {
+  const savedKv = {};
+  const store = { kvGet: (k) => savedKv[k] ?? null, kvPut: (k, v) => { savedKv[k] = v; } };
+  const db = createFakeDb((sql) => (/FROM cars c/.test(sql) ? [{ id: 1, odometer_km: 24560 }] : []));
+  const routes = createMaintenanceRoutes({ db, store });
+  // 默认：两项，lastAtKm 未设 → dueInKm null
+  const got = await routes.get({ query: {} });
+  assert.equal(got.odometerKm, 24560);
+  assert.equal(got.items.length, 2);
+  assert.equal(got.items[0].label, "轮胎换位");
+  assert.equal(got.items.every((i) => i.dueInKm == null), true);
+  // PUT：换位上次 20000km → 剩 10000-(24560-20000)=5440；更换周期改 30000
+  await routes.put({ body: { items: [{ key: "tireRotate", lastAtKm: 20000 }, { key: "tireReplace", intervalKm: 30000 }] } });
+  const got2 = await routes.get({ query: {} });
+  assert.equal(got2.items.find((i) => i.key === "tireRotate").dueInKm, 5440);
+  assert.equal(got2.items.find((i) => i.key === "tireRotate").due, false);
+  assert.equal(got2.items.find((i) => i.key === "tireReplace").intervalKm, 30000);
+  // 已到期：换位周期 2000、上次 22000 → 2000-2560 = -560
+  await routes.put({ body: { items: [{ key: "tireRotate", intervalKm: 2000, lastAtKm: 22000 }] } });
+  const got3 = await routes.get({ query: {} });
+  assert.equal(got3.items.find((i) => i.key === "tireRotate").dueInKm, -560);
+  assert.equal(got3.items.find((i) => i.key === "tireRotate").due, true);
+  // 校验：intervalKm 越界 400
+  await assert.rejects(
+    () => routes.put({ body: { items: [{ key: "tireRotate", intervalKm: 10 }] } }),
+    (e) => e.status === 400,
+  );
+  // 未知 key 静默忽略
+  await routes.put({ body: { items: [{ key: "hack", intervalKm: 1000 }] } });
+  assert.equal(JSON.parse(savedKv["maintenance:items"]).length, 2);
 });

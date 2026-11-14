@@ -422,7 +422,7 @@ export function createBarkChannel({ fetchImpl = globalThis.fetch, logger = () =>
 // ---- Notifier 门面：矩阵化 dispatch + SLA 埋点 -------------------------------
 
 export const PUSH_EVENTS = [
-  "tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly", "annual",
+  "tripEnd", "chargingStart", "chargingDone", "daily", "weekly", "monthly", "annual", "maintenance",
   // P2 告警事件群(不受 quietHours 静音约束;默认 webpush/telegram/feishu 全开)
   "outage", "chargeInterrupt", "tirePressure", "batteryLow"
 ];
@@ -509,6 +509,7 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       case "weekly": return `每周用车周报${carSuffix}`;
       case "monthly": return `每月账本月报${carSuffix}`;
       case "annual": return `每年账本年报${carSuffix}`;
+      case "maintenance": return `🔧 保养提醒${carSuffix}`;
       case "outage": return `⚠ 数据断联 · ${ts}`;
       case "outage_recovered": return `✅ 数据已恢复 · ${ts}`;
       case "chargeInterrupt": return `⚠ 充电提前中止 · ${ts}${carSuffix}`;
@@ -593,6 +594,14 @@ export function createNotifier({ state, eventLog, feishu = null, telegram = null
       if (event.locationName) bits.push(`📍 ${event.locationName}`);
       if (event.estimate) bits.push(`⏱ ${event.estimate}`);
       return bits.join("\n");
+    }
+    if (event.type === "maintenance") {
+      // v2.5 保养里程提醒：逐项列出到期状态（巡检只在有到期项时推送）
+      const lines = (Array.isArray(event.items) ? event.items : []).map((it) =>
+        `${it.dueInKm <= 0 ? `⚠️ ${it.label} 已超 ${Math.abs(it.dueInKm).toLocaleString()} km` : `${it.label} 还剩 ${it.dueInKm.toLocaleString()} km`}（间隔 ${it.intervalKm.toLocaleString()} km）`
+      );
+      if (event.odometerKm != null) lines.push(`📊 当前里程 ${Math.round(event.odometerKm).toLocaleString()} km`);
+      return lines.length ? lines.join("\n") : "有保养项到期";
     }
     if (event.type === "batteryLow") {
       // v2.5 低电量告警：静置掉电场景（充电中不触发），提示补电防深度放电

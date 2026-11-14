@@ -327,6 +327,120 @@ export function createTripsRoutes({ db, state }) {
       };
     },
 
+    /** GET /api/trips/display-accuracy?months=12&carId —— 表显 vs 实际偏差月趋势（v2.5）。
+     *  "表显掉 1 km 实际能跑多少 km"：实际里程 ÷ 表显续航消耗，按月聚合。
+     *  ratio>100 = 实际比表显耐跑；<90 = 表显偏乐观（长期走低是电池虚的信号，官方 App 不给这个）。
+     *  样本守卫：单月表显消耗合计 <50 km 的月剔除（挪车微行程噪声）。 */
+    async displayAccuracy(ctx) {
+      const months = Math.max(6, Math.min(24, Number(ctx.query.months) || 12));
+      const carId = carIdFromQuery(ctx, state);
+      const since = new Date(Date.now() - months * 31 * 86400_000).toISOString();
+      const rows = await db.query(`
+        SELECT d.end_date AS end_at,
+               d.distance::float8 AS distance_km,
+               GREATEST(d.start_rated_range_km - d.end_rated_range_km, 0)::float8 AS rated_used_km
+        FROM drives d
+        WHERE d.end_date IS NOT NULL AND d.end_date >= ('${since}'::timestamptz AT TIME ZONE 'UTC')
+          ${carFilterSql(carId)}
+      `).catch(() => []);
+      const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: state.settings?.timezone || "Asia/Shanghai", year: "numeric", month: "2-digit" });
+      const msOfEnd = (v) => {
+        if (v instanceof Date) return v.getTime();
+        const s = String(v);
+        return new Date(/[Z+]|T\d{2}:\d{2}:\d{2}/.test(s) ? s : `${s}Z`).getTime(); // teslamate naive-UTC
+      };
+      const byMonth = new Map();
+      for (const r of rows) {
+        const ms = msOfEnd(r.end_at);
+        if (!Number.isFinite(ms)) continue;
+        const key = fmt.format(new Date(ms));
+        const cur = byMonth.get(key) || { actual: 0, rated: 0, trips: 0 };
+        cur.actual += finiteNumber(r.distance_km) || 0;
+        cur.rated += finiteNumber(r.rated_used_km) || 0;
+        cur.trips += 1;
+        byMonth.set(key, cur);
+      }
+      const out = [];
+      let totalActual = 0, totalRated = 0;
+      for (const [month, v] of [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        if (v.rated < 50) continue;
+        totalActual += v.actual;
+        totalRated += v.rated;
+        out.push({ month, actualKm: round(v.actual, 1), ratedKm: round(v.rated, 1), trips: v.trips, ratio: round(v.actual / v.rated, 3) });
+      }
+      return { months: out.slice(-months), avgRatio: totalRated > 0 ? round(totalActual / totalRated, 3) : null };
+    },
+
+    /** GET /api/trips/efficiency-profile?days=365&carId —— 能效画像（v2.6，车主第一关注）。
+     *  回答两件事：①我的最佳战绩是什么条件（Wh/km 最低的一程 + 当时温度/均速）
+     *  ②什么情况下能耗最低——温度/均速分箱的加权平均 Wh/km（冷天热泵、高速风阻一目了然）。
+     *  能耗口径与全站一致：表显续航消耗 × 车辆效率；短程(<1km)与离群值(50~400 Wh/km 外)剔除。 */
+    async efficiencyProfile(ctx) {
+      const days = Math.max(90, Math.min(730, Number(ctx.query.days) || 365));
+      const carId = carIdFromQuery(ctx, state);
+      const since = new Date(Date.now() - days * 86400_000).toISOString();
+      const rows = await db.query(`
+        SELECT d.end_date AS end_at, d.distance::float8 AS distance_km, d.duration_min::float8 AS duration_min,
+               d.outside_temp_avg::float8 AS temp_c,
+               GREATEST(d.start_rated_range_km - d.end_rated_range_km, 0)::float8 AS rated_used_km,
+               c.efficiency::float8 AS efficiency
+        FROM drives d JOIN cars c ON c.id = d.car_id
+        WHERE d.end_date IS NOT NULL AND d.distance >= 1 AND d.end_date >= ('${since}'::timestamptz AT TIME ZONE 'UTC')
+          ${carFilterSql(carId).replace(/^\s*AND\s+/i, "AND ")}
+      `).catch(() => []);
+      const msOf = (v) => (v instanceof Date ? v.getTime() : new Date(/[Z+]/.test(String(v)) ? v : `${v}Z`).getTime());
+      const trips = [];
+      for (const r of rows) {
+        const km = finiteNumber(r.distance_km);
+        const eff = finiteNumber(r.efficiency);
+        const rated = finiteNumber(r.rated_used_km);
+        if (km == null || !eff || rated == null || rated <= 0) continue;
+        const whPerKm = rated * eff / km * 1000;
+        if (whPerKm < 50 || whPerKm > 400) continue;
+        const dur = finiteNumber(r.duration_min);
+        const temp = finiteNumber(r.temp_c);
+        trips.push({
+          whPerKm: Math.round(whPerKm),
+          km,
+          tempC: temp,
+          avgSpeedKmh: dur && dur > 0 ? Math.round(km / (dur / 60)) : null,
+          endMs: msOf(r.end_at),
+        });
+      }
+      // 个人最佳：≥5km 的行程里 Wh/km 最低的一程（短程能耗噪声大）
+      let best = null;
+      for (const t of trips) {
+        if (t.km < 5) continue;
+        if (!best || t.whPerKm < best.whPerKm) best = t;
+      }
+      // 分箱（加权平均按里程加权——长途占比更真实）
+      const bin = (defs, pick, labelOf) => {
+        const acc = defs.map(() => ({ wh: 0, km: 0, n: 0 }));
+        for (const t of trips) {
+          const v = pick(t);
+          if (v == null) continue;
+          const i = defs.findIndex(([lo, hi]) => v >= lo && v < hi);
+          if (i === -1) continue;
+          acc[i].wh += t.whPerKm * t.km;
+          acc[i].km += t.km;
+          acc[i].n += 1;
+        }
+        return acc.map((a, i) => ({ label: labelOf(defs[i]), whPerKm: a.km > 0 ? Math.round(a.wh / a.km) : null, count: a.n }));
+      };
+      const TEMP_BINS = [[-99, 0], [0, 10], [10, 20], [20, 30], [30, 99]];
+      const SPEED_BINS = [[0, 40], [40, 60], [60, 80], [80, 999]];
+      return {
+        days,
+        samples: trips.length,
+        best: best ? {
+          whPerKm: best.whPerKm, distanceKm: round(best.km, 1), tempC: best.tempC,
+          avgSpeedKmh: best.avgSpeedKmh, at: Number.isFinite(best.endMs) ? new Date(best.endMs).toISOString() : null,
+        } : null,
+        tempBins: bin(TEMP_BINS, (t) => t.tempC, ([lo, hi]) => (lo === -99 ? `<${hi}°C` : hi === 99 ? `${lo}°C+` : `${lo}~${hi}°C`)),
+        speedBins: bin(SPEED_BINS, (t) => t.avgSpeedKmh, ([lo, hi]) => (hi === 999 ? `${lo}+ km/h` : `${lo}~${hi} km/h`)),
+      };
+    },
+
     /** GET /api/trips/route-summary?from&to&carId —— 区间内行驶轨迹汇总（Grafana trip.json 地图提炼）。
      *  v0.3.1 重写：按 drive 分组抽样、每段 ≤10 点（含首尾），返回 segments 由前端逐段画线。
      *  旧版全局取模抽样把不同行程串成一条 polyline → 满屏跨城"飞线"（蜘蛛网），已废。
@@ -485,9 +599,55 @@ export function createTripsRoutes({ db, state }) {
         if (first?.v != null && last?.v != null) soc = { start: first.v, end: last.v };
       } catch { /* positions 缺列时忽略 */ }
 
+      // 急刹次数 + 行程内胎压变化（v2.6，车主核心关注）：positions 逐点速度差分 +
+      // 首/末 TPMS 读数。急刹 = 降速 ≥8 km/h/s（≈2.2 m/s²），同一次刹车多采样去重：
+      // 触发后须待减速 <3 km/h/s 才重新武装。速度数据缺失 → null。
+      let hardBraking = null;
+      let tirePressureChange = null;
+      try {
+        const rows = await db.query(`
+          SELECT p.date, p.speed::float8 AS speed,
+                 p.tpms_pressure_fl::float8 AS fl, p.tpms_pressure_fr::float8 AS fr,
+                 p.tpms_pressure_rl::float8 AS rl, p.tpms_pressure_rr::float8 AS rr
+          FROM positions p WHERE p.drive_id = $1
+          ORDER BY p.date ASC, p.id ASC
+        `, [drive.id]);
+        const msOf = (v) => (v instanceof Date ? v.getTime() : new Date(/[Z+]/.test(String(v)) ? v : `${v}Z`).getTime());
+        let armed = true;
+        for (let i = 1; i < rows.length; i++) {
+          const v1 = finiteNumber(rows[i - 1]?.speed);
+          const v2 = finiteNumber(rows[i]?.speed);
+          if (v1 == null || v2 == null) continue;
+          const dt = (msOf(rows[i].date) - msOf(rows[i - 1].date)) / 1000;
+          if (dt <= 0 || dt > 5) continue;
+          const decel = (v1 - v2) / dt;
+          if (decel >= 8) {
+            if (armed) { hardBraking = (hardBraking ?? 0) + 1; armed = false; }
+          } else if (decel < 3) {
+            armed = true;
+          }
+        }
+        const tpmsAvg = (r) => {
+          const vals = [r?.fl, r?.fr, r?.rl, r?.rr].map(finiteNumber).filter((v) => v != null);
+          return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+        };
+        let firstTp = null, lastTp = null;
+        for (const r of rows) { if (tpmsAvg(r) != null) { firstTp ??= r; lastTp = r; } }
+        if (firstTp && lastTp && rows.length) {
+          const startAvg = tpmsAvg(firstTp), endAvg = tpmsAvg(lastTp);
+          tirePressureChange = {
+            start: { fl: finiteNumber(firstTp.fl), fr: finiteNumber(firstTp.fr), rl: finiteNumber(firstTp.rl), rr: finiteNumber(firstTp.rr) },
+            end: { fl: finiteNumber(lastTp.fl), fr: finiteNumber(lastTp.fr), rl: finiteNumber(lastTp.rl), rr: finiteNumber(lastTp.rr) },
+            deltaBar: startAvg != null && endAvg != null ? round(endAvg - startAvg, 2) : null,
+          };
+        }
+      } catch { /* positions 缺列时忽略 */ }
+
       return {
         ...view,
         soc,
+        hardBraking,
+        tirePressureChange,
         route: polyline.map((p) => ({ t: p.t, lat: p.lat, lng: p.lng, speed: p.speed ?? null, elevation: p.elevation ?? null })),
         positionCount: points.length,
         fifo: {

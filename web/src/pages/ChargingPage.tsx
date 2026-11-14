@@ -499,6 +499,19 @@ export default function ChargingPage() {
                   </section>
                 )}
 
+                {/* 同站均价对比（v2.5）：与推送 charging_done 同款——"这个站是不是涨价了" */}
+                {detail.priceCmp && (
+                  <section className="mb-4 rounded-xl bg-white/[0.03] p-4" data-testid="price-cmp">
+                    <p className="num text-xs text-slate-300">
+                      📊 {t('charging.priceCmp', '较本站近 {n} 次均价').replace('{n}', String(detail.priceCmp.samples))}
+                      <span className={`ml-1.5 font-semibold ${detail.priceCmp.pct > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {detail.priceCmp.pct > 0 ? '+' : ''}{detail.priceCmp.pct}%
+                      </span>
+                      <span className="ml-1.5 text-slate-500">（{getCurrencySymbol()}{detail.priceCmp.avgPrice}/kWh）</span>
+                    </p>
+                  </section>
+                )}
+
                 {/* 录入实付电费（AC-7.6/7.1 第①层） */}
                 <section className="rounded-xl border border-emerald-400/20 bg-emerald-400/[0.04] p-4" data-testid="cost-override">
                   <h3 className="mb-1 flex items-center gap-1.5 text-xs font-medium text-emerald-400">

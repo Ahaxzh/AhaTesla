@@ -108,6 +108,29 @@ export default function TripDetailPage() {
                 🔋 {trip.soc.start}% <span className="text-slate-500">→</span> {trip.soc.end}%
               </span>
             )}
+            {/* 急刹次数（v2.6）：降速 ≥8km/h/s 差分判定 */}
+            {trip.hardBraking != null && (
+              <span
+                className={`num rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs ${trip.hardBraking > 2 ? 'text-amber-400' : 'text-slate-300'}`}
+                data-testid="trip-braking"
+                title={t('tripDetail.brakingNote', '降速 ≥8 km/h/s 判定，同一次刹车不重复计')}
+              >
+                🛑 {t('tripDetail.braking', '急刹')} {trip.hardBraking}
+              </span>
+            )}
+            {/* 行程内胎压变化（v2.6）：行驶升温升压 */}
+            {trip.tirePressureChange && trip.tirePressureChange.deltaBar != null && (
+              <span
+                className="num rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs text-slate-300"
+                data-testid="trip-tp-change"
+                title={t('tripDetail.tpChangeNote', '行程首/末 TPMS 对比——行驶升温胎压会自然上升')}
+              >
+                🛞 {trip.tirePressureChange.start.fl?.toFixed(1) ?? '--'} → {trip.tirePressureChange.end.fl?.toFixed(1) ?? '--'} bar
+                <span className={trip.tirePressureChange.deltaBar >= 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                  {' '}({trip.tirePressureChange.deltaBar >= 0 ? '+' : ''}{trip.tirePressureChange.deltaBar.toFixed(2)})
+                </span>
+              </span>
+            )}
             {/* 口径标注（AC-6.3） */}
             <span className="text-[11px] text-slate-400" data-testid="energy-formula-note">
               {t('tripDetail.energyNote', '耗电口径：基于起止表显续航差 × 车辆效率系数')}

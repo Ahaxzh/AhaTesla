@@ -31,7 +31,7 @@ describe('SettingsPage', () => {
     expect(screen.queryByLabelText('当前密码')).not.toBeInTheDocument()
   })
 
-  it('分区结构：外观/车辆/账本/电价/AI/推送/系统/安全 八分区，导航与卡片一一对应', async () => {
+  it('分区结构：外观/车辆/账本/电价/推送/保养/AI/系统/安全 九分区，导航与卡片一一对应', async () => {
     renderWithProviders(<SettingsPage />)
     // 八分区卡片齐备
     expect(await screen.findByTestId('settings-appearance')).toBeInTheDocument()
@@ -45,7 +45,7 @@ describe('SettingsPage', () => {
     // 导航锚点与分区一一对应（桌面 aside + 移动横向 两份导航都要 8 项）
     const navs = screen.getAllByTestId('settings-nav')
     expect(navs).toHaveLength(2)
-    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(8)
+    for (const nav of navs) expect(nav.querySelectorAll('a')).toHaveLength(9)
     // 去重回归：数据源健康小卡已并入系统分区，设置页不再出现
     expect(screen.queryByText('累计行程')).not.toBeInTheDocument()
     expect(screen.queryByTestId('resync-meta')).not.toBeInTheDocument()
@@ -72,14 +72,15 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(savedBody).toMatchObject({ primaryCarId: 2, carAliases: { '2': '老婆的Y' } }))
   })
 
-  it('推送分区（v0.3 事件级总开关）：11 事件各一个 Toggle，副行显示启用渠道；关=全静音', async () => {
+  it('推送分区（v0.3 事件级总开关）：12 事件各一个 Toggle，副行显示启用渠道；关=全静音', async () => {
     const user = userEvent.setup()
     renderWithProviders(<SettingsPage />)
     await openSection(user, 'push')
     // 列表要等 pushRules 查询返回（此前是骨架屏）
     const list = await screen.findByTestId('push-matrix-list')
     // 11 行事件 Toggle 全渲染（含每日早报、告警四行与年报）
-    expect(within(list).getAllByTestId(/^push-event-toggle-/).length).toBe(11)
+    expect(within(list).getAllByTestId(/^push-event-toggle-/).length).toBe(12)
+    expect(within(list).getByText('保养到期提醒')).toBeInTheDocument()
     expect(within(list).getByText('每日早报')).toBeInTheDocument()
     expect(within(list).getByText('数据断联告警')).toBeInTheDocument()
     expect(within(list).getByText('充电提前中止')).toBeInTheDocument()
@@ -192,5 +193,29 @@ describe('SettingsPage', () => {
     // 侧栏高亮同步切到 security
     const desktopNav = screen.getAllByTestId('settings-nav')[0]
     expect(desktopNav.querySelector('a[href="#settings-security"]')?.className).toContain('text-white')
+  })
+})
+
+describe('保养提醒分区（v2.6）', () => {
+  it('显示两项配置 + 到期状态；输入上次里程保存后 PUT', async () => {
+    const user = userEvent.setup()
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/maintenance', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    renderWithProviders(<SettingsPage />)
+    await openSection(user, 'maintenance')
+    // msw fixture：换位还剩 5440 km；更换未填上次里程
+    expect(await screen.findByTestId('maintenance-status-tireRotate')).toHaveTextContent('还剩 5,440 km')
+    expect(screen.getByTestId('maintenance-status-tireReplace')).toHaveTextContent('先填上次保养里程')
+    const last = screen.getByTestId('maintenance-last-tireRotate')
+    await user.clear(last)
+    await user.type(last, '21000')
+    await user.click(screen.getByTestId('maintenance-save'))
+    await waitFor(() => expect(bodies.length).toBe(1))
+    expect(JSON.stringify(bodies[0])).toContain('"lastAtKm":21000')
   })
 })

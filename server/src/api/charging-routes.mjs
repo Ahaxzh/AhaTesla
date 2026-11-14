@@ -3,6 +3,7 @@ import { HttpError } from "./http-kit.mjs";
 import { listCharging, countCharging, listChargingForStats, getChargingProcessById, getChargesCurve } from "../core/teslamate-queries.mjs";
 import { carIdFromQuery } from "./car-scope.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
+import { stationPriceCmp } from "../core/event-enrichment.mjs";
 import { pricingOptionsFor, overridesMapFromStore, instanceTimezone } from "../core/pricing-options.mjs";
 import { isoFromTeslaMate, round, finiteNumber, wallClockToUtcMs } from "../core/util.mjs";
 
@@ -157,12 +158,17 @@ export function createChargingRoutes({ db, state, getStore }) {
         };
       }
 
+      // 同站近 5 次均价对比（v2.5）：与推送 charging_done 同款——
+      // "这个站是不是涨价了"此前只能翻推送记录，Web 模态补齐
+      const priceCmp = await stationPriceCmp(db, state, row).catch(() => null);
+
       return {
         ...view,
         powerCurve,
         maxKw,
         maxKwSoc,
         efficiency,
+        priceCmp,
         overrideCost: options.overrides?.has(id) ? options.overrides.get(id) : null
       };
     },

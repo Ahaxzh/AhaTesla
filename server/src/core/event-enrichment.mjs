@@ -229,6 +229,30 @@ export async function enrichTripEndEvent(db, event, opts = {}) {
   };
 }
 
+/** P1-d 同站近 5 次有效均价对比（不含本次；同车；分层计价:实付 > 围栏价/TOU > 默认价）。
+ *  row 需含 { id, geofence_id, car_id, charge_energy_added }；返回 { pct, avgPrice, samples } | null。
+ *  v2.5 起充电详情模态复用——推送有、Web 没有的能力倒挂修复。 */
+export async function stationPriceCmp(db, state, row) {
+  if (row?.geofence_id == null) return null;
+  try {
+    const carId = Number.isInteger(Number(row.car_id)) ? Number(row.car_id) : null;
+    const sessions = await listChargingForStats(db, { carId });
+    const priceOpts = await pricingOptionsFor(db, state);
+    const priceOf = (s) => priceChargingSession(s, null, priceOpts)?.pricePerUnit ?? null;
+    const thisPrice = priceOf(row);
+    const past = sessions
+      .filter((s) => Number(s.geofence_id) === Number(row.geofence_id)
+        && Number(s.id) !== Number(row.id)
+        && Number(s.car_id ?? 0) === Number(row.car_id ?? 0))
+      .slice(-5)
+      .map(priceOf)
+      .filter((v) => v != null && v > 0);
+    if (thisPrice == null || thisPrice <= 0 || past.length < 2) return null;
+    const avg = past.reduce((s, v) => s + v, 0) / past.length;
+    return { pct: round((thisPrice - avg) / avg * 100, 0), avgPrice: round(avg, 3), samples: past.length };
+  } catch { return null; }
+}
+
 /** 充电完成事件富化：补温度/电量/能耗/费用 + P1-d 同站近 5 次均价对比与提前中止标记。
  *  opts：{state} 提供时按四层回退计价并带出「充入 X kWh · ¥Y」（模板字段此前从未填充）。 */
 export async function enrichChargingDoneEvent(db, event, opts = {}) {
@@ -272,26 +296,9 @@ export async function enrichChargingDoneEvent(db, event, opts = {}) {
       } catch { /* 计价失败省略 */ }
     }
 
-    // P1-d 同站近 5 次有效均价对比（不含本次；同车；分层计价:实付 > 围栏价/TOU > 默认价）
-    if (r.geofence_id != null) {
-      try {
-        const sessions = await listChargingForStats(db, { carId: Number.isInteger(Number(r.car_id)) ? Number(r.car_id) : null });
-        const priceOpts = await pricingOptionsFor(db, opts.state);
-        const priceOf = (s) => priceChargingSession(s, null, priceOpts)?.pricePerUnit ?? null;
-        const thisPrice = priceOf({ ...r, charge_energy_added: r.added });
-        const past = sessions
-          .filter((s) => Number(s.geofence_id) === Number(r.geofence_id)
-            && Number(s.id) !== id
-            && Number(s.car_id ?? 0) === Number(r.car_id ?? 0))
-          .slice(-5)
-          .map(priceOf)
-          .filter((v) => v != null && v > 0);
-        if (thisPrice != null && thisPrice > 0 && past.length >= 2) {
-          const avg = past.reduce((s, v) => s + v, 0) / past.length;
-          out.priceCmpPct = round((thisPrice - avg) / avg * 100, 0);
-        }
-      } catch { /* 对比不可得 → 省略 */ }
-    }
+    // P1-d 同站近 5 次有效均价对比（v2.5 抽出共享：充电详情模态同款）
+    const cmp = await stationPriceCmp(db, opts.state, { ...r, id, charge_energy_added: r.added });
+    if (cmp) out.priceCmpPct = cmp.pct;
     return out;
   } catch {
     return event;

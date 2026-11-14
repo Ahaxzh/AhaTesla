@@ -12,6 +12,7 @@ import {
   Settings as SettingsIcon,
   Sparkles,
   Tag,
+  Wrench,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCar } from '@/contexts/CarContext'
@@ -44,6 +45,7 @@ const EVENTS: { id: PushEventId; labelKey: string; label: string; descKey: strin
   { id: 'weekly', labelKey: 'settings.ev.weekly', label: '每周周报', descKey: 'settings.ev.weekly.desc', desc: '每周一 08:00 汇总上周' },
   { id: 'monthly', labelKey: 'settings.ev.monthly', label: '每月月报', descKey: 'settings.ev.monthly.desc', desc: '每月 1 日 08:00 汇总上月' },
   { id: 'annual', labelKey: 'settings.ev.annual', label: '每年年报', descKey: 'settings.ev.annual.desc', desc: '每年 1 月 1 日汇总上年(含年度之最)' },
+  { id: 'maintenance', labelKey: 'settings.ev.maintenance', label: '保养到期提醒', descKey: 'settings.ev.maintenance.desc', desc: '提醒 · 保养项里程到期时提醒(7 天一次)' },
 ]
 
 /** 事件默认行（与服务端 defaultMatrix 同口径）：存量矩阵缺行时回退默认。
@@ -116,6 +118,7 @@ function SettingsNav({ active }: { active: string }) {
     { id: 'pricing', label: t('settings.nav.pricing', '电价'), icon: Tag },
     { id: 'ledger', label: t('settings.nav.ledger', '账本参数'), icon: Calculator },
     { id: 'push', label: t('settings.nav.push', '推送'), icon: BellRing },
+    { id: 'maintenance', label: t('settings.nav.maintenance', '保养提醒'), icon: Wrench },
     { id: 'ai', label: t('settings.nav.ai', 'AI 助手'), icon: Sparkles },
     { id: 'cars', label: t('settings.nav.cars', '车辆'), icon: Car },
     { id: 'system', label: t('settings.nav.system', '系统'), icon: Activity },
@@ -138,6 +141,101 @@ function SettingsNav({ active }: { active: string }) {
         </a>
       ))}
     </nav>
+  )
+}
+
+/** 保养提醒分区（v2.6）——特斯拉没有保养灯：轮胎换位/更换的里程周期 + 到期状态 + 推送（server 巡检 7 天节流） */
+function MaintenanceSection({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const { t } = useI18n()
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+  const { data } = useQuery({ queryKey: ['maintenance'], queryFn: () => api.maintenanceGet(), retry: false })
+  const [inputs, setInputs] = useState<Record<string, { intervalKm?: string; lastAtKm?: string }>>({})
+  useEffect(() => {
+    if (!data) return
+    setInputs((prev) => {
+      const next = { ...prev }
+      for (const item of data.items) {
+        next[item.key] ??= { intervalKm: String(item.intervalKm), lastAtKm: item.lastAtKm != null ? String(item.lastAtKm) : '' }
+      }
+      return next
+    })
+  }, [data])
+  const save = useMutation({
+    mutationFn: () => {
+      const items = (data?.items ?? []).map((item) => {
+        const edit = inputs[item.key] ?? {}
+        return {
+          key: item.key,
+          intervalKm: edit.intervalKm != null && edit.intervalKm !== '' ? Number(edit.intervalKm) : undefined,
+          lastAtKm: edit.lastAtKm === '' ? null : edit.lastAtKm != null ? Number(edit.lastAtKm) : undefined,
+        }
+      })
+      return api.maintenancePut(items)
+    },
+    onSuccess: () => {
+      toast(t('maintenance.saved', '保养配置已保存'), 'success')
+      void queryClient.invalidateQueries({ queryKey: ['maintenance'] })
+    },
+    onError: (err) => toast(err.message, 'error'),
+  })
+  return (
+    <CollapseCard id="maintenance" icon={Wrench} title={t('settings.nav.maintenance', '保养提醒')} summary={data?.odometerKm != null ? `${Math.round(data.odometerKm).toLocaleString()} km` : undefined} open={open} onToggle={onToggle} testid="settings-maintenance">
+      <p className="section-desc mt-1">
+        {t('maintenance.desc', '按里程周期的保养提醒（推送 7 天一次，到期才发）——特斯拉没有保养灯')}
+        {data?.odometerKm != null && <span className="num"> · {t('maintenance.odometer', '当前里程')} {Math.round(data.odometerKm).toLocaleString()} km</span>}
+      </p>
+      {data && (
+        <>
+          <div className="mt-2 divide-y divide-white/[0.05]">
+            {data.items.map((item) => (
+              <div key={item.key} data-testid={`maintenance-item-${item.key}`}>
+                <div className="flex items-center justify-between gap-3 pt-3">
+                  <span className="text-[13px] text-slate-200">{item.label}</span>
+                  <span className={`num shrink-0 text-xs ${item.due ? 'font-semibold text-amber-400' : 'text-slate-400'}`} data-testid={`maintenance-status-${item.key}`}>
+                    {item.dueInKm == null
+                      ? t('maintenance.setLastFirst', '先填上次保养里程')
+                      : item.due
+                        ? t('maintenance.overdue', '已超 {n} km').replace('{n}', Math.abs(item.dueInKm).toLocaleString())
+                        : t('maintenance.left', '还剩 {n} km').replace('{n}', item.dueInKm.toLocaleString())}
+                  </span>
+                </div>
+                <div className="mb-3 mt-2 flex flex-wrap gap-2">
+                  <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                    {t('maintenance.interval', '间隔')}
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      className="input-dark num !w-24 !py-1"
+                      value={inputs[item.key]?.intervalKm ?? ''}
+                      onChange={(e) => setInputs((p) => ({ ...p, [item.key]: { ...p[item.key], intervalKm: e.target.value } }))}
+                      data-testid={`maintenance-interval-${item.key}`}
+                    />
+                    km
+                  </label>
+                  <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                    {t('maintenance.lastAt', '上次')}
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="--"
+                      className="input-dark num !w-28 !py-1"
+                      value={inputs[item.key]?.lastAtKm ?? ''}
+                      onChange={(e) => setInputs((p) => ({ ...p, [item.key]: { ...p[item.key], lastAtKm: e.target.value } }))}
+                      data-testid={`maintenance-last-${item.key}`}
+                    />
+                    km
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button className="btn-primary" onClick={() => save.mutate()} disabled={save.isPending} data-testid="maintenance-save">
+            {t('common.save', '保存')}
+          </button>
+        </>
+      )}
+    </CollapseCard>
   )
 }
 
@@ -664,6 +762,9 @@ export default function SettingsPage() {
               </div>
             )}
           </CollapseCard>
+
+          {/* ===== 分区3.5：保养提醒（v2.6，特斯拉没有保养灯） ===== */}
+          <MaintenanceSection open={openSections.has('maintenance')} onToggle={() => toggleSection('maintenance')} />
 
           {/* ===== 分区4：AI 助手（BYO 模型，可选） ===== */}
           <CollapseCard id="ai" icon={Sparkles} title={t('settings.nav.ai', 'AI 助手')} summary={aiCfg ? (aiCfg.enabled ? t('settings.ai.polishOn', 'AI 润色已开启') : t('settings.ai.builtinTemplate', '使用内置模板')) : undefined} open={openSections.has('ai')} onToggle={() => toggleSection('ai')} testid="settings-ai">

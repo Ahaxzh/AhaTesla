@@ -114,7 +114,7 @@ test("checkBatteryLow:低于阈值且未充电 → 告警;充电中/正常/无�
 
 // ---- 11×6 矩阵（v2.5 +batteryLow 告警 +annual 年报） ----
 test("矩阵 11 事件 × 6 渠道;告警四事件默认 webpush/telegram/feishu 开;outage_recovered 复用 outage 行", () => {
-  assert.equal(PUSH_EVENTS.length, 11);
+  assert.equal(PUSH_EVENTS.length, 12);
   const m = defaultMatrix();
   for (const ev of ["outage", "chargeInterrupt", "tirePressure", "batteryLow"]) {
     assert.deepEqual(

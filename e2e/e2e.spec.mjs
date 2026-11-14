@@ -76,6 +76,15 @@ test("行程页：列表加载、分页、详情路线", async ({ page }) => {
     await expect(soc).toContainText(/%/);
     await expect(soc).toContainText(/→/);
   }
+  // v2.6 急刹 / 行程内胎压变化胶囊（数据可得才渲染）
+  const brake = page.getByTestId("trip-braking");
+  if (await brake.isVisible().catch(() => false)) {
+    await expect(brake).toContainText(/急刹|Hard/);
+  }
+  const tpChange = page.getByTestId("trip-tp-change");
+  if (await tpChange.isVisible().catch(() => false)) {
+    await expect(tpChange).toContainText(/bar/);
+  }
   const empty = await page.locator("[data-testid='route-map-empty']").isVisible().catch(() => false);
   if (!empty) {
     // preferCanvas: true → 轨迹画在 canvas（svg 仅在无 canvas 渲染器时出现）
@@ -256,6 +265,11 @@ test("行程页：顶部汇总（KPI/每日活跃柱状图/轨迹图）+ 无限�
   if (await overview.isVisible().catch(() => false)) {
     await expect(page.getByTestId("trip-daily-activity")).toBeVisible();
     await expect(overview).toContainText(/km/);
+  }
+  // v2.6 能效画像卡（样本充足才渲染；条件断言同电池健康卡模式）
+  const eff = page.getByTestId("trip-efficiency-card");
+  if (await eff.isVisible().catch(() => false)) {
+    await expect(eff).toContainText(/Wh\/km|按气温/);
   }
   // 无限滚动：滚到底触发加载（真实库 90 天通常 >20 条；滚动后条数增加或已显示全部）
   const before = await page.getByTestId("trip-item").count();

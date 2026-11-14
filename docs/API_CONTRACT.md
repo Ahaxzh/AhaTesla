@@ -59,14 +59,17 @@
 - `GET /api/dashboard/heatmap`（v2.1 新增，P2 模块4）→ {days:[{date:"YYYY-MM-DD", distanceKm}], maxKm}（最近 90 天按实例时区聚合，date 为本地日期）
 - `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
 - `GET /api/trips/overview?from=ISO&to=ISO` → {tripCount, distanceKm, durationMin, energyKwh, costCny, maxSpeedKmh, stateShare:{driveMin, chargeMin, parkedMin}, daily:{bucket:"day"|"week", points:[{date:"YYYY-MM-DD", driveMin, chargeMin, trips}]}}（v0.3 行程页顶部汇总 + v0.4 时间分布改每日活跃柱状图：能耗电费与列表同 FIFO 口径；stateShare 为时长 SUM 近似（驻车=区间−行驶−充电，仅作小字）；daily 供柱状图——按**结束时刻**归日（实例时区，同 heatmap 口径）、区间 ≤150 天按日零填充、更长自动按周聚合（周一起，date=桶起始日）防长区间点数爆炸）
+- `GET /api/trips/display-accuracy?months=12&carId`（**v2.5**）→ {months:[{month:"YYYY-MM",actualKm,ratedKm,trips,ratio}],avgRatio}（表显 vs 实际：实际里程 ÷ 表显续航消耗按月聚合，ratio>100=跑赢表显；单月表显消耗 <50km 剔除；months 6~24 钳制）
+- `GET /api/trips/efficiency-profile?days=365&carId`（**v2.6** 能效画像）→ {days,samples,best:{whPerKm,distanceKm,tempC,avgSpeedKmh,at}|null,tempBins:[{label,whPerKm,count}],speedBins:[...]}（个人最佳 = ≥5km 行程最低 Wh/km 及当时条件；温度/均速分箱按里程加权平均；能耗口径 = 表显续航消耗 × 车辆效率；50~400 Wh/km 外离群剔除；days 90~730 钳制）
 - `GET /api/trips/route-summary?from=ISO&to=ISO` → {tripCount, segments:[{driveId, points:[{lat,lng,speed}]}]}（v0.3.1 按行程分组抽样：最长 ≤400 段、每段 ≤10 点含首尾；前端逐段画线，段间不连线。旧版全局取模抽样的单 polyline 已废——跨行程连线产生满屏飞线）
-- `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}, tirePressure:{fl,fr,rl,rr}|null（bar，行程内最后有效读数，与推送行程小结同口径）, soc:{start,end}|null（**v2.5** 行程首/末有效电量读数 %，positions 两点索引查询；无读数 null）}
+- `GET /api/trips/:id` → Trip 详情：{...Trip, polyline:[点集（LTTB 降采样 ≤300 点）], fifo:{batches:[{source, kwh, price, amount}], totalCost, blendedPrice}, fuelComparison:{baseline, fuelCost, saved, savedPct}, efficiency:{ratedKwh, actualKwh, ratio}, environment:{avgTempC, acEstimateKwh, avgSpeedKmh, cruiseSpeedKmh}, tirePressure:{fl,fr,rl,rr}|null（bar，行程内最后有效读数，与推送行程小结同口径）, soc:{start,end}|null（**v2.5** 行程首/末有效电量读数 %，positions 两点索引查询；无读数 null）, hardBraking:int|null（**v2.6** 急刹次数——降速 ≥8km/h/s 触发、同刹多采样去重；无速度数据 null）, tirePressureChange:{start:{fl,fr,rl,rr},end:{fl,fr,rl,rr},deltaBar}|null（**v2.6** 行程首/末 TPMS 对比——行驶升温升压幅度）}
 - Trip: {id, startAt, endAt, distanceKm, durationMin, energyKwh, **cost**（原 costCny）, startAddress, endAddress, kwhPer100km, routeKey}
 
 ## 4. 充电（v1 演进）
 
 - `GET /api/charging?limit=50&offset=0&month=YYYY-MM&from=ISO&to=ISO` → {total, items:[Charge]}（v0.3 日期区间，优先于 month）
 - `GET /api/charging/habits?days=180&carId=`（**v2.5** 充电习惯画像，电池保养视角）→ {days, sessions, sufficient, avgStartSoc, avgEndSoc, endAbove90Pct, startBelow15Pct, startHist:[10], endHist:[10]}（起止 SoC 齐备的会话才计入；<10 样本 sufficient=false 前端隐藏；days 30~730 钳制；十格直方图 bin=floor(SoC/10)）
+- `GET /api/charging/:id` → 充电会话详情（功率曲线/桩端效率/费用三态/补录回显；**v2.5** 新增 priceCmp:{pct,avgPrice,samples}|null——与推送 charging_done 同款同站近 5 次均价对比，能力倒挂修复）
 - `GET /api/charging/stats?period=month|all&month=YYYY-MM&from=ISO&to=ISO` → {totalKwh, **totalCost**, **avgPrice**, sessionCount, byLocation:[{name, count, kwh, cost, pricePerUnit}]}（v0.3 from/to 优先于 month/period）
 - `GET /api/charging/:id` → {**...Charge, powerCurve:[{soc, kw}]（峰值打点 maxKw@soc）**, efficiency:{meterKwh, batteryKwh, ratio, lossKwh}, costSource:"manual"|"geofence"|"default"}
 - `PUT /api/charging/:id/cost` {amount, source:"manual"} → {ok}（费用补录；触发 7 天窗口异步重算，AC-7.6）
@@ -105,7 +108,7 @@
 ### 推送规则（矩阵化）
 - `GET /api/push-rules` → {matrix: {tripEnd:{webpush,telegram,feishu,wecom,ntfy,bark}, chargingStart:{...}, chargingDone:{...}, daily:{...}, weekly:{...}, monthly:{...}}, quietHours:{enabled,start,end}}
 - `PUT /api/push-rules` {matrix, quietHours?} → {ok}
-  - v1 为每事件单一 bool → v2 为 11 事件 × 6 渠道矩阵（P6 分组3 + m4b 三渠道 + P2 告警三事件 + **v2.5** batteryLow 告警与 annual 年报）；内容事件新渠道默认全关（用户显式开）,告警事件（outage/chargeInterrupt/tirePressure）默认 webpush/telegram/feishu 全开且**不受 quietHours 静音约束**;outage_recovered 复用 outage 矩阵行;weeklyReportDay 并入 settings;P2 起告警事件语义:outage=断联≥10min 与恢复各推一次,chargeInterrupt=充电结束 end_battery<80 派生告警(与 charging_done 并存,每会话一次),tirePressure=四轮最低<2.6bar(24h 节流),batteryLow(**v2.5**)=最新电量<20% 且无进行中充电(24h 节流,充电中不告警,告警默认矩阵同 tirePressure)
+  - v1 为每事件单一 bool → v2 为 12 事件 × 6 渠道矩阵（P6 分组3 + m4b 三渠道 + P2 告警三事件 + **v2.5** batteryLow 告警与 annual 年报 + **v2.6** maintenance 保养提醒）；内容事件新渠道默认全关（用户显式开）,告警事件（outage/chargeInterrupt/tirePressure）默认 webpush/telegram/feishu 全开且**不受 quietHours 静音约束**;outage_recovered 复用 outage 矩阵行;weeklyReportDay 并入 settings;P2 起告警事件语义:outage=断联≥10min 与恢复各推一次,chargeInterrupt=充电结束 end_battery<80 派生告警(与 charging_done 并存,每会话一次),tirePressure=四轮最低<2.6bar(24h 节流),batteryLow(**v2.5**)=最新电量<20% 且无进行中充电(24h 节流,充电中不告警,告警默认矩阵同 tirePressure)
   - quietHours（P1，PUSH-DESIGN）：{enabled:boolean, start:'HH:MM', end:'HH:MM'}（北京时间，start>end 跨午夜；start==end 等效关闭）。仅约束 trip_end：命中时段不即时投递，摘要并入次日早报「🌙 昨夜静默行程」段。charging/日报/告警不受影响。默认 {enabled:false,start:'23:00',end:'07:00'}
   - 正文富化（P1，字段由富化层注入、数据可得才显示）：trip_end 计价批次行 `🔋 计价批次`（fifoBatches>1）；charging_start 当前电量/预估行；charging_done 近 5 次同站均价对比行与 ⚠ 提前中止标题；daily 插枪提醒行（TOU 谷价）与昨夜静默段；monthly 年度累计行
   - `daily`（m4c-c1）：昨日用车日报，每日 08:00 推送；昨日无行程且无充电自动跳过；不落报告归档表
@@ -114,6 +117,11 @@
 - `GET /api/reports` → {items:[{id, type:"weekly"|"monthly"|"annual", periodLabel, distanceKm, totalCost, saved}]}
 - `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）。**v2.4 快照已含字段全量露出**：topRoutes:[{route, count, distanceKm, energyKwh, costCny}]；insights:{avgTempC, tempRangeC, avgSpeedKmh, maxSpeedKmh, idlePct, powerMaxKw, tireFlBar, tireRrBar, tireMinBar, kwhPer100km}|null；日报 compare:{lastWeek:{distanceKm,totalCost}, kmDeltaPct, costDeltaPct, month:{distanceKm,totalCost}}；月报 ytd:{distanceKm, totalCost, saved}（旧快照缺新字段的兼容：前端判空隐藏区块）
 - `POST /api/reports/generate` {type:"daily"|"weekly"|"monthly"|"annual"}（手动触发，调试用；annual=上一自然年，每年 1 月 1 日 08:00 自动归档，快照含 annual:{maxDayKm, maxTripKm, maxTripRoute, chargeSessions, superPct}——最长单日/最长单程/充电构成，结语带 🏆 年度之最行）
+
+### 保养提醒（v2.6 新增）
+- `GET /api/maintenance?carId` → {odometerKm, items:[{key:"tireRotate"|"tireReplace", label, intervalKm, lastAtKm, dueInKm, due}]}（dueInKm = 周期 −（当前里程 − 上次保养里程），≤0 已到期；odometer 不可得时 dueInKm=null；配置 SQLite kv 持久化）
+- `PUT /api/maintenance` {items:[{key,intervalKm,lastAtKm}]} → 已知 key 合并保存；intervalKm 500~200000、lastAtKm 0~2000000 钳制校验，非法 400
+- 推送事件 **maintenance**（第 12 事件，内容类默认仅飞书）：巡检发现有到期项才推（7 天节流）；标题 🔧 保养提醒，正文逐项"已超/还剩 X km"+当前里程
 
 ### 导出（v2.4 新增）
 - `GET /api/export/trips?from=ISO&to=ISO&carId=` → `text/csv` attachment（UTF-8 BOM + RFC 4180 转义；列：开始/结束时间、起点、终点、里程、时长、能耗、电费、kWh/100km、路线；电费与列表同 FIFO 回放口径；≤20000 行防呆）

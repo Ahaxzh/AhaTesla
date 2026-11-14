@@ -8,6 +8,9 @@ import type {
   Charge,
   ChargingHabits,
   ChargingStats,
+  DisplayAccuracy,
+  EfficiencyProfile,
+  MaintenanceStatus,
   ChannelStatus,
   DashboardData,
   HealthLite,
@@ -201,6 +204,11 @@ export const api = {
   },
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
   chargingHabits: (carId?: number) => get<ChargingHabits>(withCar('/api/charging/habits', carId)),
+  displayAccuracy: (carId?: number) => get<DisplayAccuracy>(withCar('/api/trips/display-accuracy', carId)),
+  efficiencyProfile: (carId?: number) => get<EfficiencyProfile>(withCar('/api/trips/efficiency-profile', carId)),
+  maintenanceGet: () => get<MaintenanceStatus>('/api/maintenance'),
+  maintenancePut: (items: Array<{ key: string; intervalKm?: number; lastAtKm?: number | null }>) =>
+    put<{ ok: boolean }>('/api/maintenance', { items }),
   chargingStats: (params: { from?: string; to?: string; month?: string; carId?: number } = {}) => {
     const q = new URLSearchParams({ period: 'month' })
     if (params.month) q.set('month', params.month)

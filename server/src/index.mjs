@@ -40,6 +40,7 @@ import { createChargingRoutes } from "./api/charging-routes.mjs";
 import { createPricingRoutes } from "./api/pricing-routes.mjs";
 import { createLedgerRoutes } from "./api/ledger-routes.mjs";
 import { createExportRoutes } from "./api/export-routes.mjs";
+import { createMaintenanceRoutes, maintenanceStatus } from "./api/maintenance-routes.mjs";
 import { createChannelRoutes } from "./api/channel-routes.mjs";
 import { createDashboardRoutes, createSystemRoutes } from "./api/dashboard-routes.mjs";
 import { createDashboardExtraRoutes, createSettingsRoutes, createHealthLiteRoutes } from "./api/dashboard-extra-routes.mjs";
@@ -112,6 +113,7 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   const pricing = createPricingRoutes({ db, state, getStore });
   const ledger = createLedgerRoutes({ db, state, getStore });
   const exportRoutes = createExportRoutes({ db, state });
+  const maintenance = createMaintenanceRoutes({ db, store: getStore() });
   const channels = createChannelRoutes({ state, feishu, eventLog });
   const dashboard = createDashboardRoutes({ db, state });
   const dashboardExtra = createDashboardExtraRoutes({ db, state });
@@ -149,6 +151,8 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   // 汇总与轨迹必须在 :id 之前注册（手写路由按注册顺序匹配）
   app.get("/api/trips/overview", requireAuth, (ctx) => trips.overview(ctx));
   app.get("/api/trips/route-summary", requireAuth, (ctx) => trips.routeSummary(ctx));
+  app.get("/api/trips/display-accuracy", requireAuth, (ctx) => trips.displayAccuracy(ctx));
+  app.get("/api/trips/efficiency-profile", requireAuth, (ctx) => trips.efficiencyProfile(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));
@@ -160,6 +164,9 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   // CSV 导出（v2.4）：attachment 响应（ctx.res.end 原生写，不走 ctx.json）
   app.get("/api/export/trips", requireAuth, (ctx) => exportRoutes.trips(ctx));
   app.get("/api/export/charging", requireAuth, (ctx) => exportRoutes.charging(ctx));
+  // 保养里程提醒（v2.5）：配置 kv 持久化；状态读 + 配置写
+  app.get("/api/maintenance", requireAuth, (ctx) => maintenance.get(ctx));
+  app.put("/api/maintenance", requireAuth, (ctx) => maintenance.put(ctx));
   app.post("/api/ledger/recalculate", requireAuth, (ctx) => ledger.startRecalculate(ctx));
   app.get("/api/ledger/recalculate/:jobId", requireAuth, (ctx) => ledger.recalculateStatus(ctx));
   app.get("/api/pricing", requireAuth, (ctx) => pricing.list(ctx));
@@ -568,6 +575,22 @@ async function main() {
     }
   }
 
+  // v2.5 保养里程巡检(7 天节流——不像胎压紧急,周提醒足够;只在有到期项时推送)。
+  async function patrolMaintenance() {
+    const now = Date.now();
+    let lastAt = Number(store.kvGet("alerts:lastMaintenanceAlertAt")) || 0;
+    if (lastAt && now - lastAt < 7 * 24 * 3600_000) return;
+    try {
+      const status = await maintenanceStatus(db, store, { carId: state.datasource?.carId ?? null });
+      const due = status.items.filter((i) => i.due);
+      if (!due.length) return;
+      store.kvPut("alerts:lastMaintenanceAlertAt", String(now));
+      await dispatchPush({
+        type: "maintenance", odometerKm: status.odometerKm, items: status.items
+      }).catch(() => {});
+    } catch { /* 巡检失败静默 */ }
+  }
+
   const loop = startTripMonitorLoop({
     monitor,
     db,
@@ -578,6 +601,7 @@ async function main() {
       outageWatcher.observe(result);
       void patrolTirePressure();
       void patrolBatteryLow();
+      void patrolMaintenance();
     },
     logger: (message) => eventLog.log("monitor.error", { message })
   });

@@ -83,6 +83,14 @@ export interface TripDetail extends Trip {
   /** 环境剖析（P3 模块3） */
   /** v2.5 SoC 起止：行程首/末有效电量读数（%）——"这趟从 78% 开到 31%"；无读数 null */
   soc?: { start: number; end: number } | null
+  /** v2.6 急刹次数（降速 ≥8km/h/s，同刹多采样去重）；无速度数据 null */
+  hardBraking?: number | null
+  /** v2.6 行程内胎压变化（首/末 TPMS 对比，行驶升温升压）；无读数 null */
+  tirePressureChange?: {
+    start: { fl: number | null; fr: number | null; rl: number | null; rr: number | null }
+    end: { fl: number | null; fr: number | null; rl: number | null; rr: number | null }
+    deltaBar: number | null
+  } | null
   /** 胎压四轮（bar，行程内最后有效读数；与推送行程小结同口径）；无数据省略 */
   tirePressure?: { fl: number; fr: number; rl: number; rr: number } | null
   environment?: {
@@ -111,6 +119,27 @@ export interface Charge {
   costSource?: 'manual' | 'geofence' | 'default' | 'unknown'
 }
 
+/** GET /api/trips/display-accuracy → 表显 vs 实际月趋势（v2.5）。ratio>100 = 跑赢表显 */
+export interface DisplayAccuracy {
+  months: Array<{ month: string; actualKm: number; ratedKm: number; trips: number; ratio: number }>
+  avgRatio: number | null
+}
+
+/** GET /api/trips/efficiency-profile → 能效画像（v2.6）：个人最佳 + 温度/速度分箱 */
+export interface EfficiencyProfile {
+  days: number
+  samples: number
+  best: { whPerKm: number; distanceKm: number; tempC: number | null; avgSpeedKmh: number | null; at: string | null } | null
+  tempBins: Array<{ label: string; whPerKm: number | null; count: number }>
+  speedBins: Array<{ label: string; whPerKm: number | null; count: number }>
+}
+
+/** GET/PUT /api/maintenance → 保养里程提醒（v2.6） */
+export interface MaintenanceStatus {
+  odometerKm: number | null
+  items: Array<{ key: string; label: string; intervalKm: number; lastAtKm: number | null; dueInKm: number | null; due: boolean }>
+}
+
 /** GET /api/charging/habits → 充电习惯画像（v2.5，电池保养视角）。
  *  起止 SoC 齐备的会话才计入；<10 样本 sufficient=false → 前端整卡隐藏（同电池健康卡） */
 export interface ChargingHabits {
@@ -132,6 +161,8 @@ export interface ChargeDetail extends Charge {
   maxKwSoc: number | null
   /** 桩端效率（数据未上报时为 null → 隐藏损耗模块） */
   efficiency: { meterKwh: number; batteryKwh: number; ratio: number; lossKwh: number } | null
+  /** v2.5 同站近 5 次均价对比（与推送 charging_done 同款）；对比不可得为 null */
+  priceCmp?: { pct: number; avgPrice: number; samples: number } | null
   overrideCost: number | null
 }
 
@@ -340,7 +371,7 @@ export interface LedgerSummary {
 }
 
 export type PushChannelId = 'webpush' | 'telegram' | 'feishu' | 'wecom' | 'ntfy' | 'bark'
-export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly' | 'annual' | 'outage' | 'chargeInterrupt' | 'tirePressure' | 'batteryLow'
+export type PushEventId = 'tripEnd' | 'chargingStart' | 'chargingDone' | 'daily' | 'weekly' | 'monthly' | 'annual' | 'outage' | 'chargeInterrupt' | 'tirePressure' | 'batteryLow' | 'maintenance'
 
 export interface PushMatrix {
   [event: string]: { [channel: string]: boolean }

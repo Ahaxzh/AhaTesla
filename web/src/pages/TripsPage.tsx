@@ -8,6 +8,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { DailyActivityChart } from '@/components/DailyActivityChart'
+import { EfficiencyCard } from '@/components/EfficiencyCard'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
@@ -196,6 +197,12 @@ export default function TripsPage() {
           )}
         </div>
       )}
+
+      {/* v2.6 能效画像：最佳战绩 + 表显达成 + 温度/速度分箱。
+          独立于区间筛选（固定近一年），样本不足自隐藏——区间无行程也照常展示 */}
+      <div className="mb-4">
+        <EfficiencyCard />
+      </div>
 
       {isLoading ? (
         <SkeletonList rows={6} />

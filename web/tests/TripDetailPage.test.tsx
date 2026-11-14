@@ -49,6 +49,10 @@ describe('TripDetailPage', () => {
     expect(screen.getByTestId('efficiency-badge')).toHaveTextContent('能效达成 93%')
     // v2.5 SoC 起止：78% → 31%
     expect(screen.getByTestId('trip-soc')).toHaveTextContent('78%')
+    // v2.6 急刹 + 行程内胎压变化（msw fixture：1 次急刹、+0.2 bar）
+    expect(screen.getByTestId('trip-braking')).toHaveTextContent('急刹')
+    expect(screen.getByTestId('trip-tp-change')).toHaveTextContent('2.8')
+    expect(screen.getByTestId('trip-tp-change')).toHaveTextContent('+0.20')
     expect(screen.getByTestId('trip-soc')).toHaveTextContent('31%')
     expect(screen.getByTestId('energy-formula-note')).toHaveTextContent('耗电口径')
     expect(screen.getByTestId('environment-card')).toHaveTextContent('18.5')

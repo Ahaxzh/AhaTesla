@@ -255,6 +255,36 @@ export const defaultHandlers = [
       ],
     }),
   ),
+  http.get('/api/trips/display-accuracy', () =>
+    HttpResponse.json({
+      months: [
+        { month: '2026-09', actualKm: 900, ratedKm: 940, trips: 30, ratio: 0.957 },
+        { month: '2026-10', actualKm: 1240, ratedKm: 1260, trips: 42, ratio: 0.984 },
+        { month: '2026-11', actualKm: 640, ratedKm: 650, trips: 21, ratio: 0.985 },
+      ],
+      avgRatio: 0.975,
+    }),
+  ),
+  http.get('/api/trips/efficiency-profile', () =>
+    HttpResponse.json({
+      days: 365,
+      samples: 93,
+      best: { whPerKm: 121, distanceKm: 86.2, tempC: 18, avgSpeedKmh: 62, at: '2026-10-12T01:30:00Z' },
+      tempBins: [
+        { label: '<0°C', whPerKm: 182, count: 8 },
+        { label: '0~10°C', whPerKm: 158, count: 20 },
+        { label: '10~20°C', whPerKm: 141, count: 35 },
+        { label: '20~30°C', whPerKm: 134, count: 26 },
+        { label: '30°C+', whPerKm: 149, count: 4 },
+      ],
+      speedBins: [
+        { label: '0~40 km/h', whPerKm: 168, count: 24 },
+        { label: '40~60 km/h', whPerKm: 139, count: 33 },
+        { label: '60~80 km/h', whPerKm: 129, count: 27 },
+        { label: '80+ km/h', whPerKm: 142, count: 9 },
+      ],
+    }),
+  ),
   http.get('/api/trips/:id', ({ params }) =>
     HttpResponse.json({
       ...mockTrip,
@@ -278,10 +308,26 @@ export const defaultHandlers = [
       efficiency: { ratedKwh: 6.5, actualKwh: 7.0, ratio: 0.929 },
       environment: { avgTempC: 18.5, acEstimateKwh: 0.3, avgSpeedKmh: 32.5, maxSpeedKmh: 78 },
       soc: { start: 78, end: 31 },
+      hardBraking: 1,
+      tirePressureChange: {
+        start: { fl: 2.8, fr: 2.8, rl: 2.9, rr: 2.9 },
+        end: { fl: 3.0, fr: 3.0, rl: 3.1, rr: 3.1 },
+        deltaBar: 0.2,
+      },
       tirePressure: { fl: 3.1, fr: 3.0, rl: 2.9, rr: 3.0 },
     }),
   ),
   http.get('/api/charging', () => HttpResponse.json({ total: 1, items: [mockCharge] })),
+  http.get('/api/maintenance', () =>
+    HttpResponse.json({
+      odometerKm: 24560,
+      items: [
+        { key: 'tireRotate', label: '轮胎换位', intervalKm: 10000, lastAtKm: 20000, dueInKm: 5440, due: false },
+        { key: 'tireReplace', label: '轮胎更换', intervalKm: 40000, lastAtKm: null, dueInKm: null, due: false },
+      ],
+    }),
+  ),
+  http.put('/api/maintenance', () => HttpResponse.json({ ok: true })),
   http.get('/api/charging/habits', () =>
     HttpResponse.json({
       days: 180,
