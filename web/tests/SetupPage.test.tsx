@@ -217,7 +217,7 @@ describe('SetupPage 向导', () => {
     // 保存数据源 → 启动轮询
     await user.click(screen.getByTestId('setup-save-datasource'))
     // 轮询指示器出现，随后车辆发现 → 多车选择器（默认选中 suggestedCarId=2）
-    const selector = await screen.findByTestId('setup-car-selector', {}, { timeout: 4000 })
+    const selector = await screen.findByTestId('setup-car-selector', {}, { timeout: 10_000 })
     expect(selector).toBeInTheDocument()
     const chosen = screen.getByTestId('setup-car-option-2')
     expect(chosen).toHaveAttribute('aria-checked', 'true')
@@ -498,7 +498,7 @@ describe('SetupPage 向导', () => {
     // 下一个 2s tick 即触发超时——真实计时器保持不变（fake timers 会挂死 userEvent）
     const shifted = Date.now() + 61_000
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(shifted)
-    const timeoutEl = await screen.findByTestId('setup-discovery-timeout', {}, { timeout: 4000 })
+    const timeoutEl = await screen.findByTestId('setup-discovery-timeout', {}, { timeout: 10_000 })
     expect(timeoutEl).toBeInTheDocument()
     expect(screen.getByTestId('setup-discovery-retry')).toBeInTheDocument()
     // 点击重试 → 新窗口从当前（拨快后的）时钟起算：轮询提示恢复、超时区收起

@@ -310,13 +310,14 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
 
   const canSubmit = mode === 'fullstack' || (host.trim() && user.trim() && password)
 
-  // 车辆发现轮询（AC-2.3/4.3：60s 内发现；2s 间隔）
+  // 车辆发现轮询（AC-2.3/4.3：60s 内发现；2s 间隔）。
+  // 首次立即查一次再进间隔——真实用户少等最多 2s，测试也不必干等首个 tick（CI 慢机曾致 4s 超时挂）。
   // 超时不再静默停轮询（spinner 永转 + 下一步永久禁用）：置 discoveryTimedOut，
   // UI 给「重新等待」按钮重置状态并再次 startDiscovery —— Tesla OAuth 授权常超 60s。
   const startDiscovery = useCallback(() => {
     if (discoveryTimer.current) return
     const startedAt = Date.now()
-    discoveryTimer.current = setInterval(async () => {
+    const tick = async () => {
       try {
         const result = await api.setupCarDiscovery()
         if (result.found) {
@@ -332,7 +333,9 @@ function Step2Datasource({ onDone, deployMode }: { onDone: () => void; deployMod
       } catch {
         /* 继续轮询直至超时 */
       }
-    }, POLL_INTERVAL_MS)
+    }
+    void tick()
+    discoveryTimer.current = setInterval(tick, POLL_INTERVAL_MS)
   }, [])
 
   const restartDiscovery = useCallback(() => {
