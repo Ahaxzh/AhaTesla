@@ -57,8 +57,10 @@ describe('TripsPage（v0.3：默认近90天 + 顶部汇总 + 无限滚动）', (
     expect(overview).toHaveTextContent('1,241')
     expect(overview).toHaveTextContent('128')
     expect(overview).toHaveTextContent('¥168.40')
-    expect(screen.getByTestId('trip-state-share')).toHaveTextContent('行驶')
-    expect(screen.getByTestId('trip-state-share')).toHaveTextContent('驻车')
+    expect(screen.getByTestId('trip-daily-activity')).toHaveTextContent('行驶')
+    expect(screen.getByTestId('trip-daily-activity')).toHaveTextContent('驻车')
+    // v0.4 每日活跃柱状图：msw 14 桶全渲染
+    expect(screen.getAllByTestId('daily-bar')).toHaveLength(14)
     expect(screen.getByText('轨迹汇总')).toBeInTheDocument()
   })
 

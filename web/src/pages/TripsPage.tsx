@@ -7,10 +7,10 @@ import { PageHeader } from '@/components/PageHeader'
 import { EmptyState } from '@/components/EmptyState'
 import { SkeletonList } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
+import { DailyActivityChart } from '@/components/DailyActivityChart'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
-import type { TripsOverview } from '@/types'
 
 // 轨迹汇总图二级懒加载：地图 chunk（Leaflet ~156KB）不阻塞行程页首屏
 const RouteMap = lazy(() => import('@/components/RouteMap').then((m) => ({ default: m.RouteMap })))
@@ -18,36 +18,6 @@ const RouteMap = lazy(() => import('@/components/RouteMap').then((m) => ({ defau
 const PAGE_SIZE = 20
 /** 默认筛选窗口（v0.3）：近 90 天——手机端首屏 & 列表噪音双优；「清除」可看全部 */
 const DEFAULT_WINDOW_DAYS = 90
-
-/** 状态占比条：行驶/充电/驻车（时长近似口径），一行分段彩色条 + 图例 */
-function StateShareBar({ data }: { data: TripsOverview['stateShare'] }) {
-  const { t } = useI18n()
-  const { driveMin, chargeMin, parkedMin } = data
-  const total = Math.max(driveMin + chargeMin + parkedMin, 1)
-  const segs = [
-    { key: 'trips.share.drive', zh: '行驶', min: driveMin, cls: 'bg-sky-500', dot: 'bg-sky-500' },
-    { key: 'trips.share.charge', zh: '充电', min: chargeMin, cls: 'bg-emerald-500', dot: 'bg-emerald-500' },
-    { key: 'trips.share.parked', zh: '驻车', min: parkedMin, cls: 'bg-slate-600', dot: 'bg-slate-600' },
-  ]
-  return (
-    <div data-testid="trip-state-share">
-      <div className="flex h-2.5 overflow-hidden rounded-full bg-white/[0.05]" role="presentation">
-        {segs.map((s) => (
-          <div key={s.key} className={s.cls} style={{ width: `${(s.min / total) * 100}%` }} />
-        ))}
-      </div>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
-        {segs.map((s) => (
-          <span key={s.key} className="flex items-center gap-1.5">
-            <span className={`inline-block h-2 w-2 rounded-sm ${s.dot}`} />
-            {t(s.key, s.zh)} <span className="num text-slate-300">{fmtDuration(s.min)}</span>
-            <span className="num text-slate-500">{((s.min / total) * 100).toFixed(0)}%</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 export default function TripsPage() {
   const { t } = useI18n()
@@ -174,7 +144,8 @@ export default function TripsPage() {
             <div className="mb-2.5 flex items-center gap-2 text-sm font-medium text-slate-200">
               <Clock className="h-4 w-4 text-tesla" /> {t('trips.share.title', '时间分布（区间内）')}
             </div>
-            <StateShareBar data={overview.stateShare} />
+            {/* v0.4：每日活跃柱状图（旧三段占比条被驻车 ~96% 压成灰条，已废） */}
+            <DailyActivityChart overview={overview} />
           </div>
           {routeSummary && routeSummary.segments.length > 0 && (
             <div className="glass-card-flat p-4">

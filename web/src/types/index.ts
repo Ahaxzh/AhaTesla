@@ -159,8 +159,14 @@ export interface TripsOverview {
   energyKwh: number | null
   costCny: number | null
   maxSpeedKmh: number | null
-  /** 时长占比（近似：SUM 口径，非逐段 timeline）；parkedMin = 区间 − 行驶 − 充电 */
+  /** 时长占比（近似：SUM 口径，非逐段 timeline）；parkedMin = 区间 − 行驶 − 充电（仅作小字） */
   stateShare: { driveMin: number; chargeMin: number; parkedMin: number }
+  /** v0.4 时间分布：每日活跃柱状图数据。区间 ≤150 天按日、更长按周（周一起）聚合；
+   *  按结束时刻归日（实例时区），零填充；date = 桶起始日 YYYY-MM-DD */
+  daily: {
+    bucket: 'day' | 'week'
+    points: Array<{ date: string; driveMin: number; chargeMin: number; trips: number }>
+  }
 }
 
 /** GET /api/trips/route-summary → 区间内行驶轨迹汇总（v0.3.1 按行程分组，

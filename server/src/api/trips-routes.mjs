@@ -42,6 +42,74 @@ function validateIso(value, field) {
   return new Date(value).toISOString();
 }
 
+/** 时间分布 v0.4 桶聚合（每日活跃柱状图数据源，替代 v0.3 三段占比条——驻车 ~96% 把占比条压成灰条）。
+ *  行驶/充电按结束时刻归日（实例时区，同 heatmap 口径）；区间 ≤150 天按日零填充，
+ *  更长自动按周（周一起）聚合，date=桶起始日——长区间点数有界（400 天≈58 桶），柱宽不被稀释。
+ *  跨夏令时安全：UTC 正午步进 + Intl 归日（正午偏移 ±1h 不会跨日）。 */
+export function dailyActivityPoints({ from, to, tzName, driveRows, chargeRows, nowMs = Date.now() }) {
+  const DAY_MS = 86400_000;
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tzName || "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
+  const dayKeyOf = (v) => {
+    const ms = v instanceof Date ? v.getTime() : new Date(v).getTime();
+    return Number.isFinite(ms) ? fmt.format(new Date(ms)) : null;
+  };
+  const noonOf = (dateStr) => { const [y, m, d] = dateStr.split("-").map(Number); return Date.UTC(y, m - 1, d, 12); };
+
+  const driveByDay = new Map();
+  const chargeByDay = new Map();
+  let earliest = null;
+  const touch = (date) => { if (date && (earliest === null || date < earliest)) earliest = date; };
+  for (const r of driveRows) {
+    const date = dayKeyOf(r.end_at);
+    if (!date) continue;
+    const cur = driveByDay.get(date) || { min: 0, trips: 0 };
+    cur.min += finiteNumber(r.duration_min) || 0;
+    cur.trips += 1;
+    driveByDay.set(date, cur);
+    touch(date);
+  }
+  for (const r of chargeRows) {
+    const date = dayKeyOf(r.end_at);
+    if (!date) continue;
+    chargeByDay.set(date, (chargeByDay.get(date) || 0) + (finiteNumber(r.duration_min) || 0));
+    touch(date);
+  }
+
+  // 桶区间：from（缺省=最早事件日）→ min(to, now)，未来日不零填充
+  const startStr = dayKeyOf(from) || earliest;
+  const endMs = Math.min(to ? new Date(to).getTime() : nowMs, nowMs);
+  const endStr = dayKeyOf(new Date(endMs).toISOString());
+  if (!startStr || !endStr || startStr > endStr) return { bucket: "day", points: [] };
+
+  const totalDays = Math.round((noonOf(endStr) - noonOf(startStr)) / DAY_MS) + 1;
+  const points = [];
+  if (totalDays <= 150) {
+    for (let t = noonOf(startStr); ; t += DAY_MS) {
+      const date = fmt.format(new Date(t));
+      if (date > endStr) break;
+      const d = driveByDay.get(date);
+      points.push({ date, driveMin: Math.round(d?.min || 0), chargeMin: Math.round(chargeByDay.get(date) || 0), trips: d?.trips || 0 });
+    }
+    return { bucket: "day", points };
+  }
+  // 周桶：周一起，桶内 7 天求和；首尾不满一周按实际日截断
+  const mondayOf = (dateStr) => fmt.format(new Date(noonOf(dateStr) - ((new Date(noonOf(dateStr)).getUTCDay() + 6) % 7) * DAY_MS));
+  for (let t = noonOf(mondayOf(startStr)); ; t += 7 * DAY_MS) {
+    const wkStart = fmt.format(new Date(t));
+    if (wkStart > endStr) break;
+    let driveMin = 0, chargeMin = 0, trips = 0;
+    for (let k = 0; k < 7; k++) {
+      const date = fmt.format(new Date(t + k * DAY_MS));
+      if (date > endStr) break;
+      const d = driveByDay.get(date);
+      if (d) { driveMin += d.min; trips += d.trips; }
+      chargeMin += chargeByDay.get(date) || 0;
+    }
+    points.push({ date: wkStart, driveMin: Math.round(driveMin), chargeMin: Math.round(chargeMin), trips });
+  }
+  return { bucket: "week", points };
+}
+
 // Shared: build trip views with costs from the full-replay FIFO ledger (H1 修复).
 // 成本一律取自 getFifoLedger 的全量回放结果（历史行程已扣减批次池，闭包成立）。
 // 优先用调用方传入的完整 state（时区/默认价/历史价一体）；仅传 defaultRate/
@@ -165,8 +233,9 @@ export function lttbDownsample(points, threshold = 300) {
 export function createTripsRoutes({ db, state }) {
   return {
     /** GET /api/trips/overview?from&to&carId —— 行程页顶部汇总（Grafana trip.json 提炼）：
-     *  KPI（趟数/里程/时长/能耗/电费/最高速）+ 状态占比（行驶/充电/驻车）。
-     *  能耗电费走 FIFO 回放与列表同口径；占比条是时长 SUM 近似（非逐段 timeline）。 */
+     *  KPI（趟数/里程/时长/能耗/电费/最高速）+ 时间分布（v0.4：daily 每日活跃柱状图数据；
+     *  stateShare 三段时长保留作图例/小字，驻车占比不再作为主视觉）。
+     *  能耗电费走 FIFO 回放与列表同口径；时长为 SUM 近似（非逐段 timeline）。 */
     async overview(ctx) {
       const from = validateIso(ctx.query.from, "from");
       const to = validateIso(ctx.query.to, "to");
@@ -180,25 +249,29 @@ export function createTripsRoutes({ db, state }) {
       if (carCond) where.push(carCond);
       const whereSql = where.join(" AND ");
 
-      const [aggRow, chargeRow, drives] = await Promise.all([
+      // 充电/行程取逐条 (end_at, duration_min)：chargeMin 求和替代旧 SUM 单查，行同时喂 daily 桶聚合
+      const [aggRow, chargeRows, driveRows] = await Promise.all([
         db.queryOne(`
           SELECT count(*)::int AS n,
                  round(sum(d.distance)::numeric, 1) AS distance_km,
                  round(sum(d.duration_min)::numeric, 0) AS duration_min
           FROM drives d WHERE ${whereSql}
         `).catch(() => null),
-        db.queryOne(`
-          SELECT round(sum(cp.duration_min)::numeric, 0) AS charge_min
+        db.query(`
+          SELECT cp.end_date AS end_at, cp.duration_min
           FROM charging_processes cp
           WHERE cp.end_date IS NOT NULL
             ${from ? `AND cp.end_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC')` : ""}
             ${to ? `AND cp.end_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC')` : ""}
             ${carFilterSql(carId, "cp.car_id")}
-        `).catch(() => null),
+          ORDER BY cp.end_date ASC
+        `).catch(() => []),
         db.query(`
-          SELECT d.id FROM drives d WHERE ${whereSql} ORDER BY d.end_date DESC
-        `).then((rows) => rows.map((r) => String(r.id))).catch(() => []),
+          SELECT d.id, d.end_date AS end_at, d.duration_min
+          FROM drives d WHERE ${whereSql} ORDER BY d.end_date DESC
+        `).catch(() => []),
       ]);
+      const drives = driveRows.map((r) => String(r.id));
 
       // 能耗/电费：FIFO 全量回放后按区间内 drive 求和（与列表卡同口径）
       let energyKwh = null;
@@ -232,7 +305,7 @@ export function createTripsRoutes({ db, state }) {
       }
 
       const driveMin = finiteNumber(aggRow?.duration_min) ?? 0;
-      const chargeMin = finiteNumber(chargeRow?.charge_min) ?? 0;
+      const chargeMin = chargeRows.reduce((s, r) => s + (finiteNumber(r.duration_min) || 0), 0);
       const spanMin = Math.max(Math.round((to ? new Date(to).getTime() : Date.now()) - (from ? new Date(from).getTime() : Date.now())) / 60000, driveMin + chargeMin);
       return {
         tripCount: aggRow?.n ?? drives.length,
@@ -246,6 +319,11 @@ export function createTripsRoutes({ db, state }) {
           chargeMin: Math.round(chargeMin),
           parkedMin: Math.max(Math.round(spanMin - driveMin - chargeMin), 0),
         },
+        daily: dailyActivityPoints({
+          from, to,
+          tzName: state.settings?.timezone,
+          driveRows, chargeRows,
+        }),
       };
     },
 

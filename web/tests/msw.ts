@@ -233,6 +233,16 @@ export const defaultHandlers = [
       costCny: 168.4,
       maxSpeedKmh: 128,
       stateShare: { driveMin: 1710, chargeMin: 2400, parkedMin: 60000 },
+      daily: {
+        bucket: 'day',
+        points: Array.from({ length: 14 }, (_, i) => {
+          const d = new Date(Date.now() - (13 - i) * 86400_000)
+          const p = (n: number) => String(n).padStart(2, '0')
+          const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+          const driveMin = i === 3 ? 315 : i % 4 === 0 ? 0 : 30 + ((i * 37) % 90)
+          return { date, driveMin, chargeMin: i % 5 === 2 ? 45 : 0, trips: driveMin > 0 ? 2 : 0 }
+        }),
+      },
     }),
   ),
   http.get('/api/trips/route-summary', () =>

@@ -262,8 +262,15 @@ test("trips 非法 from 参数 → 400", async () => {
 function overviewFakeDb() {
   return createFakeDb((sql) => {
     if (/count\(\*\)::int AS n/.test(sql)) return [{ n: 45, distance_km: 1240.5, duration_min: 1710 }];
-    if (/sum\(cp\.duration_min\)/.test(sql)) return [{ charge_min: 2400 }];
-    if (/SELECT d\.id FROM drives/.test(sql)) return [{ id: 3241 }, { id: 3242 }];
+    if (/SELECT cp\.end_date AS end_at/.test(sql)) {
+      return [{ end_at: "2026-09-01T12:00:00.000Z", duration_min: 1500 }, { end_at: "2026-09-03T12:00:00.000Z", duration_min: 900 }];
+    }
+    if (/SELECT d\.id, d\.end_date AS end_at/.test(sql)) {
+      return [
+        { id: 3241, end_at: "2026-09-01T02:00:00.000Z", duration_min: 950 },
+        { id: 3242, end_at: "2026-09-02T02:00:00.000Z", duration_min: 760 },
+      ];
+    }
     if (/max\(p\.speed\)/.test(sql)) return [{ max_speed: 128 }];
     return [];
   });
@@ -279,7 +286,7 @@ test("overview/route-summary SQL 卫哨：不允许出现 AND AND（v0.3 线上�
   }
 });
 
-test("GET /api/trips/overview：KPI + 状态占比（时长 SUM 近似）", async () => {
+test("GET /api/trips/overview：KPI + 状态占比 + daily 按日桶（≤150 天零填充）", async () => {
   const { app } = buildTestApp({ db: overviewFakeDb() });
   const from = "2026-08-15T00:00:00.000Z";
   const to = "2026-11-13T00:00:00.000Z";
@@ -293,6 +300,28 @@ test("GET /api/trips/overview：KPI + 状态占比（时长 SUM 近似）", asyn
   assert.equal(res.json.stateShare.driveMin, 1710);
   assert.equal(res.json.stateShare.chargeMin, 2400);
   assert.equal(res.json.stateShare.parkedMin, 125490);
+  // daily：2026-08-15→11-13 = 91 天按日桶；结束时刻归日（默认 Asia/Shanghai）
+  assert.equal(res.json.daily.bucket, "day");
+  assert.equal(res.json.daily.points.length, 91);
+  assert.deepEqual(res.json.daily.points[0], { date: "2026-08-15", driveMin: 0, chargeMin: 0, trips: 0 });
+  const sep1 = res.json.daily.points.find((p) => p.date === "2026-09-01");
+  assert.deepEqual(sep1, { date: "2026-09-01", driveMin: 950, chargeMin: 1500, trips: 1 });
+  assert.deepEqual(res.json.daily.points.find((p) => p.date === "2026-09-02"), { date: "2026-09-02", driveMin: 760, chargeMin: 0, trips: 1 });
+  assert.deepEqual(res.json.daily.points.find((p) => p.date === "2026-09-03"), { date: "2026-09-03", driveMin: 0, chargeMin: 900, trips: 0 });
+});
+
+test("GET /api/trips/overview：区间 >150 天 → daily 自动切周桶（周一起）", async () => {
+  const { app } = buildTestApp({ db: overviewFakeDb() });
+  const from = "2026-05-01T00:00:00.000Z";
+  const to = "2026-11-13T00:00:00.000Z";
+  const res = await fetchApp(app, "GET", `/api/trips/overview?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cookie: `ahatesla_token=${tokenFor()}` });
+  assert.equal(res.status, 200);
+  assert.equal(res.json.daily.bucket, "week");
+  const points = res.json.daily.points;
+  // 首桶=区间首个周一 2026-04-27；9/1、9/2 同落周一起始的那一周，行程/充电并入同桶
+  assert.equal(points[0].date, "2026-04-27");
+  const sepWeek = points.find((p) => p.date === "2026-08-31");
+  assert.deepEqual(sepWeek, { date: "2026-08-31", driveMin: 1710, chargeMin: 2400, trips: 2 });
 });
 
 test("GET /api/trips/overview 非法 from → 400", async () => {

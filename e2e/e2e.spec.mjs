@@ -222,7 +222,7 @@ test("行程页：顶部汇总（KPI/状态占比/轨迹图）+ 无限滚动替�
   // 顶部汇总卡：区间内有行程才渲染（KPI + 占比条 + 轨迹汇总图）
   const overview = page.getByTestId("trip-overview");
   if (await overview.isVisible().catch(() => false)) {
-    await expect(page.getByTestId("trip-state-share")).toBeVisible();
+    await expect(page.getByTestId("trip-daily-activity")).toBeVisible();
     await expect(overview).toContainText(/km/);
   }
   // 无限滚动：滚到底触发加载（真实库 90 天通常 >20 条；滚动后条数增加或已显示全部）
