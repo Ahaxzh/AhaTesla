@@ -112,10 +112,17 @@ function amapKey() {
 const CACHE_PREFIX = "geo:amap:";
 const coordKey = (lat, lng) => `${CACHE_PREFIX}${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
 
+/** 网络失败负缓存 TTL：同坐标 10 分钟内不重试。
+ *  v2.6.2 修复：此前失败不缓存——高德不可达时每次行程详情/列表都对着同一坐标
+ *  挂满 4s 超时（用户实测详情 10s ≈ 起终点两个未命中坐标各超时一次）。 */
+const GEO_FAIL_TTL_MS = 10 * 60_000;
+const GEO_FAIL_PREFIX = "@@fail:";
+
 /**
  * 解析一个 WGS84 坐标的地名（高德逆地理，POI 名优先）。
- * 返回 string 地名，或 null（未启用/无 Key/网络失败/无结果）。
- * 缓存：成功结果与"无结果"都按 ~11m 网格落 kv，永久有效；网络/接口错误不缓存。
+ * 返回 string 地名，或 null（未启用/无Key/网络失败/无结果）。
+ * 缓存：成功结果与"无结果"按 ~11m 网格落 kv 永久有效；
+ * 网络/接口错误以时间戳负缓存 10 分钟（超时 1.5s——标签是兜底信息，慢不如无）。
  */
 export async function resolveAmapLabel(lat, lng, { fetchImpl = globalThis.fetch, store = null } = {}) {
   if (lat == null || lng == null) return null;
@@ -127,23 +134,35 @@ export async function resolveAmapLabel(lat, lng, { fetchImpl = globalThis.fetch,
 
   const key = coordKey(lat, lng);
   const cached = kv.kvGet(key);
-  if (cached != null) return cached === "" ? null : cached;
+  if (cached != null) {
+    if (cached.startsWith(GEO_FAIL_PREFIX)) {
+      // 负缓存未过期 → 直接放弃；过期 → 落下去重试
+      if (Date.now() - Number(cached.slice(GEO_FAIL_PREFIX.length)) < GEO_FAIL_TTL_MS) return null;
+    } else {
+      return cached === "" ? null : cached;
+    }
+  }
 
   const gcj = wgs84ToGcj02(lat, lng);
   const url = `https://restapi.amap.com/v3/geocode/regeo?location=${gcj.lng.toFixed(6)},${gcj.lat.toFixed(6)}&extensions=all&key=${encodeURIComponent(amapKey() ?? "")}`;
   let name = null;
   let cacheable = false;
   try {
-    const resp = await fetchImpl(url, { signal: AbortSignal.timeout(4000) });
+    const resp = await fetchImpl(url, { signal: AbortSignal.timeout(1500) });
     const data = await resp.json().catch(() => null);
     if (data && String(data.status) === "1" && data.regeocode) {
       cacheable = true;
       const poi = Array.isArray(data.regeocode.pois) ? data.regeocode.pois[0] : null;
       const addr = String(data.regeocode.formatted_address ?? "").trim();
       name = (poi?.name && String(poi.name).trim()) || (addr ? addr.split(/[省市]/).pop()?.trim() || addr : null) || null;
+    } else {
+      // 接口返回异常（非网络）：同样负缓存，避免持续打无效请求
+      kv.kvPut?.(key, `${GEO_FAIL_PREFIX}${Date.now()}`);
+      return null;
     }
   } catch {
-    return null; // 网络/超时/接口错误：不缓存，下次再试
+    kv.kvPut?.(key, `${GEO_FAIL_PREFIX}${Date.now()}`); // 网络/超时：负缓存 10 分钟
+    return null;
   }
   if (cacheable) kv.kvPut?.(key, name ?? "");
   return name;

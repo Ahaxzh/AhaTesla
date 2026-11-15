@@ -54,15 +54,20 @@ test("开启+Key:POI 名优先,结果与'无结果'都落缓存(第二次零网�
   assert.equal(calls, 2);
 });
 
-test("网络错误不缓存,下次重试;接口失败(status!=1)返回 null", async () => {
+test("网络错误负缓存 10 分钟（v2.6.2：同坐标不再反复挂超时）;接口失败(status!=1)同样负缓存", async () => {
   saveGeocodingConfig({ enabled: true, amapKey: "test-key-1234567890" });
   let calls = 0;
   const fetchImpl = async () => { calls += 1; throw new Error("network down"); };
   assert.equal(await resolveAmapLabel(24.3, 118.2, { fetchImpl }), null);
   assert.equal(await resolveAmapLabel(24.3, 118.2, { fetchImpl }), null);
-  assert.equal(calls, 2, "错误不应缓存");
+  assert.equal(calls, 1, "网络失败 10 分钟内不重试（此前每次详情都挂 4s 超时的根因）");
   const bad = async () => ({ json: async () => ({ status: "0", info: "INVALID_KEY" }) });
   assert.equal(await resolveAmapLabel(24.31, 118.21, { fetchImpl: bad }), null);
+  let badCalls = 0;
+  const bad2 = async () => { badCalls += 1; return { json: async () => ({ status: "0", info: "INVALID_KEY" }) }; };
+  await resolveAmapLabel(24.31, 118.21, { fetchImpl: bad2 });
+  await resolveAmapLabel(24.31, 118.21, { fetchImpl: bad2 });
+  assert.equal(badCalls, 0, "接口失败同坐标也已负缓存");
 });
 
 test("配置:Key 密文落库只回 hasKey/alias;空串清除", () => {

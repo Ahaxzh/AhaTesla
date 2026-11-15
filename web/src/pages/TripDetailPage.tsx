@@ -96,24 +96,26 @@ export default function TripDetailPage() {
             <StatCard icon={Zap} label={t('tripDetail.kpi.energy', '能耗')} value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
             <StatCard icon={Coins} label={t('tripDetail.kpi.cost', '电费')} value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
           </div>
+          {/* 结论胶囊行（v2.6.2 统一规格：同高 h-7 圆角胶囊，与能效徽章一致，不再大小混杂） */}
           <div className="flex flex-wrap items-center gap-2">
             <EfficiencyBadge ratio={trip.efficiency?.ratio} />
             {/* SoC 起止（v2.5）："这趟从 78% 开到 31%"——车主本能语言 */}
             {trip.soc && (
               <span
-                className="num rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs text-slate-300"
+                className="num inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[0.05] px-3 text-xs text-slate-300"
                 data-testid="trip-soc"
                 title={t('tripDetail.socNote', '行程首/末有效电量读数')}
               >
-                <BatteryMedium className="h-3.5 w-3.5 text-emerald-400" /> {trip.soc.start}% <span className="text-slate-500">→</span> {trip.soc.end}%
+                <BatteryMedium className="h-3.5 w-3.5 text-emerald-400" />
+                {trip.soc.start}% <span className="text-slate-500">→</span> {trip.soc.end}%
               </span>
             )}
-            {/* 急刹次数（v2.6）：降速 ≥8km/h/s 差分判定 */}
+            {/* 急刹次数（v2.6）：≥12 km/h/s 且初速 ≥30，同刹去重；0 次也是结论 */}
             {trip.hardBraking != null && (
               <span
-                className={`num rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs ${trip.hardBraking > 2 ? 'text-amber-400' : 'text-slate-300'}`}
+                className={`num inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs ${trip.hardBraking > 2 ? 'bg-amber-400/10 text-amber-400' : 'bg-white/[0.05] text-slate-300'}`}
                 data-testid="trip-braking"
-                title={t('tripDetail.brakingNote', '降速 ≥8 km/h/s 判定，同一次刹车不重复计')}
+                title={t('tripDetail.brakingNote', '降速 ≥12 km/h/s 且初速 ≥30 判定，同一次刹车不重复计')}
               >
                 <AlertTriangle className="h-3.5 w-3.5" /> {t('tripDetail.braking', '急刹')} {trip.hardBraking}
               </span>
@@ -121,21 +123,22 @@ export default function TripDetailPage() {
             {/* 行程内胎压变化（v2.6）：行驶升温升压 */}
             {trip.tirePressureChange && trip.tirePressureChange.deltaBar != null && (
               <span
-                className="num rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-xs text-slate-300"
+                className="num inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[0.05] px-3 text-xs text-slate-300"
                 data-testid="trip-tp-change"
                 title={t('tripDetail.tpChangeNote', '行程首/末 TPMS 对比——行驶升温胎压会自然上升')}
               >
-                <LifeBuoy className="h-3.5 w-3.5 text-slate-400" /> {trip.tirePressureChange.start.fl?.toFixed(1) ?? '--'} → {trip.tirePressureChange.end.fl?.toFixed(1) ?? '--'} bar
+                <LifeBuoy className="h-3.5 w-3.5 text-slate-400" />
+                {trip.tirePressureChange.start.fl?.toFixed(1) ?? '--'} → {trip.tirePressureChange.end.fl?.toFixed(1) ?? '--'} bar
                 <span className={trip.tirePressureChange.deltaBar >= 0 ? 'text-emerald-400' : 'text-amber-400'}>
-                  {' '}({trip.tirePressureChange.deltaBar >= 0 ? '+' : ''}{trip.tirePressureChange.deltaBar.toFixed(2)})
+                  ({trip.tirePressureChange.deltaBar >= 0 ? '+' : ''}{trip.tirePressureChange.deltaBar.toFixed(2)})
                 </span>
               </span>
             )}
-            {/* 口径标注（AC-6.3） */}
-            <span className="text-[11px] text-slate-400" data-testid="energy-formula-note">
-              {t('tripDetail.energyNote', '耗电口径：基于起止表显续航差 × 车辆效率系数')}
-            </span>
           </div>
+          {/* 口径标注（AC-6.3）：独立成行，不混进胶囊行 */}
+          <p className="text-[11px] text-slate-500" data-testid="energy-formula-note">
+            {t('tripDetail.energyNote', '耗电口径：基于起止表显续航差 × 车辆效率系数')}
+          </p>
 
           {/* 模块2：路线轨迹（速度着色 + 悬停速度提示） */}
           <Suspense fallback={<div className="skeleton h-72 w-full rounded-xl" data-testid="route-map-fallback" />}>
@@ -148,58 +151,58 @@ export default function TripDetailPage() {
           {/* 模块3：环境剖析微卡片（6 卡 = 移动 2×3 / 桌面 3×2，栅格不落单） */}
           {trip.environment && (
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-3" data-testid="environment-card">
-              <div className="glass-card-flat flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4">
                 <Thermometer className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
                   <div className="text-xs text-slate-400">{t('tripDetail.env.avgTemp', '平均室外温度')}</div>
-                  <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.avgTempC != null ? `${trip.environment.avgTempC.toFixed(1)}°C` : '--'}</div>
+                  <div className="num mt-0.5 truncate text-sm text-slate-200">{trip.environment.avgTempC != null ? `${trip.environment.avgTempC.toFixed(1)}°C` : '--'}</div>
                 </div>
               </div>
-              <div className="glass-card-flat flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4">
                 <Wind className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
                   <div className="text-xs text-slate-400">{t('tripDetail.env.ac', '空调耗电估算')}</div>
-                  <div className="num mt-0.5 text-sm text-slate-200">{trip.environment.acEstimateKwh != null ? fmtKwh(trip.environment.acEstimateKwh) : '--'}</div>
+                  <div className="num mt-0.5 truncate text-sm text-slate-200">{trip.environment.acEstimateKwh != null ? fmtKwh(trip.environment.acEstimateKwh) : '--'}</div>
                 </div>
               </div>
-              <div className="glass-card-flat flex items-center gap-3 p-4">
+              <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4">
                 <GaugeIcon className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
                   <div className="text-xs text-slate-400">{t('tripDetail.env.speed', '均速 / 最高')}</div>
-                  <div className="num mt-0.5 text-sm text-slate-200">
+                  <div className="num mt-0.5 truncate text-sm text-slate-200">
                     {trip.environment.avgSpeedKmh?.toFixed(0) ?? '--'} / {trip.environment.maxSpeedKmh?.toFixed(0) ?? '--'} km/h
                   </div>
                 </div>
               </div>
               {trip.tirePressure ? (
-                <div className="glass-card-flat flex items-center gap-3 p-4" data-testid="trip-tire-pressure">
+                <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4" data-testid="trip-tire-pressure">
                   <CircleDot className="h-4 w-4 shrink-0 text-tesla" />
                   <div>
                     <div className="text-xs text-slate-400">{t('tripDetail.env.tire', '胎压（行程末）')}</div>
                     {/* 主值=四轮最低（<2.6 bar 变红，对齐推送告警阈值）；副行四轮缩写明细（语言中立） */}
-                    <div className={`num mt-0.5 text-sm ${Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr) < 2.6 ? 'text-tesla' : 'text-slate-200'}`}>
+                    <div className={`num mt-0.5 truncate text-sm ${Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr) < 2.6 ? 'text-tesla' : 'text-slate-200'}`}>
                       {t('tripDetail.env.tireMin', '最低')} {Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr).toFixed(1)} bar
-                      <span className="ml-2 text-[11px] font-normal text-slate-400">
+                      <span className="ml-2 shrink-0 text-[11px] font-normal text-slate-400">
                         FL {trip.tirePressure.fl.toFixed(1)}/{trip.tirePressure.fr.toFixed(1)} · RL {trip.tirePressure.rl.toFixed(1)}/{trip.tirePressure.rr.toFixed(1)}
                       </span>
                     </div>
                   </div>
                 </div>
               ) : null}
-              <div className="glass-card-flat flex items-center gap-3 p-4" data-testid="trip-gps-count">
+              <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4" data-testid="trip-gps-count">
                 <Layers className="h-4 w-4 shrink-0 text-tesla" />
                 <div>
                   <div className="text-xs text-slate-400">{t('tripDetail.env.gps', 'GPS 采样点')}</div>
-                  <div className="num mt-0.5 text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
+                  <div className="num mt-0.5 truncate text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
                 </div>
               </div>
               {/* 采样间隔 = 时长 ÷ 原始点数（route 是 LTTB 抽稀后的 ≤300 点，不能用）；数据齐才渲染，与 GPS 卡凑成一对 */}
               {trip.positionCount != null && trip.positionCount > 0 && (
-                <div className="glass-card-flat flex items-center gap-3 p-4" data-testid="trip-sample-interval">
+                <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4" data-testid="trip-sample-interval">
                   <Timer className="h-4 w-4 shrink-0 text-tesla" />
                   <div>
                     <div className="text-xs text-slate-400">{t('tripDetail.env.sampleInterval', '平均采样间隔')}</div>
-                    <div className="num mt-0.5 text-sm text-slate-200">
+                    <div className="num mt-0.5 truncate text-sm text-slate-200">
                       {t('tripDetail.env.approxPrefix', '≈')} {Math.max(1, Math.round((trip.durationMin * 60) / trip.positionCount))} s/{t('tripDetail.env.perPoint', '点')}
                     </div>
                   </div>

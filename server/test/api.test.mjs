@@ -191,7 +191,7 @@ function tripsFakeDb() {
     }
     if (/FROM positions p/.test(sql) && /battery_level/.test(sql)) {
       // SoC 起止：首读 78% → 末读 31%
-      return [{ v: /ORDER BY p\.id ASC/.test(sql) ? 78 : 31 }];
+      return [{ v: /ORDER BY p\.date ASC/.test(sql) ? 78 : 31 }];
     }
     if (/GREATEST\(d\.start_rated_range_km/.test(sql) && !/outside_temp_avg/.test(sql)) {
       // 表显偏差：9 月 100/105、10 月 90/100、11 月微样本(rated 9 <50 剔除)

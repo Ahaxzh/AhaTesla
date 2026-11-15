@@ -613,12 +613,14 @@ export function createTripsRoutes({ db, state }) {
       {
         const msOf = (v) => new Date(String(v).endsWith("Z") || /[+-]\d{2}:?\d{2}$/i.test(String(v)) ? v : `${v}Z`).getTime() || 0;
         let armed = true;
+        let sawSpeed = false; // 有有效速度对 → 0 次也是结论（v2.6.1 修复：0 被当 null 隐藏）
         for (let i = 1; i < points.length; i++) {
           const v1 = finiteNumber(points[i - 1]?.speed);
           const v2 = finiteNumber(points[i]?.speed);
           if (v1 == null || v2 == null) continue;
           const dt = (msOf(points[i].date) - msOf(points[i - 1].date)) / 1000;
           if (dt <= 0 || dt > 10) continue;
+          sawSpeed = true;
           const decel = (v1 - v2) / dt;
           if (decel >= 12 && v1 >= 30) {
             if (armed) { hardBraking = (hardBraking ?? 0) + 1; armed = false; }
@@ -626,6 +628,7 @@ export function createTripsRoutes({ db, state }) {
             armed = true;
           }
         }
+        if (sawSpeed && hardBraking == null) hardBraking = 0;
         const tpmsAvg = (r) => {
           const vals = [r?.tp_fl, r?.tp_fr, r?.tp_rl, r?.tp_rr].map(finiteNumber).filter((v) => v != null);
           return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
@@ -642,13 +645,14 @@ export function createTripsRoutes({ db, state }) {
         }
       }
 
-      // SoC 起止（v2.5）："这趟从 78% 开到 31%"是车主本能语言——取行程首/末有效电量读数；
-      // 两点索引查询（positions.drive_id 有索引）；缺列/无读数 → null 不渲染
+      // SoC 起止（v2.5）："这趟从 78% 开到 31%"是车主本能语言——取行程首/末有效电量读数。
+      // v2.6.2 修复：ORDER BY p.id 无索引 → planner 走主键序全表扫（1300 万行实测 4.5s/次，
+      // 首末两个并发即用户遇到的"详情 10 秒"）；改按 (date, id) 与 drive_id 索引同序，行内取首条。
       let soc = null;
       try {
         const [first, last] = await Promise.all([
-          db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.id ASC LIMIT 1`, [drive.id]),
-          db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.id DESC LIMIT 1`, [drive.id]),
+          db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.date ASC, p.id ASC LIMIT 1`, [drive.id]),
+          db.queryOne(`SELECT p.battery_level::int AS v FROM positions p WHERE p.drive_id = $1 AND p.battery_level IS NOT NULL ORDER BY p.date DESC, p.id DESC LIMIT 1`, [drive.id]),
         ]);
         if (first?.v != null && last?.v != null) soc = { start: first.v, end: last.v };
       } catch { /* positions 缺列时忽略 */ }
