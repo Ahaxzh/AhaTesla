@@ -91,10 +91,10 @@ export default function TripDetailPage() {
         <div className="space-y-4">
           {/* 模块1：基础概览 + 能效达成率 */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard icon={RouteIcon} label={t('tripDetail.kpi.distance', '里程')} value={`${fmtKm(trip.distanceKm)} km`} />
-            <StatCard icon={Clock} label={t('tripDetail.kpi.duration', '时长')} value={fmtDuration(trip.durationMin)} />
-            <StatCard icon={Zap} label={t('tripDetail.kpi.energy', '能耗')} value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
-            <StatCard icon={Coins} label={t('tripDetail.kpi.cost', '电费')} value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
+            <StatCard compact icon={RouteIcon} label={t('tripDetail.kpi.distance', '里程')} value={`${fmtKm(trip.distanceKm)} km`} />
+            <StatCard compact icon={Clock} label={t('tripDetail.kpi.duration', '时长')} value={fmtDuration(trip.durationMin)} />
+            <StatCard compact icon={Zap} label={t('tripDetail.kpi.energy', '能耗')} value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
+            <StatCard compact icon={Coins} label={t('tripDetail.kpi.cost', '电费')} value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
           </div>
           {/* 结论胶囊行（v2.6.2 统一规格：同高 h-7 圆角胶囊，与能效徽章一致，不再大小混杂） */}
           <div className="flex flex-wrap items-center gap-2">
@@ -153,21 +153,21 @@ export default function TripDetailPage() {
             <section className="grid grid-cols-2 gap-3 lg:grid-cols-3" data-testid="environment-card">
               <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4">
                 <Thermometer className="h-4 w-4 shrink-0 text-tesla" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="text-xs text-slate-400">{t('tripDetail.env.avgTemp', '平均室外温度')}</div>
                   <div className="num mt-0.5 truncate text-sm text-slate-200">{trip.environment.avgTempC != null ? `${trip.environment.avgTempC.toFixed(1)}°C` : '--'}</div>
                 </div>
               </div>
               <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4">
                 <Wind className="h-4 w-4 shrink-0 text-tesla" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="text-xs text-slate-400">{t('tripDetail.env.ac', '空调耗电估算')}</div>
                   <div className="num mt-0.5 truncate text-sm text-slate-200">{trip.environment.acEstimateKwh != null ? fmtKwh(trip.environment.acEstimateKwh) : '--'}</div>
                 </div>
               </div>
               <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4">
                 <GaugeIcon className="h-4 w-4 shrink-0 text-tesla" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="text-xs text-slate-400">{t('tripDetail.env.speed', '均速 / 最高')}</div>
                   <div className="num mt-0.5 truncate text-sm text-slate-200">
                     {trip.environment.avgSpeedKmh?.toFixed(0) ?? '--'} / {trip.environment.maxSpeedKmh?.toFixed(0) ?? '--'} km/h
@@ -177,12 +177,16 @@ export default function TripDetailPage() {
               {trip.tirePressure ? (
                 <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4" data-testid="trip-tire-pressure">
                   <CircleDot className="h-4 w-4 shrink-0 text-tesla" />
-                  <div>
+                  {/* min-w-0：允许文本区收缩，长明细行靠 truncate 省略（v2.6.3 修复窄屏溢出） */}
+                  <div className="min-w-0 flex-1">
                     <div className="text-xs text-slate-400">{t('tripDetail.env.tire', '胎压（行程末）')}</div>
                     {/* 主值=四轮最低（<2.6 bar 变红，对齐推送告警阈值）；副行四轮缩写明细（语言中立） */}
-                    <div className={`num mt-0.5 truncate text-sm ${Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr) < 2.6 ? 'text-tesla' : 'text-slate-200'}`}>
+                    <div
+                      className={`num mt-0.5 truncate text-sm ${Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr) < 2.6 ? 'text-tesla' : 'text-slate-200'}`}
+                      title={`FL ${trip.tirePressure.fl.toFixed(1)}/${trip.tirePressure.fr.toFixed(1)} · RL ${trip.tirePressure.rl.toFixed(1)}/${trip.tirePressure.rr.toFixed(1)}`}
+                    >
                       {t('tripDetail.env.tireMin', '最低')} {Math.min(trip.tirePressure.fl, trip.tirePressure.fr, trip.tirePressure.rl, trip.tirePressure.rr).toFixed(1)} bar
-                      <span className="ml-2 shrink-0 text-[11px] font-normal text-slate-400">
+                      <span className="ml-2 text-[11px] font-normal text-slate-400">
                         FL {trip.tirePressure.fl.toFixed(1)}/{trip.tirePressure.fr.toFixed(1)} · RL {trip.tirePressure.rl.toFixed(1)}/{trip.tirePressure.rr.toFixed(1)}
                       </span>
                     </div>
@@ -191,7 +195,7 @@ export default function TripDetailPage() {
               ) : null}
               <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4" data-testid="trip-gps-count">
                 <Layers className="h-4 w-4 shrink-0 text-tesla" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="text-xs text-slate-400">{t('tripDetail.env.gps', 'GPS 采样点')}</div>
                   <div className="num mt-0.5 truncate text-sm text-slate-200">{trip.positionCount ?? trip.route?.length ?? 0}</div>
                 </div>
@@ -200,7 +204,7 @@ export default function TripDetailPage() {
               {trip.positionCount != null && trip.positionCount > 0 && (
                 <div className="glass-card-flat flex min-h-[60px] items-center gap-3 p-4" data-testid="trip-sample-interval">
                   <Timer className="h-4 w-4 shrink-0 text-tesla" />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="text-xs text-slate-400">{t('tripDetail.env.sampleInterval', '平均采样间隔')}</div>
                     <div className="num mt-0.5 truncate text-sm text-slate-200">
                       {t('tripDetail.env.approxPrefix', '≈')} {Math.max(1, Math.round((trip.durationMin * 60) / trip.positionCount))} s/{t('tripDetail.env.perPoint', '点')}
