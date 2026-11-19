@@ -12,10 +12,11 @@ import {
   Sun,
   UserCog,
   FileBarChart,
+  Zap,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { setCurrencySymbol } from '@/utils/format'
-import { LogoFull } from '@/components/Logo'
+import { LogoFull, LogoMark } from '@/components/Logo'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCar } from '@/contexts/CarContext'
 import { setApiHandlers, api } from '@/api/client'
@@ -24,17 +25,29 @@ import { useTheme, type ThemeSetting } from '@/contexts/ThemeContext'
 import { HealthBanner } from '@/components/HealthBanner'
 import { useI18n } from '@/i18n'
 
-/** 导航项（移动端 TabBar 与桌面侧栏共用）：概览/行程/充电/报告/设置 */
+/** 导航项定义（v2.7 起移动 TabBar 与桌面侧栏分列） */
+const NAV_DEFS = {
+  dashboard: { to: '/', label: '概览', labelKey: 'nav.dashboard', icon: Gauge, testid: 'nav-dashboard' },
+  trips: { to: '/trips', label: '行程', labelKey: 'nav.trips', icon: Route, testid: 'nav-trips' },
+  charging: { to: '/charging', label: '充电', labelKey: 'nav.charging', icon: BatteryCharging, testid: 'nav-charging' },
+  energy: { to: '/energy', label: '能耗', labelKey: 'nav.energy', icon: Zap, testid: 'nav-energy' },
+  reports: { to: '/reports', label: '报告', labelKey: 'nav.reports', icon: FileBarChart, testid: 'nav-reports' },
+  settings: { to: '/settings', label: '设置', labelKey: 'nav.settings', icon: Settings, testid: 'nav-settings' },
+} as const
+
+/** 桌面侧栏主导航：设置保留在侧栏（桌面有空间，直达比藏进菜单好） */
 export const NAV_ITEMS = [
-  { to: '/', label: '概览', labelKey: 'nav.dashboard', icon: Gauge, testid: 'nav-dashboard' },
-  { to: '/trips', label: '行程', labelKey: 'nav.trips', icon: Route, testid: 'nav-trips' },
-  { to: '/charging', label: '充电', labelKey: 'nav.charging', icon: BatteryCharging, testid: 'nav-charging' },
-  { to: '/reports', label: '报告', labelKey: 'nav.reports', icon: FileBarChart, testid: 'nav-reports' },
-  { to: '/settings', label: '设置', labelKey: 'nav.settings', icon: Settings, testid: 'nav-settings' },
+  NAV_DEFS.dashboard, NAV_DEFS.trips, NAV_DEFS.charging, NAV_DEFS.energy, NAV_DEFS.reports, NAV_DEFS.settings,
 ]
 
 /** 桌面侧栏主导航（电价/推送/系统已并入设置页分区） */
 export const SIDEBAR_ITEMS = NAV_ITEMS
+
+/** 移动端底部 TabBar（v2.7 重排）：设置移入顶栏头像菜单；
+ *  概览居中，左侧 行程/充电（记录类），右侧 能耗/报告（分析类）——拇指最顺手的中间位给最高频的概览 */
+export const TABBAR_ITEMS = [
+  NAV_DEFS.trips, NAV_DEFS.charging, NAV_DEFS.dashboard, NAV_DEFS.energy, NAV_DEFS.reports,
+]
 
 function NavItem({ to, label, labelKey, icon: Icon, testid, pending, onFeedback, onClick }: {
   to: string
@@ -151,10 +164,12 @@ function SidebarCarCard() {
   )
 }
 
-/** 左下角头像菜单（Discord 式）：用户信息 / 主题·语言快捷开关 /
- *  账户安全入口（跳设置页锚点 #settings-xxx，滚动落地由 SettingsPage 的 hash effect 承接） /
- *  版本标识 / 退出登录 */
-function UserMenu() {
+/** 头像菜单（Discord 式，v2.7 起双形态共用）：
+ *  sidebar = 桌面左下宽按钮，面板向上弹；
+ *  header  = 移动顶栏右上圆形头像，面板向下弹，且含「设置」入口
+ *  （v2.7 移动底栏去掉设置后，设置/账户安全/主题/语言/登出的统一入口）。
+ *  面板内容：用户信息 / 主题·语言快捷开关 / 账户安全（跳设置页锚点，滚动由 hash effect 承接）/ 版本 / 退出 */
+function UserMenu({ layout }: { layout: 'sidebar' | 'header' }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const { t } = useI18n()
@@ -197,6 +212,113 @@ function UserMenu() {
     system: { next: 'dark', icon: Monitor, label: t('menu.theme.system', '跟随系统') },
   }
   const tc = themeCycle[theme] ?? themeCycle.system
+  const base = layout === 'sidebar' ? 'user-menu' : 'mobile-user-menu'
+
+  const panel = open && (
+    <div
+      role="menu"
+      data-testid={base}
+      className={`absolute z-40 w-72 overflow-hidden rounded-xl border border-white/[0.08] bg-base-800/95 shadow-[0_8px_24px_rgba(0,0,0,0.5)] ${
+        layout === 'sidebar' ? 'bottom-full left-0 mb-2' : 'right-0 top-full mt-2'
+      }`}
+    >
+      <div className="border-b border-white/[0.06] px-3.5 py-2.5">
+        <div className="truncate text-sm font-medium text-slate-200">{user?.username}</div>
+        <div className="mt-0.5 text-[11px] text-slate-400">{t('menu.role', '管理员 · 单用户模式')}</div>
+      </div>
+
+      {/* 快捷开关：主题（三态循环）+ 语言 */}
+      <div className="flex items-center gap-2 px-3.5 py-2.5" data-testid={`${base}-quick`}>
+        <button
+          type="button"
+          onClick={() => setTheme(tc.next)}
+          title={t('menu.theme.title', '切换明暗主题')}
+          aria-label={t('menu.theme.title', '切换明暗主题')}
+          data-testid={`${base}-theme`}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/[0.09]"
+        >
+          <tc.icon className="h-3.5 w-3.5" />
+          {tc.label}
+        </button>
+        <button
+          type="button"
+          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          title={t('menu.lang.title', '切换语言')}
+          aria-label={t('menu.lang.title', '切换语言')}
+          data-testid={`${base}-lang`}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/[0.09]"
+        >
+          <Languages className="h-3.5 w-3.5" />
+          {lang === 'zh' ? 'English' : '中文'}
+        </button>
+      </div>
+
+      {/* 设置（仅顶栏形态：底栏已无设置，此为移动端唯一入口） */}
+      {layout === 'header' && (
+        <button
+          role="menuitem"
+          onClick={() => {
+            setOpen(false)
+            navigate('/settings')
+          }}
+          data-testid={`${base}-settings-link`}
+          className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+        >
+          <Settings className="h-4 w-4 text-slate-500" />
+          {t('menu.settings', '设置')}
+        </button>
+      )}
+
+      {/* 账户安全：跳设置页锚点（完整编辑唯一入口在设置→账户安全） */}
+      <button
+        role="menuitem"
+        onClick={() => {
+          setOpen(false)
+          navigate('/settings#settings-security')
+        }}
+        data-testid={`${base}-account-link`}
+        className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+      >
+        <UserCog className="h-4 w-4 text-slate-500" />
+        {t('menu.account', '账户安全')}
+        {layout === 'sidebar' && <span className="ml-auto text-[10px] text-slate-500">{t('menu.account.hint', '设置页打开')}</span>}
+      </button>
+
+      <button
+        role="menuitem"
+        onClick={handleLogout}
+        data-testid={`${base}-logout`}
+        className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
+      >
+        <LogOut className="h-4 w-4 text-slate-500" />
+        {t('menu.logout', '退出登录')}
+      </button>
+
+      {sys?.version && (
+        <div className="border-t border-white/[0.06] px-3.5 py-2 text-center text-[10px] text-slate-600" data-testid={`${base}-version`}>
+          AhaTesla v{sys.version}
+        </div>
+      )}
+    </div>
+  )
+
+  if (layout === 'header') {
+    return (
+      <div className="relative" ref={ref}>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          data-testid="mobile-user-menu-button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={t('menu.title', '账户菜单')}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-tesla/15 text-sm font-semibold text-tesla ring-1 ring-white/[0.08] transition active:scale-95"
+        >
+          {user?.username?.[0]?.toUpperCase() ?? '?'}
+        </button>
+        {panel}
+      </div>
+    )
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -222,83 +344,13 @@ function UserMenu() {
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
-
-      {/* 下拉菜单（w-72 允许内联表单铺开） */}
-      {open && (
-        <div
-          role="menu"
-          data-testid="user-menu"
-          className="absolute bottom-full left-0 z-40 mb-2 w-72 overflow-hidden rounded-xl border border-white/[0.08] bg-base-800/95 shadow-[0_8px_24px_rgba(0,0,0,0.5)] backdrop-blur-xl"
-        >
-          <div className="border-b border-white/[0.06] px-3.5 py-2.5">
-            <div className="truncate text-sm font-medium text-slate-200">{user?.username}</div>
-            <div className="mt-0.5 text-[11px] text-slate-400">{t('menu.role', '管理员 · 单用户模式')}</div>
-          </div>
-
-          {/* 快捷开关：主题（三态循环）+ 语言 */}
-          <div className="flex items-center gap-2 px-3.5 py-2.5" data-testid="user-menu-quick">
-            <button
-              type="button"
-              onClick={() => setTheme(tc.next)}
-              title={t('menu.theme.title', '切换明暗主题')}
-              aria-label={t('menu.theme.title', '切换明暗主题')}
-              data-testid="user-menu-theme"
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/[0.09]"
-            >
-              <tc.icon className="h-3.5 w-3.5" />
-              {tc.label}
-            </button>
-            <button
-              type="button"
-              onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-              title={t('menu.lang.title', '切换语言')}
-              aria-label={t('menu.lang.title', '切换语言')}
-              data-testid="user-menu-lang"
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.04] px-2 py-1.5 text-[11px] text-slate-300 transition hover:bg-white/[0.09]"
-            >
-              <Languages className="h-3.5 w-3.5" />
-              {lang === 'zh' ? 'English' : '中文'}
-            </button>
-          </div>
-
-          {/* 账户安全：跳设置页锚点（完整编辑唯一入口在设置→账户安全） */}
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              navigate('/settings#settings-security')
-            }}
-            data-testid="user-menu-account-link"
-            className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
-          >
-            <UserCog className="h-4 w-4 text-slate-500" />
-            {t('menu.account', '账户安全')}
-            <span className="ml-auto text-[10px] text-slate-500">{t('menu.account.hint', '设置页打开')}</span>
-          </button>
-
-          <button
-            role="menuitem"
-            onClick={handleLogout}
-            data-testid="user-menu-logout"
-            className="flex w-full items-center gap-2.5 border-t border-white/[0.06] px-3.5 py-2.5 text-[13px] text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
-          >
-            <LogOut className="h-4 w-4 text-slate-500" />
-            {t('menu.logout', '退出登录')}
-          </button>
-
-          {sys?.version && (
-            <div className="border-t border-white/[0.06] px-3.5 py-2 text-center text-[10px] text-slate-600" data-testid="user-menu-version">
-              AhaTesla v{sys.version}
-            </div>
-          )}
-        </div>
-      )}
+      {panel}
     </div>
   )
 }
 
 export function AppLayout() {
-  useAuth()
+  const { expire } = useAuth()
   const navigate = useNavigate()
   const { toast } = useToast()
   const { t } = useI18n()
@@ -331,11 +383,13 @@ export function AppLayout() {
   useEffect(() => {
     setApiHandlers({
       unauthorized: () => {
+        // v2.7：本地会话一并作废——否则 LoginRoute 看到 stale user 会弹回 "/"，来回跳
+        expire()
         if (window.location.pathname !== '/login') navigate('/login', { replace: true })
       },
       error: (err) => toast(err.message, 'error'),
     })
-  }, [navigate, toast])
+  }, [navigate, toast, expire])
 
   return (
     <div className="min-h-dvh bg-base-950">
@@ -354,30 +408,47 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="border-t border-white/[0.06] p-3">
-          <UserMenu />
+          <UserMenu layout="sidebar" />
         </div>
       </aside>
 
       {/* 主内容（含 GA-32 失联横幅：置于内容列内，避免叠印侧栏） */}
       <div className="lg:pl-60">
+        {/* 移动端顶栏（v2.7）：左 Logo 右头像。随页滚动（不 sticky）——刻意避开
+            sticky/fixed+半透明这套 iOS 合成层雷区（底栏消失问题的同类根源）；
+            safe-area 顶部留白在此承担，main 不再重复垫 */}
+        <header
+          data-testid="mobile-topbar"
+          className="flex items-center justify-between gap-3 px-4 pb-1 pt-[max(0.625rem,env(safe-area-inset-top))] lg:hidden"
+        >
+          <div className="flex items-center gap-2">
+            <LogoMark size={22} />
+            <span className="text-[15px] font-semibold tracking-tight text-white">
+              Aha<span className="text-tesla">Tesla</span>
+            </span>
+          </div>
+          <UserMenu layout="header" />
+        </header>
         <HealthBanner />
-        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-6 lg:pb-10 lg:pt-[max(2rem,env(safe-area-inset-top))]">
+        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-4 sm:px-6 lg:pb-10 lg:pt-[max(2rem,env(safe-area-inset-top))]">
           <Outlet />
         </main>
       </div>
 
-      {/* 移动端底部 TabBar（§6.1：4 项 概览/行程/充电/设置）。
+      {/* 移动端底部 TabBar（v2.7 重排：行程|充电|概览|能耗|报告，设置移入顶栏头像菜单）。
           安全区 padding 必须在带背景的内层：iOS 主屏独立模式下 env(safe-area-inset-bottom)≈34px，
           若垫在外层透明容器上，背景只铺到导航内容底部，栏会悬浮在透明缝上（内容穿缝而过）。
-          transform-gpu：强制独立合成层，修 iOS 主屏模式动量滚动时 fixed 底栏的亚像素漂移（视觉上"跟着滚"） */}
+          transform-gpu：强制独立合成层，修 iOS 主屏模式动量滚动时 fixed 底栏的亚像素漂移。
+          v2.7 实底化（bg-base-900 去 backdrop-blur）：iOS Safari/主屏模式下 fixed 元素带
+          backdrop-filter 的子层在动量滚动时偶发不重绘 → 整条栏"消失"，重开才恢复（用户实测） */}
       <div className="fixed inset-x-0 bottom-0 z-30 transform-gpu lg:hidden">
-        <div className="border-t border-white/[0.06] bg-base-900/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
+        <div className="border-t border-white/[0.06] bg-base-900 pb-[env(safe-area-inset-bottom)]">
           <nav
             data-testid="mobile-tabbar"
             className="mx-auto grid max-w-md grid-cols-5 px-2 pt-1"
             aria-label={t('nav.bottom', '底部导航')}
           >
-            {NAV_ITEMS.map((item) => (
+            {TABBAR_ITEMS.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

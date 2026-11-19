@@ -138,21 +138,17 @@ test("设置页：修改密码表单存在并可取消", async ({ page }) => {
   await expect(page.locator("input[type='password']").first()).toBeVisible();
 });
 
-test("头像菜单：主题/语言快捷开关 + 账户安全跳设置页锚点 + 版本标识", async ({ page }) => {
+test("头像菜单：主题/语言快捷开关 + 账户安全跳设置页锚点 + 版本标识（v2.7 桌面侧栏 + 移动顶栏双入口）", async ({ page }) => {
   await login(page);
   await navigate(page, "trips"); // 从其他页进入验证不依赖路由
-  // 头像菜单只在桌面侧栏；移动端无此入口（账户入口在设置页内）
-  const menuBtn = page.getByTestId("user-menu-button");
-  if (!(await menuBtn.isVisible().catch(() => false))) {
-    test.skip(true, "移动端无头像菜单");
-    return;
-  }
-  await menuBtn.click();
+  const vp = page.viewportSize();
+  const base = vp && vp.width < 1024 ? "mobile-user-menu" : "user-menu";
+  await page.getByTestId(`${base}-button`).click();
   // Discord 式弹层：主题/语言快捷开关 + 账户安全入口（完整编辑唯一入口在设置页）
-  await expect(page.getByTestId("user-menu-theme")).toBeVisible();
-  await expect(page.getByTestId("user-menu-lang")).toBeVisible();
-  await expect(page.getByTestId("user-menu-version")).toContainText(/v\d/); // 版本标识（"我到底在跑哪版"）
-  await page.getByTestId("user-menu-account-link").click();
+  await expect(page.getByTestId(`${base}-theme`)).toBeVisible();
+  await expect(page.getByTestId(`${base}-lang`)).toBeVisible();
+  await expect(page.getByTestId(`${base}-version`)).toContainText(/v\d/); // 版本标识（"我到底在跑哪版"）
+  await page.getByTestId(`${base}-account-link`).click();
   // 跳转设置页账户安全锚点，密码表单可见
   await expect(page).toHaveURL(/settings#settings-security/, { timeout: 8000 });
   await expect(page.getByTestId("change-password-card")).toBeVisible();
@@ -313,14 +309,77 @@ test("移动端：充电页统计四卡在窄屏两列排布不溢出", async ({
   expect(stats).toBeTruthy();
 });
 
+test("移动端：底栏五项概览居中无设置 + 顶栏头像菜单进设置（v2.7 导航重排）", async ({ page }) => {
+  await login(page);
+  const viewport = page.viewportSize();
+  if (!viewport || viewport.width >= 1024) {
+    test.skip(true, "仅移动端视口执行");
+    return;
+  }
+  const bar = page.getByTestId("mobile-tabbar");
+  await expect(bar).toBeVisible();
+  const links = bar.locator("a");
+  await expect(links).toHaveCount(5);
+  // 概览居中（第 3 项）；左侧行程/充电（记录），右侧能耗/报告（分析）
+  await expect(links.nth(0)).toHaveAttribute("href", "/trips");
+  await expect(links.nth(1)).toHaveAttribute("href", "/charging");
+  await expect(links.nth(2)).toHaveAttribute("href", "/");
+  await expect(links.nth(3)).toHaveAttribute("href", "/energy");
+  await expect(links.nth(4)).toHaveAttribute("href", "/reports");
+  // 设置不在底栏（v2.7 移入顶栏头像菜单）
+  await expect(bar.getByTestId("nav-settings-mobile")).toHaveCount(0);
+  // 顶栏：左 Logo 右头像；头像菜单 → 设置直达
+  await expect(page.getByTestId("mobile-topbar")).toBeVisible();
+  await page.getByTestId("mobile-user-menu-button").click();
+  await expect(page.getByTestId("mobile-user-menu-settings-link")).toBeVisible();
+  await page.getByTestId("mobile-user-menu-settings-link").click();
+  await expect(page).toHaveURL(/settings/, { timeout: 8000 });
+  // 设置页真实渲染（标题出现即可；各分区细节由设置页专属用例覆盖）
+  await expect(page.locator("main")).toContainText(/设置|Settings/, { timeout: 10000 });
+});
+
+test("能耗页：三段切换（最近行程/自上次充电/累计）+ 曲线与月度图（v2.7）", async ({ page }) => {
+  await login(page);
+  await navigate(page, "energy");
+  // 默认最近行程：KPI 四卡 + 行程详情链接
+  await page.waitForSelector("[data-testid='energy-kpis']", { timeout: 15000 });
+  await expect(page.getByTestId("energy-trip-link")).toBeVisible();
+  await expect(page.getByTestId("energy-projected")).toBeVisible(); // 满电预估（电池容量可得时）
+  // 近两年：逐趟能耗曲线 + 每月实际vs表显（数据可得才渲染；真实库样本充足）。
+  // 2 年窗口 overview 实测 ~1.3s，但并行压测下仍放宽到 20s（同行程页惯例）
+  await page.getByTestId("energy-range-all").click();
+  await page.waitForSelector("[data-testid='energy-trend-card']", { timeout: 20000 });
+  await expect(page.getByTestId("energy-trend-track")).toBeVisible();
+  await expect(page.getByTestId("energy-trend-avg-line")).toBeVisible();
+  await page.waitForSelector("[data-testid='energy-monthly-card']", { timeout: 20000 });
+  await expect(page.getByTestId("energy-monthly-track").locator("button").first()).toBeVisible();
+  // 自上次充电：聚合 KPI 或空态（刚充满还没跑）
+  await page.getByTestId("energy-range-since").click();
+  await page.waitForSelector("[data-testid='energy-kpis'], [data-testid='energy-empty']", { timeout: 20000 });
+  // URL 深链：?range=all 直达近两年
+  await page.goto(page.url().split("?")[0] + "?range=all");
+  await page.waitForSelector("[data-testid='energy-trend-card']", { timeout: 20000 });
+});
+
+test("登录页首屏不再闪主界面：未登录直达登录页，应用壳不渲染", async ({ page }) => {
+  // 已在 beforeEach 清 cookie；直开首页应只见登录卡，不见底部栏/侧栏/顶栏
+  await page.goto("/");
+  await expect(page.getByTestId("login-card")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId("mobile-tabbar")).toHaveCount(0);
+  await expect(page.getByTestId("desktop-sidebar")).toHaveCount(0);
+  await expect(page.getByTestId("mobile-topbar")).toHaveCount(0);
+});
+
 test("登出后回到登录页且受保护页 401 跳转", async ({ page }) => {
   await login(page);
   await navigate(page, "settings");
-  // 桌面侧栏头像菜单里的登出
-  const menuBtn = page.getByTestId("user-menu-button");
+  // 侧栏（桌面）或顶栏（移动）头像菜单里的登出
+  const vp = page.viewportSize();
+  const base = vp && vp.width < 1024 ? "mobile-user-menu" : "user-menu";
+  const menuBtn = page.getByTestId(`${base}-button`);
   if (await menuBtn.isVisible().catch(() => false)) {
     await menuBtn.click();
-    await page.getByTestId("user-menu-logout").click();
+    await page.getByTestId(`${base}-logout`).click();
     await expect(page).toHaveURL(/login/, { timeout: 8000 });
   }
 });

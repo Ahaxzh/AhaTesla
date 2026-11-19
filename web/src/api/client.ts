@@ -205,8 +205,12 @@ export const api = {
   chargingDetail: (id: number | string) => get<ChargeDetail>(`/api/charging/${id}`),
   chargingHabits: (params: { from?: string; to?: string; carId?: number } = {}) =>
     get<ChargingHabits>(`/api/charging/habits${buildRangeQuery(params)}`),
-  displayAccuracy: (params: { from?: string; to?: string; carId?: number } = {}) =>
-    get<DisplayAccuracy>(`/api/trips/display-accuracy${buildRangeQuery(params)}`),
+  displayAccuracy: (params: { from?: string; to?: string; carId?: number; months?: number } = {}) => {
+    const q = buildRangeQuery(params)
+    const months = params.months ? `months=${Math.round(params.months)}` : ''
+    const sep = months ? (q ? '&' : '?') : ''
+    return get<DisplayAccuracy>(`/api/trips/display-accuracy${q}${sep}${months}`)
+  },
   efficiencyProfile: (params: { from?: string; to?: string; carId?: number } = {}) =>
     get<EfficiencyProfile>(`/api/trips/efficiency-profile${buildRangeQuery(params)}`),
   maintenanceGet: () => get<MaintenanceStatus>('/api/maintenance'),

@@ -121,4 +121,18 @@ describe('LoginRoute 路由分流', () => {
     expect(await screen.findByTestId('login-card')).toBeInTheDocument()
     expect(screen.queryByTestId('setup-admin-form')).not.toBeInTheDocument()
   })
+
+  it('v2.7 已登录直开 /login：探测完成前先 splash，不闪登录表单，随后跳回 /', async () => {
+    // 默认 msw：me 成功返回 mockUser
+    renderWithProviders(
+      <Routes>
+        <Route path="/login" element={<LoginRoute />} />
+        <Route path="/" element={<div data-testid="home-route" />} />
+      </Routes>,
+      { route: '/login' },
+    )
+    // 探测期间的 splash 或直接跳转都可能被观察到；登录表单绝不能出现
+    await waitFor(() => expect(screen.getByTestId('home-route')).toBeInTheDocument())
+    expect(screen.queryByTestId('login-card')).not.toBeInTheDocument()
+  })
 })

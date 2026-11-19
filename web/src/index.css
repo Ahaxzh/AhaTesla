@@ -324,6 +324,30 @@
 [data-theme='light'] .bg-sky-400 {
   background-color: #0ea5e9; /* sky-500 */
 }
+/* 图表实心柱/点（v2.7 能耗页 + 既有逐日活跃/时间轴/习惯图）：白底上加深一档 */
+[data-theme='light'] .bg-emerald-500,
+[data-theme='light'] .bg-emerald-500\/80,
+[data-theme='light'] .bg-emerald-500\/75 {
+  background-color: #059669; /* emerald-600 */
+}
+[data-theme='light'] .bg-amber-500,
+[data-theme='light'] .bg-amber-500\/70 {
+  background-color: #b45309; /* amber-700 */
+}
+/* 能耗图白色标记（平均虚线/表显刻线）：白卡上翻成深色墨 */
+[data-theme='light'] .bg-white\/70 {
+  background-color: rgba(15, 23, 42, 0.55);
+}
+[data-theme='light'] .border-white\/25 {
+  border-color: rgba(15, 23, 42, 0.3);
+}
+[data-theme='light'] .ring-white\/\[0\.08\] {
+  --tw-ring-color: rgba(15, 23, 42, 0.12);
+}
+/* v2.7 移动底栏/顶栏实底（去 backdrop-blur 后）：浅色主题等价白底 */
+[data-theme='light'] .bg-base-900 {
+  background-color: #ffffff;
+}
 /* 彩色软底 chip（/10 一档）：底色同步换深色系 */
 [data-theme='light'] .bg-emerald-400\/10 {
   background-color: rgba(5, 150, 105, 0.1);

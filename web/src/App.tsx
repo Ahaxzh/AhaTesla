@@ -15,6 +15,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const TripsPage = lazy(() => import('./pages/TripsPage'))
 const TripDetailPage = lazy(() => import('./pages/TripDetailPage'))
 const ChargingPage = lazy(() => import('./pages/ChargingPage'))
+const EnergyPage = lazy(() => import('./pages/EnergyPage'))
 const PushPage = lazy(() => import('./pages/PushPage'))
 const ReportsPage = lazy(() => import('./pages/ReportsPage'))
 const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'))
@@ -41,6 +42,7 @@ const ROUTE_PRELOADS: Array<() => Promise<unknown>> = [
   () => import('./pages/TripsPage'),
   () => import('./pages/TripDetailPage'),
   () => import('./pages/ChargingPage'),
+  () => import('./pages/EnergyPage'),
   () => import('./pages/PushPage'),
   () => import('./pages/ReportsPage'),
   () => import('./pages/ReportDetailPage'),
@@ -70,27 +72,32 @@ function useIdlePreloadRoutes() {
   }, [])
 }
 
+function AuthSplash() {
+  return (
+    <div className="flex min-h-dvh items-center justify-center" data-testid="auth-splash">
+      <div className="skeleton h-8 w-8 rounded-full" />
+    </div>
+  )
+}
+
 function Protected({ children }: { children: ReactNode }) {
   const { user, initialized } = useAuth()
-  // 探测未完成时不渲染应用壳（避免未登录首屏闪出侧栏/TabBar 再跳登录）
-  if (!initialized) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center" data-testid="auth-splash">
-        <div className="skeleton h-8 w-8 rounded-full" />
-      </div>
-    )
-  }
+  // 探测未完成时不渲染应用壳。守卫必须包在 AppLayout 外层：只包 Outlet 内容的话，
+  // 壳（侧栏/底部栏）仍会在未登录首屏先渲染出来，me() 返回后再跳登录 —— 用户实测闪主界面。
+  if (!initialized) return <AuthSplash />
   if (!user) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
 /** §6.2 路由树：/login 已登录 → /；实例未初始化（无管理员）→ /setup 向导。
  *  此前 / 只认登录态：全新实例打开首页是死登录框（无任何向导提示），
- *  与 README「打开 :18500 → 向导」承诺不符 —— 首位真实新用户实测踩中。 */
+ *  与 README「打开 :18500 → 向导」承诺不符 —— 首位真实新用户实测踩中。
+ *  v2.7：探测完成前先出 splash —— 带有效 cookie 直开 /login 不再闪一下登录表单再弹回应用。 */
 export function LoginRoute() {
   const { user, initialized } = useAuth()
   const statusQuery = useQuery({ queryKey: ['setup-status'], queryFn: api.setupStatus, staleTime: 0 })
-  if (initialized && user) return <Navigate to="/" replace />
+  if (!initialized) return <AuthSplash />
+  if (user) return <Navigate to="/" replace />
   if (statusQuery.data?.state === 'uninitialized') return <Navigate to="/setup" replace />
   return <LoginPage />
 }
@@ -108,15 +115,17 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Page path="/login"><LoginRoute /></Page>} />
           <Route path="/setup" element={<Page path="/setup"><SetupPage /></Page>} />
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<Page path="/"><Protected><DashboardPage /></Protected></Page>} />
-            <Route path="/trips" element={<Page path="/trips"><Protected><TripsPage /></Protected></Page>} />
-            <Route path="/trips/:id" element={<Page path="/trips/:id"><Protected><TripDetailPage /></Protected></Page>} />
-            <Route path="/charging" element={<Page path="/charging"><Protected><ChargingPage /></Protected></Page>} />
-            <Route path="/push" element={<Page path="/push"><Protected><PushPage /></Protected></Page>} />
-            <Route path="/reports" element={<Page path="/reports"><Protected><ReportsPage /></Protected></Page>} />
-            <Route path="/reports/:id" element={<Page path="/reports/:id"><Protected><ReportDetailPage /></Protected></Page>} />
-            <Route path="/settings" element={<Page path="/settings"><Protected><SettingsPage /></Protected></Page>} />
+          {/* 守卫在壳外层：未登录/探测中整壳不渲染（v2.7 修复首屏闪主界面） */}
+          <Route element={<Protected><AppLayout /></Protected>}>
+            <Route path="/" element={<Page path="/"><DashboardPage /></Page>} />
+            <Route path="/trips" element={<Page path="/trips"><TripsPage /></Page>} />
+            <Route path="/trips/:id" element={<Page path="/trips/:id"><TripDetailPage /></Page>} />
+            <Route path="/charging" element={<Page path="/charging"><ChargingPage /></Page>} />
+            <Route path="/energy" element={<Page path="/energy"><EnergyPage /></Page>} />
+            <Route path="/push" element={<Page path="/push"><PushPage /></Page>} />
+            <Route path="/reports" element={<Page path="/reports"><ReportsPage /></Page>} />
+            <Route path="/reports/:id" element={<Page path="/reports/:id"><ReportDetailPage /></Page>} />
+            <Route path="/settings" element={<Page path="/settings"><SettingsPage /></Page>} />
             {/* v2.4 电价/系统并入设置页分区，旧地址重定向 */}
             <Route path="/pricing" element={<Navigate to="/settings#settings-pricing" replace />} />
             <Route path="/system" element={<Navigate to="/settings#settings-system" replace />} />

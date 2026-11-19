@@ -11,6 +11,9 @@ interface AuthState {
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
+  /** 本地会话作废（401 且 refresh 失败时）：只清态不发请求。
+   *  若不清，LoginRoute 看到 stale user 会弹回 "/"，与 401 处理器形成来回跳。 */
+  expire: () => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -53,9 +56,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [queryClient])
 
+  const expire = useCallback(() => {
+    setUser(null)
+    queryClient.clear()
+  }, [queryClient])
+
   const value = useMemo(
-    () => ({ user, initialized, login, logout, refresh }),
-    [user, initialized, login, logout, refresh],
+    () => ({ user, initialized, login, logout, refresh, expire }),
+    [user, initialized, login, logout, refresh, expire],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

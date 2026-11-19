@@ -45,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div
         data-testid="toast-root"
-        className="pointer-events-none fixed inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] z-[100] flex flex-col items-center gap-2 px-4"
+        className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top)+3.75rem)] z-[100] flex flex-col items-center gap-2 px-4 lg:top-[max(0.75rem,env(safe-area-inset-top))]"
       >
         {items.map((t) => (
           <div
