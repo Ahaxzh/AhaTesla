@@ -33,6 +33,11 @@ describe('能耗页：四卡同屏', () => {
     expect(screen.getByTestId('energy-card-since')).toBeInTheDocument()
     // 详情区默认展开 trip 窗：头条 + KPI
     expect(screen.getByTestId('energy-headline')).toHaveTextContent(/km/)
+    // v2.8.2 车机曲线：trip 窗渲染衰减图 + 瞬时图（mock 19 点）
+    expect(await screen.findByTestId('energy-decay-card')).toBeInTheDocument()
+    expect(screen.getByTestId('energy-curve-decay')).toBeInTheDocument()
+    expect(screen.getByTestId('energy-instant-card')).toBeInTheDocument()
+    expect(screen.getByTestId('energy-curve-svg-instant')).toBeInTheDocument()
   })
 
   it('车机式头条：overview.ratedUsedKm 与里程差 → 比额定少跑（橙）', async () => {

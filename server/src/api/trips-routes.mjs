@@ -461,6 +461,107 @@ export function createTripsRoutes({ db, state }) {
       };
     },
 
+    /** GET /api/trips/energy-curve?driveId=|from=ISO&carId —— 车机能量页曲线数据（v2.8.2）。
+     *  positions 表显续航（rated_battery_range_km，0.01km 分辨率）按 1km odometer 分桶：
+     *  桶首/桶尾有序聚合 → 桶间差分 = 每公里表显消耗 → 换算瞬时 Wh/km → 3 点滑动平均。
+     *  同时输出 ratedLeft 序列（剩余表显续航 vs 行驶 km）——同一份数据喂两张车机图：
+     *  续航衰减图（Y=剩余续航，虚线额定斜率）与 瞬时vs平均曲线。
+     *  口径：drive_id IS NOT NULL（只行驶段，不含停车哨兵耗电）；rated=0（停车唤醒段）剔除。
+     *  桶数上限 400（LTTB 降采样防长途回包爆炸）；查无样本返回 points: []。 */
+    async energyCurve(ctx) {
+      const driveId = Number(ctx.query.driveId) || null;
+      const from = validateIso(ctx.query.from, "from");
+      const carId = carIdFromQuery(ctx, state);
+      if (!driveId && !from) throw new HttpError(400, "BAD_REQUEST", "driveId or from required");
+
+      // 车辆效率（kWh/km；表显续航 km × eff = kWh，与全站能耗口径一致）
+      const carRow = await db.queryOne(
+        `SELECT efficiency::float8 AS eff FROM cars WHERE id = $1`,
+        [carId ?? (await db.queryOne(`SELECT id FROM cars ORDER BY id LIMIT 1`))?.id ?? 0]
+      ).catch(() => null);
+      const effRaw = finiteNumber(carRow?.eff);
+      const eff = effRaw != null ? (effRaw > 1 ? effRaw / 1000 : effRaw) : null;
+
+      const cond = driveId ? "p.drive_id = $1" : "p.drive_id IS NOT NULL AND p.date >= $1";
+      const rows = await db.query(`
+        WITH pts AS (
+          SELECT date, odometer, rated_battery_range_km AS rated
+          FROM positions p
+          WHERE p.rated_battery_range_km > 0 AND p.odometer IS NOT NULL AND ${cond}
+            ${carFilterSql(carId, "p.car_id").replace(/^\s*AND\s+/i, "AND ")}
+        )
+        SELECT floor(odometer)::int AS bucket,
+          (array_agg(rated ORDER BY date ASC))[1] AS rated_first,
+          (array_agg(rated ORDER BY date DESC))[1] AS rated_last,
+          max(odometer) - min(odometer) AS km
+        FROM pts GROUP BY 1 ORDER BY 1
+      `, [driveId ?? from]).catch(() => []);
+
+      if (!rows.length || eff == null) {
+        return { startRatedKm: null, actualKm: 0, ratedUsedKm: 0, avgWhPerKm: null, points: [] };
+      }
+
+      // 桶间差分：segDrop = 上桶尾 rated − 本桶尾 rated（表显显示刷新延迟产生的 0 值由滑动平均摊薄）
+      const buckets = rows.map((r) => ({
+        bucket: Number(r.bucket),
+        km: finiteNumber(r.km) ?? 0,
+        ratedFirst: finiteNumber(r.rated_first) ?? 0,
+        ratedLast: finiteNumber(r.rated_last) ?? 0,
+      }));
+      const startRatedKm = round(buckets[0].ratedFirst, 2);
+
+      // 单次遍历：逐桶段消耗 → 累计里程/累计消耗 → 瞬时（原始）与累计平均。
+      // 充电跳变守卫：窗口内若又充电，rated 链跳升数十 km 会被误算成大额"负消耗"
+      // 抵扣累计（真实库冒烟抓到：3 天窗 ratedUsed 44km → avgWh 46 的荒谬值）——
+      // 跳升 >30km 判定为充电，该桶 drop 记 0 并重置链基准（前端 since 窗只用
+      // instant/avg 曲线；totals 精度由 overview.ratedUsedKm 承担）。
+      const raw = [];
+      let cumKm = 0, cumDrop = 0, prevLast = null;
+      for (const b of buckets) {
+        if (prevLast !== null) {
+          let drop = prevLast - b.ratedLast;
+          if (drop < -30) drop = 0; // 充电跳变 → 重置（不抵扣）
+          cumKm += b.km;
+          cumDrop += drop;
+          raw.push({
+            km: round(cumKm, 1),
+            instant: b.km > 0.3 ? drop * eff * 1000 / b.km : null,
+            avg: cumKm > 0 ? cumDrop * eff * 1000 / cumKm : null,
+            drop,
+          });
+        }
+        prevLast = b.ratedLast;
+      }
+
+      // 3 点滑动平均（centered，null 跳过）+ ratedLeft = startRated − 累计消耗
+      let accDrop = 0;
+      const points = raw.map((p, i) => {
+        accDrop += p.drop;
+        const xs = [raw[i - 1]?.instant, p.instant, raw[i + 1]?.instant].filter((v) => v != null);
+        return {
+          km: p.km,
+          instant: xs.length ? round(xs.reduce((s, v) => s + v, 0) / xs.length, 1) : null,
+          avg: p.avg != null ? round(p.avg, 1) : null,
+          ratedLeft: round(startRatedKm - accDrop, 2),
+        };
+      });
+
+      // LTTB 降采样 ≤400（长途桶多防回包爆炸）：x=km, y= instant??avg（复用既有工具后映射回字段）
+      const finalPoints = points.length > 400
+        ? lttbDownsample(
+            points.map((p) => ({ x: p.km, y: p.instant ?? p.avg ?? 0, km: p.km, instant: p.instant, avg: p.avg, ratedLeft: p.ratedLeft })),
+            400,
+          ).map((p) => ({ km: p.km, instant: p.instant, avg: p.avg, ratedLeft: p.ratedLeft }))
+        : points;
+      return {
+        startRatedKm,
+        actualKm: round(cumKm, 1),
+        ratedUsedKm: round(cumDrop, 2),
+        avgWhPerKm: cumKm > 0 ? Math.round((cumDrop * eff * 1000) / cumKm) : null,
+        points: finalPoints,
+      };
+    },
+
     /** GET /api/trips/route-summary?from&to&carId —— 区间内行驶轨迹汇总（Grafana trip.json 地图提炼）。
      *  v0.3.1 重写：按 drive 分组抽样、每段 ≤10 点（含首尾），返回 segments 由前端逐段画线。
      *  旧版全局取模抽样把不同行程串成一条 polyline → 满屏跨城"飞线"（蜘蛛网），已废。

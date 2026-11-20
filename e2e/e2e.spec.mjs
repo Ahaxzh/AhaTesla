@@ -346,6 +346,9 @@ test("能耗页：四卡同屏 + 车机式头条 + 月度图（v2.8）", async (
   await expect(page.getByTestId("energy-card-trip")).toHaveAttribute("aria-pressed", "true");
   await page.waitForSelector("[data-testid='energy-headline']", { timeout: 20000 });
   await expect(page.getByTestId("energy-trip-link")).toBeVisible();
+  // v2.8.2 车机曲线：trip 窗衰减图 + 瞬时图（positions 分桶，≥2 点才渲染；真实库样本充足）
+  await page.waitForSelector("[data-testid='energy-decay-card']", { timeout: 25000 });
+  await expect(page.getByTestId("energy-instant-card")).toBeVisible();
   // 近 30 天窗：车机式头条出现（真实库有表显数据 → ±差值或仅里程）+ 满电预估
   // （trip 窗最新一趟可能是 0km 挪车微行程 → avgWh/满电预估按数据条件渲染，不硬断言）
   await page.getByTestId("energy-card-m30").click();

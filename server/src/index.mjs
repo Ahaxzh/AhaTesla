@@ -153,6 +153,8 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/trips/route-summary", requireAuth, (ctx) => trips.routeSummary(ctx));
   app.get("/api/trips/display-accuracy", requireAuth, (ctx) => trips.displayAccuracy(ctx));
   app.get("/api/trips/efficiency-profile", requireAuth, (ctx) => trips.efficiencyProfile(ctx));
+  // v2.8.2 车机能量曲线（positions 1km 分桶）：须在 :id 前注册（同上，顺序匹配）
+  app.get("/api/trips/energy-curve", requireAuth, (ctx) => trips.energyCurve(ctx));
   app.get("/api/trips/:id", requireAuth, (ctx) => trips.detail(ctx));
   app.get("/api/charging", requireAuth, (ctx) => charging.list(ctx));
   app.get("/api/charging/stats", requireAuth, (ctx) => charging.stats(ctx));

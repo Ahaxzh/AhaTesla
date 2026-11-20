@@ -10,6 +10,7 @@ import type {
   ChargingStats,
   DisplayAccuracy,
   EfficiencyProfile,
+  EnergyCurve,
   MaintenanceStatus,
   ChannelStatus,
   DashboardData,
@@ -213,6 +214,14 @@ export const api = {
   },
   efficiencyProfile: (params: { from?: string; to?: string; carId?: number } = {}) =>
     get<EfficiencyProfile>(`/api/trips/efficiency-profile${buildRangeQuery(params)}`),
+  /** v2.8.2 车机能量曲线：driveId=单趟 / from=时刻起（自上次充电） */
+  energyCurve: (params: { driveId?: number; from?: string; carId?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.driveId != null) q.set('driveId', String(params.driveId))
+    if (params.from) q.set('from', params.from)
+    if (params.carId != null) q.set('carId', String(params.carId))
+    return get<EnergyCurve>(`/api/trips/energy-curve?${q.toString()}`)
+  },
   maintenanceGet: () => get<MaintenanceStatus>('/api/maintenance'),
   maintenancePut: (items: Array<{ key: string; intervalKm?: number; lastAtKm?: number | null }>) =>
     put<{ ok: boolean }>('/api/maintenance', { items }),

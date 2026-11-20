@@ -288,6 +288,20 @@ export const defaultHandlers = [
       ],
     }),
   ),
+  http.get('/api/trips/energy-curve', () =>
+    HttpResponse.json({
+      startRatedKm: 365.5,
+      actualKm: 18.7,
+      ratedUsedKm: 20.2,
+      avgWhPerKm: 138,
+      points: Array.from({ length: 19 }, (_, i) => ({
+        km: (i + 1) * 1.0,
+        ratedLeft: 365.5 - (i + 1) * 1.06,
+        instant: 90 + ((i * 37) % 140),
+        avg: 100 + i * 2,
+      })),
+    }),
+  ),
   http.get('/api/trips/:id', ({ params }) =>
     HttpResponse.json({
       ...mockTrip,

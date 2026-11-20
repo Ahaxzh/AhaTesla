@@ -126,6 +126,15 @@ export interface DisplayAccuracy {
   avgRatio: number | null
 }
 
+/** GET /api/trips/energy-curve → 车机能量曲线（v2.8.2，positions 1km 分桶+滑动平均） */
+export interface EnergyCurve {
+  startRatedKm: number | null
+  actualKm: number
+  ratedUsedKm: number
+  avgWhPerKm: number | null
+  points: Array<{ km: number; ratedLeft: number; instant: number | null; avg: number | null }>
+}
+
 /** GET /api/trips/efficiency-profile → 能效画像（v2.6）：个人最佳 + 温度/速度分箱 */
 export interface EfficiencyProfile {
   days: number

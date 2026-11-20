@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
 import { EfficiencyCard } from '@/components/EfficiencyCard'
 import { MonthlyAccuracyChart } from '@/components/MonthlyAccuracyChart'
+import { EnergyCurveChart } from '@/components/EnergyCurveChart'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
 import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh } from '@/utils/format'
@@ -200,6 +201,17 @@ export default function EnergyPage() {
     queryFn: () => api.batteryHealth(currentCarId),
     retry: false,
   })
+  // 车机能量曲线（v2.8.2）：trip 窗衰减+瞬时两张，since 窗瞬时一张（positions 分桶）
+  const curveAnchor = active === 'trip' ? latestTrip?.id : active === 'since' ? sinceAnchor : undefined
+  const { data: curve } = useQuery({
+    queryKey: ['energy-curve', active, curveAnchor, currentCarId],
+    queryFn: () =>
+      active === 'trip'
+        ? api.energyCurve({ driveId: latestTrip!.id, carId: currentCarId })
+        : api.energyCurve({ from: sinceAnchor, carId: currentCarId }),
+    enabled: (active === 'trip' && latestTrip != null) || (active === 'since' && sinceAnchor != null),
+    retry: false,
+  })
 
   const st = stats[active]
   const detailLoading =
@@ -360,6 +372,35 @@ export default function EnergyPage() {
                 </>
               )}
             </div>
+
+            {/* 车机能量曲线（trip 窗：衰减+瞬时；since 窗：瞬时；样本 ≥2 才渲染） */}
+            {curve && curve.points.length >= 2 && (
+              <>
+                {active === 'trip' && (
+                  <section className="glass-card-flat p-4" data-testid="energy-decay-card">
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <h3 className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                        <TrendingDown className="h-4 w-4 text-tesla" /> {t('energy.curve.decayTitle', '续航衰减（vs 额定）')}
+                      </h3>
+                      <span className="num text-[11px] text-slate-500">
+                        {t('energy.curve.consumed', '已消耗 {n} km 表显').replace('{n}', fmtKm(curve.ratedUsedKm, 1))}
+                      </span>
+                    </div>
+                    <EnergyCurveChart points={curve.points} startRatedKm={curve.startRatedKm} mode="decay" />
+                  </section>
+                )}
+                <section className="glass-card-flat p-4" data-testid="energy-instant-card">
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <h3 className="flex items-center gap-2 text-sm font-medium text-slate-200">
+                      <TrendingUp className="h-4 w-4 text-tesla" />
+                      {active === 'trip' ? t('energy.curve.instantTitleTrip', '本趟瞬时能耗') : t('energy.curve.instantTitleSince', '自充电以来瞬时能耗')}
+                    </h3>
+                    <span className="num text-[11px] text-slate-500">{curve.avgWhPerKm != null ? `${curve.avgWhPerKm} Wh/km` : ''}</span>
+                  </div>
+                  <EnergyCurveChart points={curve.points} startRatedKm={curve.startRatedKm} mode="instant" />
+                </section>
+              </>
+            )}
 
             {/* 长期视角（近两年窗）：月度实际 vs 表显 + 能效画像 */}
             {active === 'y2' && months.length >= 2 && (
