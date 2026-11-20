@@ -232,6 +232,7 @@ export const defaultHandlers = [
       durationMin: 1710,
       energyKwh: 223.1,
       costCny: 168.4,
+      ratedUsedKm: 1265.3,
       maxSpeedKmh: 128,
       stateShare: { driveMin: 1710, chargeMin: 2400, parkedMin: 60000 },
       daily: {

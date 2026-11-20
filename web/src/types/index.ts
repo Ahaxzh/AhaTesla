@@ -209,6 +209,8 @@ export interface TripsOverview {
   durationMin: number
   energyKwh: number | null
   costCny: number | null
+  /** v2.8 区间表显续航消耗合计（km）：与 distanceKm 同量纲，差值 = ±比额定多/少跑；旧实例无此字段 */
+  ratedUsedKm?: number | null
   maxSpeedKmh: number | null
   /** 时长占比（近似：SUM 口径，非逐段 timeline）；parkedMin = 区间 − 行驶 − 充电（仅作小字） */
   stateShare: { driveMin: number; chargeMin: number; parkedMin: number }

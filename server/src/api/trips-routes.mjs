@@ -250,11 +250,13 @@ export function createTripsRoutes({ db, state }) {
       const whereSql = where.join(" AND ");
 
       // 充电/行程取逐条 (end_at, duration_min)：chargeMin 求和替代旧 SUM 单查，行同时喂 daily 桶聚合
+      // v2.8 加表显续航消耗合计（ratedUsedKm）：能耗页车机式头条「比额定多跑 X km」的数据源
       const [aggRow, chargeRows, driveRows] = await Promise.all([
         db.queryOne(`
           SELECT count(*)::int AS n,
                  round(sum(d.distance)::numeric, 1) AS distance_km,
-                 round(sum(d.duration_min)::numeric, 0) AS duration_min
+                 round(sum(d.duration_min)::numeric, 0) AS duration_min,
+                 round(sum(greatest(d.start_rated_range_km - d.end_rated_range_km, 0))::numeric, 1) AS rated_used_km
           FROM drives d WHERE ${whereSql}
         `).catch(() => null),
         db.query(`
@@ -313,6 +315,8 @@ export function createTripsRoutes({ db, state }) {
         durationMin: driveMin,
         energyKwh,
         costCny,
+        // 区间表显续航消耗合计（km）：与 distanceKm 同量纲，差值 = ±比额定多/少跑
+        ratedUsedKm: finiteNumber(aggRow?.rated_used_km),
         maxSpeedKmh,
         stateShare: {
           driveMin: Math.round(driveMin),

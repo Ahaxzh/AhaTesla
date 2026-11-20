@@ -338,27 +338,26 @@ test("移动端：底栏五项概览居中无设置 + 顶栏头像菜单进设�
   await expect(page.locator("main")).toContainText(/设置|Settings/, { timeout: 10000 });
 });
 
-test("能耗页：三段切换（最近行程/自上次充电/累计）+ 曲线与月度图（v2.7）", async ({ page }) => {
+test("能耗页：四卡同屏 + 车机式头条 + 月度图（v2.8）", async ({ page }) => {
   await login(page);
   await navigate(page, "energy");
-  // 默认最近行程：KPI 四卡 + 行程详情链接
-  await page.waitForSelector("[data-testid='energy-kpis']", { timeout: 15000 });
+  // 四卡渲染（最近行程/自上次充电/近30天/近两年），trip 卡默认激活 → 详情头条 + KPI
+  await page.waitForSelector("[data-testid='energy-cards']", { timeout: 20000 });
+  await expect(page.getByTestId("energy-card-trip")).toHaveAttribute("aria-pressed", "true");
+  await page.waitForSelector("[data-testid='energy-headline']", { timeout: 20000 });
   await expect(page.getByTestId("energy-trip-link")).toBeVisible();
-  await expect(page.getByTestId("energy-projected")).toBeVisible(); // 满电预估（电池容量可得时）
-  // 近两年：逐趟能耗曲线 + 每月实际vs表显（数据可得才渲染；真实库样本充足）。
-  // 2 年窗口 overview 实测 ~1.3s，但并行压测下仍放宽到 20s（同行程页惯例）
-  await page.getByTestId("energy-range-all").click();
-  await page.waitForSelector("[data-testid='energy-trend-card']", { timeout: 20000 });
-  await expect(page.getByTestId("energy-trend-track")).toBeVisible();
-  await expect(page.getByTestId("energy-trend-avg-line")).toBeVisible();
+  // 近 30 天窗：车机式头条出现（真实库有表显数据 → ±差值或仅里程）+ 满电预估
+  // （trip 窗最新一趟可能是 0km 挪车微行程 → avgWh/满电预估按数据条件渲染，不硬断言）
+  await page.getByTestId("energy-card-m30").click();
+  await page.waitForSelector("[data-testid='energy-headline']", { timeout: 20000 });
+  await page.waitForSelector("[data-testid='energy-projected']", { timeout: 20000 });
+  // 近两年窗：月度实际vs表显 + 能效画像（2 年 overview 实测 ~1.3s，并行压测放宽 20s）
+  await page.getByTestId("energy-card-y2").click();
   await page.waitForSelector("[data-testid='energy-monthly-card']", { timeout: 20000 });
-  await expect(page.getByTestId("energy-monthly-track").locator("button").first()).toBeVisible();
-  // 自上次充电：聚合 KPI 或空态（刚充满还没跑）
-  await page.getByTestId("energy-range-since").click();
-  await page.waitForSelector("[data-testid='energy-kpis'], [data-testid='energy-empty']", { timeout: 20000 });
-  // URL 深链：?range=all 直达近两年
-  await page.goto(page.url().split("?")[0] + "?range=all");
-  await page.waitForSelector("[data-testid='energy-trend-card']", { timeout: 20000 });
+  await page.waitForSelector("[data-testid='trip-efficiency-card']", { timeout: 20000 });
+  // URL 深链：?range=y2 直达近两年
+  await page.goto(page.url().split("?")[0] + "?range=y2");
+  await page.waitForSelector("[data-testid='energy-monthly-card']", { timeout: 20000 });
 });
 
 test("登录页首屏不再闪主界面：未登录直达登录页，应用壳不渲染", async ({ page }) => {
