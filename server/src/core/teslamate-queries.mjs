@@ -2,7 +2,7 @@
 // Timestamps in TeslaMate are naive UTC; we pass ISO instants as timestamptz
 // literals and compare via `AT TIME ZONE 'UTC'` to stay correct regardless of
 // the server's session timezone.
-import { utcNaiveSqlExpr, wallClockToUtcMs } from "./util.mjs";
+import { utcNaiveSqlExpr, wallClockToUtcMs, monthWindowIso } from "./util.mjs";
 
 function expr(value, errorMessage) {
   return utcNaiveSqlExpr(value, errorMessage);
@@ -232,12 +232,6 @@ export function listDrivesSql({ from, to, carId } = {}) {
   };
 }
 
-export const countDrivesSql = `
-  SELECT count(*)::int AS total
-  FROM drives d
-  WHERE d.end_date IS NOT NULL
-`;
-
 /** 轻量行程查询（FIFO 回放/窗口聚合专用）：不带 LATERAL 坐标子查询 ——
  *  positions 表千万行级，listDrivesSql 的端点坐标 LATERAL 全量扫会超时；
  *  回放只需要 id/car/时间/能耗列。 */
@@ -369,19 +363,18 @@ export async function getGeofences(db) {
 
 // ---- charging ------------------------------------------------------------
 
-/** 充电区间过滤：month（实例时区自然月）优先，否则 from/to ISO 精确区间（v0.3 日期区间筛选） */
+/** 充电区间过滤：month（实例时区自然月）优先，否则 from/to ISO 精确区间（v0.3 日期区间筛选）。
+ *  月份窗口与时间戳字面量均复用 util 权威实现（monthWindowIso/expr），与
+ *  ledger-routes 同口径 —— 此前各自手写，跨时区月份边界曾与账本页漂移。 */
 function chargingRangeFilter({ month, from, to, tz }) {
   if (month) {
-    const m = /^(\d{4})-(\d{2})$/.exec(String(month || ""));
-    const mon = m ? Number(m[2]) : 0;
-    if (!m || mon < 1 || mon > 12) throw new Error("invalid month");
-    const startIso = new Date(wallClockToUtcMs(tz, Number(m[1]), mon, 1)).toISOString();
-    const endIso = new Date(wallClockToUtcMs(tz, mon === 12 ? Number(m[1]) + 1 : Number(m[1]), mon === 12 ? 1 : mon + 1, 1)).toISOString();
-    return `AND cp.start_date >= ('${startIso}'::timestamptz AT TIME ZONE 'UTC') AND cp.start_date < ('${endIso}'::timestamptz AT TIME ZONE 'UTC')`;
+    const win = monthWindowIso(String(month), tz);
+    if (!win) throw new Error("invalid month");
+    return `AND cp.start_date >= (${expr(win.startIso, "invalid month")}) AND cp.start_date < (${expr(win.endIso, "invalid month")})`;
   }
   let f = "";
-  if (from) f += `AND cp.start_date >= ('${from}'::timestamptz AT TIME ZONE 'UTC') `;
-  if (to) f += `AND cp.start_date <= ('${to}'::timestamptz AT TIME ZONE 'UTC') `;
+  if (from) f += `AND cp.start_date >= (${expr(from, "invalid from")}) `;
+  if (to) f += `AND cp.start_date <= (${expr(to, "invalid to")}) `;
   return f;
 }
 

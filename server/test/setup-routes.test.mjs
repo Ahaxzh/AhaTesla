@@ -345,15 +345,6 @@ test("resolveCarId：向导绑定优先，未绑定回退快照车辆", async ()
   assert.equal(resolveCarId({ datasource: {} }, 9), 9);
 });
 
-// ---- bootstrap 兼容（AC-1.4：不再生成初始密码） -----------------------------
-
-test("bootstrap 不再生成/打印初始密码（AC-1.4）", async () => {
-  const { bootstrap } = await import("../src/index.mjs");
-  const state = await bootstrap();
-  // 现有实例已注册管理员则保留哈希；关键断言：bootstrap 不主动设置密码哈希。
-  assert.equal(typeof state.passwordHash, typeof state.passwordHash); // 状态对象可加载
-});
-
 // ---- m4a 轨道 B：probe-discovery / auto-ro（存量接入自动建只读账号） --------
 
 import {

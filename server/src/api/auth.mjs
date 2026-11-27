@@ -46,19 +46,6 @@ export async function verifyPassword(password, stored) {
   }
 }
 
-export function generateInitialPassword() {
-  // readable-ish: 4 groups of 4 base32 chars
-  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  const bytes = randomBytes(16);
-  const groups = [];
-  for (let g = 0; g < 4; g++) {
-    let part = "";
-    for (let i = 0; i < 4; i++) part += alphabet[bytes[g * 4 + i] % alphabet.length];
-    groups.push(part);
-  }
-  return groups.join("-");
-}
-
 // ---- HS256 JWT ----
 
 function b64url(buf) {
@@ -104,10 +91,4 @@ export function verifyJwt(token, secret, { now = Date.now() } = {}) {
   }
   if (typeof payload.exp === "number" && payload.exp * 1000 < now) return null;
   return payload;
-}
-
-export function jwtSecret(state) {
-  // JWT secret derives from the data-dir secret key file; stable across restarts.
-  const { loadSecretKey } = globalThis.__ahatesla_secret_loader?.() || {};
-  return loadSecretKey ? loadSecretKey() : null;
 }

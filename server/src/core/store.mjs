@@ -475,7 +475,3 @@ export function migrateStateJsonIntoStore(store, { jsonPath } = {}) {
   try { renameSync(jsonPathResolved, backup); } catch { /* best effort；下次启动会重试 */ }
   return { migrated: true, backup };
 }
-
-export function sqlitePathFor(dir) {
-  return join(dir, "ahatesla.db");
-}

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import {
-  hashPassword, verifyPassword, generateInitialPassword,
+  hashPassword, verifyPassword,
   signJwt, verifyJwt, TOKEN_TTL_S
 } from "../src/api/auth.mjs";
 import { createAuthRoutes } from "../src/api/auth-routes.mjs";
@@ -27,12 +27,6 @@ test("verifyPassword tolerates garbage stored values", async () => {
   assert.equal(await verifyPassword("x", ""), false);
   assert.equal(await verifyPassword("x", "not-a-hash"), false);
   assert.equal(await verifyPassword("x", "bcrypt$foo$bar$baz"), false);
-});
-
-test("initial password is readable and reasonably strong", () => {
-  const pwd = generateInitialPassword();
-  assert.match(pwd, /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
-  assert.equal(pwd.length, 19);
 });
 
 test("JWT sign/verify roundtrip", () => {

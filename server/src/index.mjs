@@ -49,7 +49,7 @@ import { createPushRoutes } from "./api/push-routes.mjs";
 import { createAiRoutes } from "./api/ai-routes.mjs";
 import { createAiCopywriter } from "./core/ai-copywriter.mjs";
 import { computeTripViews as tripsComputeTripViews } from "./api/trips-routes.mjs";
-import { listDrivesSql, listChargingForStats } from "./core/teslamate-queries.mjs";
+import { listDrivesSql, listChargingForStats, getCars } from "./core/teslamate-queries.mjs";
 import { enrichTripEndEvent, enrichChargingDoneEvent, enrichChargingStartEvent } from "./core/event-enrichment.mjs";
 
 const PORT = Number(process.env.PORT) || 18500;
@@ -83,14 +83,8 @@ function redactUrl(url) {
 }
 
 // ---- bootstrap state ------------------------------------------------------
-
-// AC-1.4：无预设明文密码。管理员账号由 /setup 向导首位注册创建（t_3f9fe52a）；
-// bootstrap 不再生成/打印初始密码。保留函数供旧测试导入兼容。
-export async function bootstrap({ db, statePathEnv } = {}) {
-  loadSecretKey();
-  const state = loadState();
-  return state;
-}
+// AC-1.4：无预设明文密码，管理员账号由 /setup 向导首位注册创建；
+// 进程启动状态装配全部在 main() 内完成（此前另设 bootstrap() 仅为旧测试兼容）。
 
 export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const getSecret = () => loadSecretKey();
@@ -304,7 +298,8 @@ function resolveDbUrl(state) {
 
 async function main() {
   const startedAt = Date.now();
-  const state = await bootstrap();
+  loadSecretKey();
+  const state = loadState();
   // §7.1 事件日志落 SQLite（进程重启可回看）；getStore 顺带完成 JSON→SQLite 一次性迁移。
   const eventLog = createEventLog({ store: getStore() });
   // AHATESLA_DEMO=1：不连 TeslaMate 库，全部查询由确定性种子数据应答（m4d 演示模式）
@@ -400,7 +395,7 @@ async function main() {
   async function carsListCached() {
     if (carsCache.list && Date.now() - carsCache.at < 60_000) return carsCache.list;
     try {
-      const rows = await db.query("SELECT id, name FROM cars ORDER BY id ASC");
+      const rows = await getCars(db);
       carsCache = { at: Date.now(), list: rows };
     } catch {
       carsCache = { at: Date.now(), list: carsCache.list || [] }; // 查询失败沿用旧缓存

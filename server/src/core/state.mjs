@@ -188,13 +188,6 @@ export function saveState(state) {
   return state;
 }
 
-// 兼容导出：旧 state.json 路径（迁移后文件已退役改名；供脚本/诊断探测用）。
-import { dataDir } from "./secret-box.mjs";
-import { join } from "node:path";
-export function statePath() {
-  return join(dataDir(), "state.json");
-}
-
 export function setDefaultRate(state, rate, source = "manual") {
   const from = state.pricing.defaultRateCnyPerKwh;
   if (from === rate) return false;

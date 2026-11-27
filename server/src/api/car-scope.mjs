@@ -5,7 +5,7 @@
 // null(数据层不过滤,保持单库单车旧行为)。
 // 数据层查询的 carId 过滤由并行改造承接:options 型查询统一读 opts.carId。
 import { HttpError } from "./http-kit.mjs";
-import { resolveCarId } from "../core/teslamate-queries.mjs";
+import { getCars, resolveCarId } from "../core/teslamate-queries.mjs";
 
 /**
  * 从请求查询串解析生效 carId。非法值(非正整数)直接 400。
@@ -32,19 +32,13 @@ export function carFilterSql(carId, column = "d.car_id") {
 }
 
 /**
- * 车辆清单(TeslaMate cars 表,只读直查——刻意不经过 teslamate-queries,
- * 该文件由数据层并行改造持有,避免合并冲突)。
- */
-export async function listCars(db) {
-  return db.query("SELECT id, name FROM cars ORDER BY id ASC");
-}
-
-/**
  * /api/cars 响应体:teslamate 车辆 + 设置页别名/主车标记。
+ * 车辆清单唯一权威实现 = teslamate-queries.getCars(display_priority 排序,
+ * 契约 §1;此前这里自建 id ASC 查询与契约口径漂移)。
  * settings.carAliases: Record<string, string>(carId → 别名)。
  */
 export async function carsPayload(db, state) {
-  const rows = await listCars(db);
+  const rows = await getCars(db);
   const aliases = state?.settings?.carAliases ?? {};
   const primary = Number(state?.settings?.primaryCarId);
   return rows.map((r) => ({

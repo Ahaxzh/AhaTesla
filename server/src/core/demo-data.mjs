@@ -421,10 +421,6 @@ export function createDemoDb({ dataset = buildDemoDataset() } = {}) {
     if (s.includes("d.end_date IS NULL") && s.includes("d.car_id")) {
       return [];
     }
-    // carsListCached（index.mjs 车辆标记缓存：SELECT id, name FROM cars ORDER BY id ASC）
-    if (s.includes("FROM cars ORDER BY id ASC")) {
-      return dataset.cars.map((c) => ({ id: c.id, name: c.name }));
-    }
     // 回放效率表（fifo-ledger：SELECT id, efficiency FROM cars）
     if (s.includes("SELECT id, efficiency FROM cars")) {
       return dataset.cars.map((c) => ({ id: c.id, efficiency: c.efficiency }));
