@@ -28,12 +28,11 @@ export const DEFAULT_STATE = {
     history: [] // [{changedAt, from, to, source}]
   },
   pushRules: {
-    tripEnd: true,
-    chargingStart: true,
-    chargingDone: true,
-    weeklyReport: true,
+    // v2 矩阵时代的默认形状：matrix 由 push-channels.defaultMatrix() 兜底，
+    // 不再落 v1 布尔默认 —— v1 布尔会经 matrixFromRules 兼容路径被误读成
+    // 「内容事件全渠道开」，与契约 §6（内容事件新渠道默认关）相反。
+    // 存量 v1 实例的布尔规则仍由 store 读出并走同一兼容路径，不受影响。
     weeklyReportDay: 1,
-    monthlyReport: true,
     // P1 静音时段（PUSH-DESIGN §trip_end）：命中时段的 trip_end 不即时投递，
     // 摘要进 quietBacklog（上限 10），次日早报「昨夜」段合并呈现后清空。
     quietHours: { enabled: false, start: "23:00", end: "07:00" },

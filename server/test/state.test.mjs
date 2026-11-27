@@ -43,13 +43,18 @@ beforeEach(() => {
   useMemoryStore();
 });
 
-test("空库 loadState 返回默认值（与 M0 DEFAULT_STATE 对齐）", () => {
+test("空库 loadState 返回默认值（与 DEFAULT_STATE 对齐；推送规则为 v2 矩阵时代形状）", () => {
   const state = loadState();
   assert.equal(state.username, "admin");
   assert.equal(state.passwordHash, null);
   assert.equal(typeof state.pricing.defaultRateCnyPerKwh, "number");
   assert.deepEqual(state.pricing.history, []);
-  assert.equal(state.pushRules.tripEnd, true);
+  // v1 布尔默认已删：残留会让全新实例经 matrixFromRules 兼容路径误读成
+  // 「内容事件全渠道开」（与契约 §6 默认矩阵相反）—— 这里锁死不回潮。
+  assert.equal("tripEnd" in state.pushRules, false);
+  assert.equal("chargingStart" in state.pushRules, false);
+  assert.equal(state.pushRules.quietHours.enabled, false);
+  assert.equal(state.pushRules.weeklyReportDay, 1);
   assert.equal(state.feishu.enabled, false);
 });
 

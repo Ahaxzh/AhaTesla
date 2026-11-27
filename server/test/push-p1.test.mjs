@@ -5,7 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { useMemoryStore } from "../src/core/state.mjs";
 import { openStore } from "../src/core/store.mjs";
-import { createNotifier, inQuietHours } from "../src/core/push-channels.mjs";
+import { createNotifier, inQuietHours, matrixFromRules } from "../src/core/push-channels.mjs";
+import { loadState } from "../src/core/state.mjs";
 import { buildReport, startReportScheduler } from "../src/core/report-engine.mjs";
 
 function makeFakeDb(routes) {
@@ -31,6 +32,21 @@ const probeChannel = (sink) => ({
 });
 
 // ---- P1-a 静音时段 -----------------------------------------------------------
+
+test("全新实例默认矩阵：内容事件仅飞书、告警三即时渠道（契约 §6，防 v1 默认回潮）", () => {
+  useMemoryStore();
+  // 空库 state：pushRules 只含 quietHours/weeklyReportDay 等 v2 默认，无 v1 布尔。
+  const fresh = loadState();
+  assert.equal("tripEnd" in fresh.pushRules, false);
+  const m = matrixFromRules(fresh.pushRules);
+  // 内容事件：新渠道默认关（用户显式开）
+  assert.deepEqual(m.tripEnd, { webpush: false, telegram: false, feishu: true, wecom: false, ntfy: false, bark: false });
+  assert.equal(m.daily.feishu, true);
+  assert.equal(m.daily.telegram, false);
+  // 告警事件：webpush/telegram/feishu 默认全开
+  assert.deepEqual(m.outage, { webpush: true, telegram: true, feishu: true, wecom: false, ntfy: false, bark: false });
+  assert.equal(m.tirePressure.webpush, true);
+});
 
 test("inQuietHours：普通窗口/跨午夜/非法与关闭态", () => {
   const at = (hm) => new Date(`2026-10-18T${hm}:00+08:00`);

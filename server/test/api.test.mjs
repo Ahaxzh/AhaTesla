@@ -14,7 +14,7 @@ import { createMaintenanceRoutes } from "../src/api/maintenance-routes.mjs";
 import { createPricingRoutes } from "../src/api/pricing-routes.mjs";
 import { createChannelRoutes } from "../src/api/channel-routes.mjs";
 import { createPushRoutes } from "../src/api/push-routes.mjs";
-import { matrixFromRules } from "../src/core/push-channels.mjs";
+import { createNotifier, matrixFromRules } from "../src/core/push-channels.mjs";
 import { createDashboardRoutes, createSystemRoutes } from "../src/api/dashboard-routes.mjs";
 import { createFeishuChannel } from "../src/core/feishu.mjs";
 import { createEventLog } from "../src/core/events.mjs";
@@ -28,8 +28,9 @@ function baseState(overrides = {}) {
     passwordHash: PASSWORD_HASH,
     pricing: { defaultRateCnyPerKwh: 1.0, history: [] },
     pushRules: {
-      tripEnd: true, chargingStart: true, chargingDone: true,
-      weeklyReport: true, weeklyReportDay: 1, monthlyReport: true
+      weeklyReportDay: 1,
+      quietHours: { enabled: false, start: "23:00", end: "07:00" },
+      quietBacklog: []
     },
     feishu: { enabled: false, appId: "", appSecretEnc: null, lastEventAt: null },
     ...overrides
@@ -50,7 +51,9 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
     s.pricing.history.push({ changedAt: new Date().toISOString(), from: 1.0, to: rate, source: src });
     saveStateFn(s);
   } });
-  const channels = createChannelRoutes({ state, feishu, eventLog, saveStateFn });
+  const channels = createChannelRoutes({ state, feishu, eventLog });
+  const notifier = createNotifier({ state, eventLog, feishu });
+  const push = createPushRoutes({ state, notifier, eventLog, store: null, reportScheduler: null, buildDeps: () => ({}) });
   const dashboard = createDashboardRoutes({ db, state });
   const system = createSystemRoutes({ db, mqtt, eventLog, startedAt: () => Date.now() - 5000 });
   const app = createApp();
@@ -74,11 +77,11 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
   app.get("/api/pricing", requireAuth, (ctx) => pricing.list(ctx));
   app.put("/api/pricing/default", requireAuth, (ctx) => pricing.setDefault(ctx));
   app.get("/api/pricing/history", requireAuth, (ctx) => pricing.history(ctx));
-  app.get("/api/channels", requireAuth, (ctx) => channels.list(ctx));
+  app.get("/api/channels", requireAuth, (ctx) => push.listChannels(ctx));
+  app.get("/api/push-rules", requireAuth, (ctx) => push.getPushRules(ctx));
+  app.put("/api/push-rules", requireAuth, (ctx) => push.putPushRules(ctx));
   app.put("/api/channels/feishu", requireAuth, (ctx) => channels.updateFeishu(ctx));
   app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
-  app.get("/api/push-rules", requireAuth, (ctx) => channels.getPushRules(ctx));
-  app.put("/api/push-rules", requireAuth, (ctx) => channels.putPushRules(ctx));
   app.get("/api/system/status", requireAuth, (ctx) => system.status(ctx));
   app.get("/api/system/events", requireAuth, (ctx) => system.events(ctx));
   return { app, state, saved, eventLog };
@@ -503,13 +506,16 @@ test("PUT /api/pricing/default 校验 + 历史", async () => {
 
 // ---- channels / push-rules ----------------------------------------------
 
-test("GET /api/channels：未配置飞书 → enabled=false 优雅降级", async () => {
+test("GET /api/channels：未配置渠道 → enabled=false 优雅降级（生产 listChannels 处理器）", async () => {
   const { app } = buildTestApp({ db: createFakeDb() });
   const res = await fetchApp(app, "GET", "/api/channels", { cookie: `ahatesla_token=${tokenFor()}` });
   assert.equal(res.status, 200);
   assert.equal(res.json.feishu.enabled, false);
   assert.equal(res.json.feishu.connected, false);
-  assert.equal(res.json.web.enabled, true);
+  for (const ch of ["telegram", "wecom", "ntfy", "bark"]) {
+    assert.ok(ch in res.json, `渠道 ${ch} 必须出现在状态清单`);
+    assert.equal(res.json[ch].enabled, false);
+  }
 });
 
 test("PUT /api/channels/feishu 校验", async () => {
@@ -529,18 +535,20 @@ test("POST /api/channels/feishu/test 未启用 → 400", async () => {
   assert.equal(res.json.error.code, "channel_disabled");
 });
 
-test("push-rules GET/PUT 校验", async () => {
+test("push-rules GET/PUT 校验（v2 矩阵，生产处理器）", async () => {
   const { app } = buildTestApp({ db: createFakeDb() });
   const cookie = `ahatesla_token=${tokenFor()}`;
   const get = await fetchApp(app, "GET", "/api/push-rules", { cookie });
-  assert.equal(get.json.tripEnd, true);
+  assert.equal(get.json.matrix.tripEnd.feishu, true);
+  assert.equal(get.json.matrix.tripEnd.telegram, false);
+  assert.equal(get.json.weeklyReportDay, 1);
   const bad = await fetchApp(app, "PUT", "/api/push-rules", { cookie, body: { weeklyReportDay: 9 } });
   assert.equal(bad.status, 400);
-  const bad2 = await fetchApp(app, "PUT", "/api/push-rules", { cookie, body: { tripEnd: "on" } });
+  const bad2 = await fetchApp(app, "PUT", "/api/push-rules", { cookie, body: { matrix: { tripEnd: { telegram: "on" } } } });
   assert.equal(bad2.status, 400);
-  const ok = await fetchApp(app, "PUT", "/api/push-rules", { cookie, body: { tripEnd: false, weeklyReportDay: 5 } });
+  const ok = await fetchApp(app, "PUT", "/api/push-rules", { cookie, body: { matrix: { tripEnd: { telegram: true } }, weeklyReportDay: 5 } });
   assert.equal(ok.status, 200);
-  assert.equal(ok.json.tripEnd, false);
+  assert.equal(ok.json.matrix.tripEnd.telegram, true);
   assert.equal(ok.json.weeklyReportDay, 5);
 });
 

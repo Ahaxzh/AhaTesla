@@ -1,14 +1,10 @@
-// channels + push-rules routes.
+// channel-routes.mjs — 飞书渠道配置（六渠道中唯一需要服务端代持 appId/Secret
+// 做长连接探测的渠道；其余渠道的配置端点在 push-routes.mjs）。
 import { HttpError } from "./http-kit.mjs";
-import { setFeishuConfig, saveState } from "../core/state.mjs";
+import { setFeishuConfig } from "../core/state.mjs";
 
-export function createChannelRoutes({ state, feishu, eventLog, saveStateFn = saveState }) {
+export function createChannelRoutes({ state, feishu, eventLog }) {
   return {
-    async list(ctx) {
-      const feishuStatus = await feishu.status();
-      return { feishu: feishuStatus, web: { enabled: true } };
-    },
-
     async updateFeishu(ctx) {
       const { enabled, appId, appSecret } = ctx.body || {};
       if (typeof enabled !== "boolean") throw new HttpError(400, "bad_request", "enabled must be boolean");
@@ -28,32 +24,6 @@ export function createChannelRoutes({ state, feishu, eventLog, saveStateFn = sav
       eventLog?.log("channels.feishu_test", { sent: result.sent });
       if (!result.sent) throw new HttpError(502, "channel_error", `feishu test failed: ${result.reason || "unknown"}`);
       return { ok: true, message: "测试卡片已发送" };
-    },
-
-    async getPushRules(ctx) {
-      return { ...state.pushRules };
-    },
-
-    async putPushRules(ctx) {
-      const body = ctx.body || {};
-      const allowed = ["tripEnd", "chargingStart", "chargingDone", "weeklyReport", "monthlyReport"];
-      const update = {};
-      for (const key of allowed) {
-        if (body[key] !== undefined) {
-          if (typeof body[key] !== "boolean") throw new HttpError(400, "bad_request", `${key} must be boolean`);
-          update[key] = body[key];
-        }
-      }
-      if (body.weeklyReportDay !== undefined) {
-        const day = Number(body.weeklyReportDay);
-        if (!Number.isInteger(day) || day < 1 || day > 7) {
-          throw new HttpError(400, "bad_request", "weeklyReportDay must be integer 1-7");
-        }
-        update.weeklyReportDay = day;
-      }
-      Object.assign(state.pushRules, update);
-      saveStateFn(state);
-      return { ...state.pushRules };
     }
   };
 }
