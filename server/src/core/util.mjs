@@ -72,3 +72,35 @@ export function monthWindowIso(month, tz = "Asia/Shanghai") {
     : wallClockToUtcMs(tz, year, mon + 1, 1);
   return { startIso: new Date(startMs).toISOString(), endIso: new Date(endMs).toISOString() };
 }
+
+/** LTTB（Largest-Triangle-Three-Buckets）降采样（§6.5-3）：保形状。
+ *  点为 {x, y, ...} 形状（trips 轨迹 / charging 功率曲线共用）。 */
+export function lttbDownsample(points, threshold = 300) {
+  if (!Array.isArray(points) || points.length <= threshold) return points || [];
+  const sampled = [];
+  const every = (points.length - 2) / (threshold - 2);
+  sampled.push(points[0]);
+  let a = 0;
+  for (let i = 1; i < threshold - 1; i++) {
+    const rangeStart = Math.floor((i + 1) * every) + 1;
+    const rangeEnd = Math.min(Math.floor((i + 2) * every) + 1, points.length);
+    // 计算 a..a+1 区间平均
+    let avgX = 0, avgY = 0;
+    const avgRangeLen = rangeEnd - rangeStart;
+    for (let j = rangeStart; j < rangeEnd; j++) { avgX += points[j].x; avgY += points[j].y; }
+    avgX /= avgRangeLen || 1; avgY /= avgRangeLen || 1;
+    // 在下一区间选离“前点→均值线”三角形面积最大的点
+    const rangeOff = Math.floor((i - 1) * every) + 1;
+    const rangeTo = Math.floor(i * every) + 1;
+    const px = points[a].x, py = points[a].y;
+    let maxArea = -1, nextA = rangeOff;
+    for (let j = rangeOff; j < rangeTo && j < points.length; j++) {
+      const area = Math.abs((px - avgX) * (points[j].y - py) - (px - points[j].x) * (avgY - py)) * 0.5;
+      if (area > maxArea) { maxArea = area; nextA = j; }
+    }
+    sampled.push(points[nextA]);
+    a = nextA;
+  }
+  sampled.push(points[points.length - 1]);
+  return sampled;
+}

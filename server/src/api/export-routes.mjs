@@ -1,7 +1,7 @@
 // export routes — CSV 导出（自托管"数据是自己的"刚需：行程/充电流水带走，含 FIFO 分摊列）。
 // 只读端点，走 requireAuth；只导 UI 已展示的口径（地址标签，无 GPS 坐标——红线 2）。
 import { listDrivesSql, listCharging, countCharging } from "../core/teslamate-queries.mjs";
-import { computeTripViews } from "./trips-routes.mjs";
+import { computeTripViews } from "../core/trip-views.mjs";
 import { chargeRowToView } from "./charging-routes.mjs";
 import { pricingOptionsFor, instanceTimezone } from "../core/pricing-options.mjs";
 import { carIdFromQuery } from "./car-scope.mjs";

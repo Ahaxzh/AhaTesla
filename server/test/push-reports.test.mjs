@@ -11,7 +11,7 @@ import { buildReport, nextReportRun, startReportScheduler } from "../src/core/re
 import { recordProbe, healthState, resetHealth } from "../src/core/health.mjs";
 import { createAuthRoutes, resetLoginLockoutForTest } from "../src/api/auth-routes.mjs";
 import { hashPassword } from "../src/api/auth.mjs";
-import { lttbDownsample } from "../src/api/trips-routes.mjs";
+import { lttbDownsample } from "../src/core/util.mjs";
 import { createChargingRoutes } from "../src/api/charging-routes.mjs";
 import { createApp, fetchApp } from "../src/api/http-kit.mjs";
 import { createJwtMiddleware } from "../src/api/jwt.mjs";

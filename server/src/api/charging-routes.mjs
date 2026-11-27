@@ -5,7 +5,7 @@ import { carIdFromQuery } from "./car-scope.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { stationPriceCmp } from "../core/event-enrichment.mjs";
 import { pricingOptionsFor, overridesMapFromStore, instanceTimezone } from "../core/pricing-options.mjs";
-import { isoFromTeslaMate, round, finiteNumber, wallClockToUtcMs } from "../core/util.mjs";
+import { isoFromTeslaMate, round, finiteNumber, wallClockToUtcMs, lttbDownsample } from "../core/util.mjs";
 
 /** 充电会话 → 前端视图（列表/详情/CSV 导出共用，防三处口径漂移） */
 export function chargeRowToView(row, options, defaultRateCnyPerKwh) {
@@ -142,7 +142,6 @@ export function createChargingRoutes({ db, state, getStore }) {
             y: finiteNumber(c.charger_power) ?? 0
           }))
           .filter((p) => p.soc !== null && p.kw !== null);
-        const { lttbDownsample } = await import("./trips-routes.mjs");
         powerCurve = lttbDownsample(pts, 300).map((p) => ({ soc: p.soc, kw: p.kw }));
         let best = null;
         for (const p of pts) if (best === null || p.kw > best.kw) best = p;

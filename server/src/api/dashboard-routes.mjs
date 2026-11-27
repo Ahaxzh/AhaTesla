@@ -4,7 +4,7 @@ import {
   listCharging, listChargingForStats, resolveCarId, getGeofences, geofenceLabelFor
 } from "../core/teslamate-queries.mjs";
 import { listDrivesSql, listDrivesLightSql, monthStartIso } from "../core/teslamate-queries.mjs";
-import { computeTripViews } from "./trips-routes.mjs";
+import { computeTripViews } from "../core/trip-views.mjs";
 import { priceChargingSession } from "../core/pricing-ledger.mjs";
 import { instanceTimezone } from "../core/pricing-options.mjs";
 import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";

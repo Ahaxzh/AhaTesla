@@ -1,34 +1,10 @@
 // trips routes — list/detail with batch-ledger cost allocation.
 import { HttpError } from "./http-kit.mjs";
-import { finiteNumber, round, isoFromTeslaMate } from "../core/util.mjs";
+import { finiteNumber, round, isoFromTeslaMate, lttbDownsample } from "../core/util.mjs";
 import { getFifoLedger } from "../core/fifo-ledger.mjs";
-import { resolveAmapLabels } from "../core/geo-geocode.mjs";
-import { listDrivesSql, getRoutePoints, getAddresses, getGeofences, geofenceLabelFor } from "../core/teslamate-queries.mjs";
+import { listDrivesSql, getRoutePoints, getAddresses, getGeofences } from "../core/teslamate-queries.mjs";
 import { carIdFromQuery, carFilterSql } from "./car-scope.mjs";
-import { shortRouteLabel, shortAddressLabel } from "../core/address-label.mjs";
-
-function addressLabel(address) {
-  if (!address) return null;
-  return address.display_name
-    || [address.name, address.road, address.city].filter(Boolean).join(" ")
-    || null;
-}
-
-/** 第三级地点兜底：半径感知三级标签（围栏内→确定名；1.5km→"XX 附近"；更远→null）。
- *  纯本地数据计算，不调用任何外部逆地理 API（红线）。与推送富化同口径。 */
-function nearestGeofenceName(geofenceRows, lat, lng) {
-  return geofenceLabelFor(geofenceRows, lat, lng);
-}
-
-function routeKey(drive, addressMap, geofenceMap, geofenceRows, amapLabels) {
-  const start = drive.start_address_id ? addressMap[drive.start_address_id] : null;
-  const end = drive.end_address_id ? addressMap[drive.end_address_id] : null;
-  const amap = (lat, lng) => (lat == null || lng == null ? null : amapLabels?.get(`${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`) ?? null);
-  const a = addressLabel(start) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amap(drive.start_lat, drive.start_lng) || "未知";
-  const b = addressLabel(end) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amap(drive.end_lat, drive.end_lng) || "未知";
-  if (a === "未知" && b === "未知") return "未知";
-  return shortRouteLabel(a, b);
-}
+import { computeTripViews } from "../core/trip-views.mjs";
 
 function clampPaging(query) {
   const limit = Math.max(1, Math.min(200, Number(query.limit) || 50));
@@ -46,7 +22,7 @@ function validateIso(value, field) {
  *  行驶/充电按结束时刻归日（实例时区，同 heatmap 口径）；区间 ≤150 天按日零填充，
  *  更长自动按周（周一起）聚合，date=桶起始日——长区间点数有界（400 天≈58 桶），柱宽不被稀释。
  *  跨夏令时安全：UTC 正午步进 + Intl 归日（正午偏移 ±1h 不会跨日）。 */
-export function dailyActivityPoints({ from, to, tzName, driveRows, chargeRows, nowMs = Date.now() }) {
+function dailyActivityPoints({ from, to, tzName, driveRows, chargeRows, nowMs = Date.now() }) {
   const DAY_MS = 86400_000;
   const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: tzName || "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" });
   const dayKeyOf = (v) => {
@@ -110,62 +86,6 @@ export function dailyActivityPoints({ from, to, tzName, driveRows, chargeRows, n
   return { bucket: "week", points };
 }
 
-// Shared: build trip views with costs from the full-replay FIFO ledger (H1 修复).
-// 成本一律取自 getFifoLedger 的全量回放结果（历史行程已扣减批次池，闭包成立）。
-// 优先用调用方传入的完整 state（时区/默认价/历史价一体）；仅传 defaultRate/
-// history 的旧调用点（如 report-engine 依赖注入）合成等价最小 state。
-export async function computeTripViews(db, drives, { defaultRate, history, state = null, carId = null } = {}) {
-  const addressIds = drives.flatMap((drive) => [drive.start_address_id, drive.end_address_id]);
-  const addressMap = await getAddresses(db, addressIds);
-  // Fallback labels: reverse-geocoded addresses may be absent (privacy-off setups),
-  // while TeslaMate geofence names (e.g. "CND", "HOME") are always set for known spots.
-  const geofenceRows = await getGeofences(db);
-  const geofenceMap = Object.fromEntries(geofenceRows.map((row) => [row.id, row.name]));
-  const ledgerState = state ?? {
-    pricing: { defaultRateCnyPerKwh: defaultRate, history: history ?? [] }
-  };
-  const ledger = await getFifoLedger(db, ledgerState, carId);
-
-  // 第④级（可选，默认关）：三级标签全未命中的端点 → 高德逆地理批量解析
-  // （同网格去重并发；未启用/失败静默回退"未知"）
-  const unknownPoints = [];
-  for (const drive of drives) {
-    const endpoints = [
-      { gf: drive.start_geofence_id, addr: drive.start_address_id, lat: drive.start_lat, lng: drive.start_lng },
-      { gf: drive.end_geofence_id, addr: drive.end_address_id, lat: drive.end_lat, lng: drive.end_lng }
-    ];
-    for (const ep of endpoints) {
-      if (ep.lat == null || ep.lng == null) continue;
-      if (ep.addr != null || ep.gf != null || geofenceLabelFor(geofenceRows, ep.lat, ep.lng) != null) continue;
-      unknownPoints.push({ lat: ep.lat, lng: ep.lng });
-    }
-  }
-  let amapLabels = new Map();
-  if (unknownPoints.length) {
-    try { amapLabels = await resolveAmapLabels(unknownPoints); } catch { /* 保持未知 */ }
-  }
-  const amapOf = (lat, lng) => (lat == null || lng == null ? null : amapLabels.get(`${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`) ?? null);
-
-  return drives.map((drive) => {
-    const allocation = ledger.byDriveId.get(String(drive.id));
-    const energy = allocation?.energy_kwh ?? null;
-    const distance = finiteNumber(drive.distance_km);
-    return {
-      id: drive.id,
-      startAt: isoFromTeslaMate(drive.start_at),
-      endAt: isoFromTeslaMate(drive.end_at),
-      distanceKm: distance,
-      durationMin: Number(drive.duration_min) || 0,
-      energyKWh: energy,
-      costCny: allocation?.cost_cny ?? null,
-      startAddress: shortAddressLabel(addressLabel(addressMap[drive.start_address_id] || null)) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amapOf(drive.start_lat, drive.start_lng) || null,
-      endAddress: shortAddressLabel(addressLabel(addressMap[drive.end_address_id] || null)) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amapOf(drive.end_lat, drive.end_lng) || null,
-      kwhPer100km: energy !== null && distance > 0 ? round(energy / distance * 100, 2) : null,
-      routeKey: routeKey(drive, addressMap, geofenceMap, geofenceRows, amapLabels)
-    };
-  });
-}
-
 async function getDrive(db, id) {
   const numId = Number(id);
   if (!Number.isInteger(numId) || numId <= 0) throw new HttpError(400, "bad_request", "invalid trip id");
@@ -199,36 +119,6 @@ async function getDrive(db, id) {
   return rows[0] ?? null;
 }
 
-// LTTB（Largest-Triangle-Three-Buckets）降采样（§6.5-3）：保形状，≤300 点。
-export function lttbDownsample(points, threshold = 300) {
-  if (!Array.isArray(points) || points.length <= threshold) return points || [];
-  const sampled = [];
-  const every = (points.length - 2) / (threshold - 2);
-  sampled.push(points[0]);
-  let a = 0;
-  for (let i = 1; i < threshold - 1; i++) {
-    const rangeStart = Math.floor((i + 1) * every) + 1;
-    const rangeEnd = Math.min(Math.floor((i + 2) * every) + 1, points.length);
-    // 计算 a..a+1 区间平均
-    let avgX = 0, avgY = 0;
-    const avgRangeLen = rangeEnd - rangeStart;
-    for (let j = rangeStart; j < rangeEnd; j++) { avgX += points[j].x; avgY += points[j].y; }
-    avgX /= avgRangeLen || 1; avgY /= avgRangeLen || 1;
-    // 在下一区间选离“前点→均值线”三角形面积最大的点
-    const rangeOff = Math.floor((i - 1) * every) + 1;
-    const rangeTo = Math.floor(i * every) + 1;
-    const px = points[a].x, py = points[a].y;
-    let maxArea = -1, nextA = rangeOff;
-    for (let j = rangeOff; j < rangeTo && j < points.length; j++) {
-      const area = Math.abs((px - avgX) * (points[j].y - py) - (px - points[j].x) * (avgY - py)) * 0.5;
-      if (area > maxArea) { maxArea = area; nextA = j; }
-    }
-    sampled.push(points[nextA]);
-    a = nextA;
-  }
-  sampled.push(points[points.length - 1]);
-  return sampled;
-}
 
 export function createTripsRoutes({ db, state }) {
   return {

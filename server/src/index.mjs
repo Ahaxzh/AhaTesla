@@ -48,7 +48,7 @@ import { createSetupRoutes } from "./api/setup-routes.mjs";
 import { createPushRoutes } from "./api/push-routes.mjs";
 import { createAiRoutes } from "./api/ai-routes.mjs";
 import { createAiCopywriter } from "./core/ai-copywriter.mjs";
-import { computeTripViews as tripsComputeTripViews } from "./api/trips-routes.mjs";
+import { computeTripViews as tripsComputeTripViews } from "./core/trip-views.mjs";
 import { listDrivesSql, listChargingForStats, getCars } from "./core/teslamate-queries.mjs";
 import { enrichTripEndEvent, enrichChargingDoneEvent, enrichChargingStartEvent } from "./core/event-enrichment.mjs";
 
