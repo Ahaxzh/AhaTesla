@@ -12,10 +12,10 @@ import { createChargingRoutes } from "../src/api/charging-routes.mjs";
 import { createExportRoutes } from "../src/api/export-routes.mjs";
 import { createMaintenanceRoutes } from "../src/api/maintenance-routes.mjs";
 import { createPricingRoutes } from "../src/api/pricing-routes.mjs";
-import { createChannelRoutes } from "../src/api/channel-routes.mjs";
 import { createPushRoutes } from "../src/api/push-routes.mjs";
 import { createNotifier, matrixFromRules } from "../src/core/push-channels.mjs";
-import { createDashboardRoutes, createSystemRoutes } from "../src/api/dashboard-routes.mjs";
+import { createDashboardRoutes } from "../src/api/dashboard-routes.mjs";
+import { createSystemRoutes } from "../src/api/system-routes.mjs";
 import { createFeishuChannel } from "../src/core/feishu.mjs";
 import { createEventLog } from "../src/core/events.mjs";
 
@@ -51,7 +51,6 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
     s.pricing.history.push({ changedAt: new Date().toISOString(), from: 1.0, to: rate, source: src });
     saveStateFn(s);
   } });
-  const channels = createChannelRoutes({ state, feishu, eventLog });
   const notifier = createNotifier({ state, eventLog, feishu });
   const push = createPushRoutes({ state, notifier, eventLog, store: null, reportScheduler: null, buildDeps: () => ({}) });
   const dashboard = createDashboardRoutes({ db, state });
@@ -80,8 +79,8 @@ function buildTestApp({ db, state = baseState(), mqtt = { isConfigured: () => tr
   app.get("/api/channels", requireAuth, (ctx) => push.listChannels(ctx));
   app.get("/api/push-rules", requireAuth, (ctx) => push.getPushRules(ctx));
   app.put("/api/push-rules", requireAuth, (ctx) => push.putPushRules(ctx));
-  app.put("/api/channels/feishu", requireAuth, (ctx) => channels.updateFeishu(ctx));
-  app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
+  app.put("/api/channels/feishu", requireAuth, (ctx) => push.updateFeishu(ctx));
+  app.post("/api/channels/feishu/test", requireAuth, (ctx) => push.testFeishu(ctx));
   app.get("/api/system/status", requireAuth, (ctx) => system.status(ctx));
   app.get("/api/system/events", requireAuth, (ctx) => system.events(ctx));
   return { app, state, saved, eventLog };

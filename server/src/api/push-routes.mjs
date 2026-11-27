@@ -5,6 +5,7 @@
 // 报告（GA-11/18）：列表/详情/手动生成。
 import { HttpError } from "./http-kit.mjs";
 import { saveChannelConfig, loadChannelConfig, PUSH_EVENTS, PUSH_CHANNELS, matrixFromRules } from "../core/push-channels.mjs";
+import { setFeishuConfig } from "../core/state.mjs";
 import { buildReport, startReportScheduler } from "../core/report-engine.mjs";
 import { saveState } from "../core/state.mjs";
 import { randomBytes } from "node:crypto";
@@ -23,6 +24,30 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
       const entries = Object.entries(channelsApi());
       const list = await Promise.all(entries.map(([, ch]) => ch.status()));
       return Object.fromEntries(entries.map(([id], i) => [id, list[i]]));
+    },
+
+    // ---- 飞书渠道配置（自 channel-routes.mjs 并入：六渠道配置一处一域） ------
+    async updateFeishu(ctx) {
+      const feishu = channelsApi().feishu;
+      const { enabled, appId, appSecret } = ctx.body || {};
+      if (typeof enabled !== "boolean") throw new HttpError(400, "bad_request", "enabled must be boolean");
+      if (appId !== undefined && typeof appId !== "string") throw new HttpError(400, "bad_request", "appId must be string");
+      if (appSecret !== undefined && appSecret !== null && appSecret !== "" && typeof appSecret !== "string") {
+        throw new HttpError(400, "bad_request", "appSecret must be string");
+      }
+      setFeishuConfig(state, { enabled, appId, appSecret: appSecret || undefined });
+      eventLog?.log("channels.feishu_updated", { enabled });
+      const status = await feishu.status();
+      return { ok: true, connected: status.connected };
+    },
+
+    async testFeishu(ctx) {
+      const feishu = channelsApi().feishu;
+      if (!feishu.enabled()) throw new HttpError(400, "channel_disabled", "feishu channel is not enabled/configured");
+      const result = await feishu.sendTest();
+      eventLog?.log("channels.feishu_test", { sent: result.sent });
+      if (!result.sent) throw new HttpError(502, "channel_error", `feishu test failed: ${result.reason || "unknown"}`);
+      return { ok: true, message: "测试卡片已发送" };
     },
 
     // ---- Web Push ---------------------------------------------------------
@@ -184,13 +209,6 @@ export function createPushRoutes({ state, notifier, eventLog, store, reportSched
       eventLog?.log("channels.bark_test", { sent: r.sent });
       if (!r.sent) throw new HttpError(502, "channel_error", `bark test failed: ${r.reason || "unknown"}`);
       return { ok: true };
-    },
-
-    // ---- 飞书（保留既有 state 直连实现） ------------------------------------
-    async updateFeishu(ctx) {
-      return channelsApi().feishu === notifier.channels.feishu
-        ? notifier.channels.feishu.updateConfig?.(ctx)
-        : undefined;
     },
 
     // ---- 推送矩阵（B4） ------------------------------------------------------

@@ -64,7 +64,7 @@ test("/api/cars 与 settings primaryCarId/carAliases 往返(经 registerRoutes �
     queryOne: async () => null,
   };
   const app = null; // 路由级直测(鉴权环境省略);注册在 index.mjs 已随 /api/cars 走通
-  const { createSettingsRoutes } = await import("../src/api/dashboard-extra-routes.mjs");
+  const { createSettingsRoutes } = await import("../src/api/settings-routes.mjs");
   const kv = new Map();
   const settings = createSettingsRoutes({
     state,

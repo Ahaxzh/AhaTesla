@@ -41,9 +41,10 @@ import { createPricingRoutes } from "./api/pricing-routes.mjs";
 import { createLedgerRoutes } from "./api/ledger-routes.mjs";
 import { createExportRoutes } from "./api/export-routes.mjs";
 import { createMaintenanceRoutes, maintenanceStatus } from "./api/maintenance-routes.mjs";
-import { createChannelRoutes } from "./api/channel-routes.mjs";
-import { createDashboardRoutes, createSystemRoutes } from "./api/dashboard-routes.mjs";
-import { createDashboardExtraRoutes, createSettingsRoutes, createHealthLiteRoutes } from "./api/dashboard-extra-routes.mjs";
+import { createDashboardRoutes } from "./api/dashboard-routes.mjs";
+import { createDashboardExtraRoutes } from "./api/dashboard-extra-routes.mjs";
+import { createSettingsRoutes } from "./api/settings-routes.mjs";
+import { createSystemRoutes, createHealthLiteRoutes } from "./api/system-routes.mjs";
 import { createSetupRoutes } from "./api/setup-routes.mjs";
 import { createPushRoutes } from "./api/push-routes.mjs";
 import { createAiRoutes } from "./api/ai-routes.mjs";
@@ -108,7 +109,6 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   const ledger = createLedgerRoutes({ db, state, getStore });
   const exportRoutes = createExportRoutes({ db, state });
   const maintenance = createMaintenanceRoutes({ db, store: getStore() });
-  const channels = createChannelRoutes({ state, feishu, eventLog });
   const dashboard = createDashboardRoutes({ db, state });
   const dashboardExtra = createDashboardExtraRoutes({ db, state });
   const settingsRoutes = createSettingsRoutes({ state, getStore });
@@ -172,8 +172,8 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/settings", requireAuth, (ctx) => settingsRoutes.get(ctx));
   app.put("/api/settings", requireAuth, (ctx) => settingsRoutes.put(ctx));
   app.get("/api/channels", requireAuth, (ctx) => push.listChannels(ctx));
-  app.put("/api/channels/feishu", requireAuth, (ctx) => channels.updateFeishu(ctx));
-  app.post("/api/channels/feishu/test", requireAuth, (ctx) => channels.testFeishu(ctx));
+  app.put("/api/channels/feishu", requireAuth, (ctx) => push.updateFeishu(ctx));
+  app.post("/api/channels/feishu/test", requireAuth, (ctx) => push.testFeishu(ctx));
   app.put("/api/channels/telegram", requireAuth, (ctx) => push.updateTelegram(ctx));
   app.post("/api/channels/telegram/test", requireAuth, (ctx) => push.testTelegram(ctx));
   // m4b 三渠道：企业微信 / ntfy / Bark（契约 §channels）

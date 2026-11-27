@@ -342,7 +342,7 @@ test("系统状态路由：latencyMs + readonlyVerified 元数据探测", async 
     { match: (sql) => sql.includes("has_table_privilege"), rows: [{ table_write: false, schema_create: false }] },
     { match: (sql) => sql.includes("drive_count"), rows: [{ drive_count: 10, last_drive_at: "2026-10-14" }] }
   ]);
-  const { createSystemRoutes } = await import("../src/api/dashboard-routes.mjs");
+  const { createSystemRoutes } = await import("../src/api/system-routes.mjs");
   const system = createSystemRoutes({ db, mqtt: null, eventLog: { log() {} }, startedAt: () => Date.now() });
   const status = await system.status(fakeCtx());
   assert.equal(status.teslamate.dbOk, true);
@@ -354,7 +354,7 @@ test("系统状态路由：latencyMs + readonlyVerified 元数据探测", async 
 test("settings 路由（GA-36）：读写 + 校验", async () => {
   useMemoryStore();
   const state = { settings: undefined, fuelBaseline: undefined };
-  const { createSettingsRoutes } = await import("../src/api/dashboard-extra-routes.mjs");
+  const { createSettingsRoutes } = await import("../src/api/settings-routes.mjs");
   const routes = createSettingsRoutes({ state, getStore: () => openStore({ file: ":memory:" }) });
   const cur = await routes.get(fakeCtx());
   assert.equal(cur.currency.symbol, "¥");
@@ -371,7 +371,7 @@ test("settings 路由（GA-36）：读写 + 校验", async () => {
 
 test("health-lite 匿名路由（GA-32）", async () => {
   resetHealth();
-  const { createHealthLiteRoutes } = await import("../src/api/dashboard-extra-routes.mjs");
+  const { createHealthLiteRoutes } = await import("../src/api/system-routes.mjs");
   const routes = createHealthLiteRoutes({});
   const r = await routes.healthLite(fakeCtx());
   assert.deepEqual(Object.keys(r).sort(), ["bannerLevel", "dbOk", "outageMs"]);
