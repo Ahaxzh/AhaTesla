@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Module boundary check (ADR-0001)
+        run: node scripts/check-arch.mjs
+
   server:
     runs-on: ubuntu-latest
     steps:

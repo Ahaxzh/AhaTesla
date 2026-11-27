@@ -4,7 +4,6 @@ import type { BatteryHealth } from '@/types'
 import type {
   CarDiscoveryResult,
   ChargeDetail,
-  ChannelsData,
   Charge,
   ChargingHabits,
   ChargingStats,
@@ -21,7 +20,6 @@ import type {
   Paged,
   PricingData,
   PricingHistoryEntry,
-  PushRules,
   PushRulesV2,
   AiConfig,
   RecalcJob,
@@ -142,8 +140,6 @@ export const api = {
   /** 账户更新：改密和/或改用户名（当前密码恒必需） */
   changeAccount: (payload: { oldPassword: string; newPassword?: string; newUsername?: string }) =>
     post<{ ok: boolean; user: { username: string } }>('/api/auth/change-password', payload),
-  changePassword: (oldPassword: string, newPassword: string) =>
-    post<{ ok: boolean }>('/api/auth/change-password', { oldPassword, newPassword }),
 
   // ---- Setup wizard（契约 v2 §1）----
   setupStatus: () => get<SetupStatus>('/api/setup/status'),
@@ -253,7 +249,7 @@ export const api = {
     put<{ ok: boolean }>(`/api/pricing/locations/${id}`, payload),
   pricingHistory: () => get<PricingHistoryEntry[]>('/api/pricing/history'),
 
-  channels: () => get<ChannelsData>('/api/channels'),
+  /** 渠道状态（GET /api/channels；列表页与设置页共用） */
   channelStatus: () => get<ChannelStatus>('/api/channels'),
   pushEnv: () => get<{ https: boolean; vapidPublicKey: string | null }>('/api/push/env'),
   webpushInitVapid: () => post<{ ok: boolean; publicKey: string; created: boolean }>('/api/push/webpush/init-vapid'),
@@ -297,9 +293,6 @@ export const api = {
   saveFeishu: (payload: { enabled: boolean; appId: string; appSecret?: string }) =>
     put<{ ok: boolean; connected: boolean }>('/api/channels/feishu', payload),
   testFeishu: () => post<{ ok: boolean; message: string }>('/api/channels/feishu/test'),
-  pushRules: () => get<PushRules>('/api/push-rules'),
-  setPushRules: (rules: PushRules) => put<PushRules>('/api/push-rules', rules),
-
   systemStatus: () => get<SystemStatus>('/api/system/status'),
   systemEvents: (limit = 100) => get<SystemEvent[]>(`/api/system/events?limit=${limit}`).then((r: unknown) => {
     // API 契约返回 { items: [...] }，容错直接数组

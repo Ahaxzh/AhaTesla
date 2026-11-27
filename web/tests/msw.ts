@@ -4,7 +4,6 @@ import type {
   Charge,
   DashboardData,
   PricingData,
-  PushRules,
   ChannelsData,
   SystemStatus,
   SystemEvent,
@@ -92,15 +91,6 @@ export const mockPricing: PricingData = {
     },
     { id: 2, name: '超充 上海站', pricePerUnit: 1.85, sessionFee: 0, billingType: 'kWh', priceMode: 'fixed' },
   ],
-}
-
-export const mockPushRules: PushRules = {
-  tripEnd: true,
-  chargingStart: false,
-  chargingDone: true,
-  weeklyReport: true,
-  weeklyReportDay: 1,
-  monthlyReport: true,
 }
 
 export const mockChannels: ChannelsData = {

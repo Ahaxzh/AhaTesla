@@ -286,15 +286,6 @@ export interface ChannelsData {
   web: { enabled: boolean }
 }
 
-export interface PushRules {
-  tripEnd: boolean
-  chargingStart: boolean
-  chargingDone: boolean
-  weeklyReport: boolean
-  weeklyReportDay: number
-  monthlyReport: boolean
-}
-
 export interface SystemStatus {
   teslamate: {
     dbOk: boolean

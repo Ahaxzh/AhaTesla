@@ -1,21 +1,13 @@
 {
   "name": "ahatesla",
   "version": "1.2.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "private": true,
+  "description": "AhaTesla 特斯拉小管家 — TeslaMate 数据记账/行程/推送（Ubuntu 自托管）。本清单仅承载仓库级工具（Playwright e2e、架构边界检查）；后端见 server/，前端见 web/。",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "test:e2e": "playwright test --config e2e/playwright.config.mjs"
+    "test:e2e": "bash scripts/run-e2e.sh",
+    "check:arch": "node scripts/check-arch.mjs"
   },
-  "keywords": [],
   "author": "ahaxzh <i@ues.one>",
-  "type": "commonjs",
-  "dependencies": {
-    "pg": "^8.23.1"
-  },
   "devDependencies": {
     "playwright": "^1.64.0"
   }

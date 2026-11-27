@@ -11,6 +11,8 @@ server/data/state.json.migrated-*
 server/data/state.json.corrupt-*
 *.env
 .DS_Store
+# TS 增量构建产物（本地 build 生成，非源码）
+*.tsbuildinfo
 coverage/
 playwright-report/
 test-results/
