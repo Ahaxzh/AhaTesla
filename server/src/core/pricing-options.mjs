@@ -27,7 +27,7 @@ export function overridesMapFromStore(store = getStore()) {
 }
 
 /** 第③层 TOU 窗口：Map<geofenceId, touWindow>（kv pricing:location-tou:<id>） */
-export async function touMapFromDb(db, store = getStore()) {
+async function touMapFromDb(db, store = getStore()) {
   const map = new Map();
   let geofences = [];
   try {

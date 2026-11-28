@@ -299,7 +299,7 @@ export async function getRoutePoints(db, driveId, maxPoints = 500) {
   return downsamplePoints(rows, maxPoints);
 }
 
-export function downsamplePoints(rows, maxPoints) {
+function downsamplePoints(rows, maxPoints) {
   if (!Array.isArray(rows) || rows.length <= maxPoints) return rows || [];
   const step = (rows.length - 1) / (maxPoints - 1);
   const out = [];
@@ -322,7 +322,7 @@ export async function getAddresses(db, ids) {
 }
 
 /** 近似米距（纬度 1°≈111.3km，经度按 cos 缩放） */
-export function metersBetween(lat1, lng1, lat2, lng2) {
+function metersBetween(lat1, lng1, lat2, lng2) {
   const dLat = (lat1 - lat2) * 111_320;
   const dLng = (lng1 - lng2) * 111_320 * Math.cos(((lat1 + lat2) / 2) * Math.PI / 180);
   return Math.hypot(dLat, dLng);

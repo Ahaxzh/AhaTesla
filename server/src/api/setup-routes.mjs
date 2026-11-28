@@ -26,7 +26,7 @@ export const READONLY_PROBE_SQL = `
          has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create
 `;
 
-export function isInstanceUninitialized(state) {
+function isInstanceUninitialized(state) {
   return !state.passwordHash;
 }
 
@@ -59,7 +59,7 @@ export function buildConnectionString({ host, port = 5432, database = "teslamate
  * （SET default_transaction_read_only = on），即 AC-2.4 的会话级双保险。
  * 返回 { pool, query, close }。
  */
-export async function createProbePool(connectionString) {
+async function createProbePool(connectionString) {
   const pool = new pg.Pool({
     connectionString,
     max: 2,
@@ -239,7 +239,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE teslamate IN SCHEMA public GRANT SELECT ON TAB
 }
 
 /** 默认 TCP 探测：800ms 超时内连上即认为有服务在监听（不猜协议/库名）。 */
-export function defaultTcpProbe(host, port, timeoutMs = 800) {
+function defaultTcpProbe(host, port, timeoutMs = 800) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     const done = (ok) => {
@@ -294,7 +294,7 @@ export function probeCandidates(probeEnv = "", currentDbUrl = null) {
  * CREATE ROLE / GRANT（AC-2.4 的实写禁区仅针对探测；这里是显式的管理操作，
  * 且只对角色/权限元数据生效，不碰业务表数据）。用完即关，凭据不落盘。
  */
-export async function createAdminPool(connectionString) {
+async function createAdminPool(connectionString) {
   const pool = new pg.Pool({
     connectionString,
     max: 1,

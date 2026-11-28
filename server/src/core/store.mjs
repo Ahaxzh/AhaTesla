@@ -28,7 +28,7 @@ export const DEFAULT_DB_FILE = join(dataDir(), "ahatesla.db");
 export const SCHEMA_VERSION = 1;
 
 // 建表语句纳入版本控制；新增迁移以 user_version 为序追加到 MIGRATIONS。
-export const SCHEMA_V1 = `
+const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS kv (
   key         TEXT PRIMARY KEY,
   value       TEXT NOT NULL,

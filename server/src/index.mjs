@@ -26,7 +26,7 @@ import { loadState, saveState, getStore } from "./core/state.mjs";
 import { createEventLog } from "./core/events.mjs";
 import { createFeishuChannel } from "./core/feishu.mjs";
 import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
-import { createMonitorPersistence } from "./core/monitor-persistence.mjs";
+import { createMonitorPersistence, MONITOR_STATE_KEY } from "./core/monitor-persistence.mjs";
 import { createPushDispatch } from "./core/push-dispatch.mjs";
 import { createPatrols } from "./core/patrols.mjs";
 import { startMqttBridge } from "./core/mqtt-bridge.mjs";
@@ -263,7 +263,7 @@ async function main() {
   const monitor = new TripMonitor({
     state: (() => {
       try {
-        const raw = store.kvGet("monitor_state_v1");
+        const raw = store.kvGet(MONITOR_STATE_KEY);
         return raw ? JSON.parse(raw) : {};
       } catch {
         return {};

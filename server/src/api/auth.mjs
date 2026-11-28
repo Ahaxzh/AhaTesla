@@ -52,7 +52,7 @@ function b64url(buf) {
   return Buffer.from(buf).toString("base64url");
 }
 
-export function b64urlJson(obj) {
+function b64urlJson(obj) {
   return b64url(JSON.stringify(obj));
 }
 

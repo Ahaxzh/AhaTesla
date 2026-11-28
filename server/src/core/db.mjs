@@ -1,7 +1,7 @@
 // db.mjs — PostgreSQL (pg) read-only connection pool to the TeslaMate database.
 import pg from "pg";
 
-export const DEFAULT_DB_URL = process.env.DB_URL || "postgres://teslamate@127.0.0.1:15432/teslamate";
+const DEFAULT_DB_URL = process.env.DB_URL || "postgres://teslamate@127.0.0.1:15432/teslamate";
 
 // 慢查询观测：超过阈值（默认 2s，AHA_SLOW_QUERY_MS 可调）打一行首部 SQL 到 stdout
 const SLOW_QUERY_LOG_MS = Number(process.env.AHA_SLOW_QUERY_MS) || 2000;

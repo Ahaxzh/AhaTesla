@@ -11,7 +11,7 @@ import { isoFromTeslaMate, round, finiteNumber } from "../core/util.mjs";
 import { carIdFromQuery, carsPayload } from "./car-scope.mjs";
 
 
-export const FUEL_REFERENCE = Object.freeze({
+const FUEL_REFERENCE = Object.freeze({
   // 油耗对标参考：92# 油价 × 常见油车 8L/100km。来源口径为内置假设，asOf 为常量。
   fuelPriceCnyPerL: 7.8,
   literPer100km: 8,

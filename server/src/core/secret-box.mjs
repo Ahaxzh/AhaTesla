@@ -18,7 +18,7 @@ export function dataDir() {
   return DATA_DIR;
 }
 
-export function ensureDataDir() {
+function ensureDataDir() {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
   return DATA_DIR;
 }

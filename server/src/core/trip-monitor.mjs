@@ -46,7 +46,7 @@ function carKey(carId) {
 // Restore persisted state, merging defaults so older snapshots stay loadable.
 // v2（m4e 后续）：sessions 与游标按车分桶。v1 快照自动迁移 —— 全局游标作为
 // 所有车的水线地板（宁可静默也不回放），全局 session 归入无主桶。
-export function normalizeMonitorState(saved = {}) {
+function normalizeMonitorState(saved = {}) {
   const legacyDriveFloor = Number(saved.last_drive_id) || 0;
   const legacyChargeFloor = Number(saved.last_charging_id) || 0;
   const legacyDoneFloor = Number(saved.last_charging_done_id) || 0;

@@ -60,7 +60,7 @@ function readingAt(row, atField, idealField, ratedField, eff) {
 }
 
 /** 由行程行（含绝对续航列）与充电行推全部驻车损耗事件 [{car_id, at_ms, kwh}]。 */
-export function computeParkingLosses(driveRows, chargingRows, carRows) {
+function computeParkingLosses(driveRows, chargingRows, carRows) {
   const effByCar = new Map();
   for (const car of Array.isArray(carRows) ? carRows : []) {
     const eff = normalizeEfficiency(car.efficiency);

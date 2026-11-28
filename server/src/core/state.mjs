@@ -83,7 +83,7 @@ export function useMemoryStore() {
 }
 
 /** 测试辅助：注入指定文件库。 */
-export function useStateFile(file) {
+function useStateFile(file) {
   const prev = store;
   store = openStore({ file });
   return prev;

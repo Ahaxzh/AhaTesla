@@ -12,7 +12,7 @@ export class HttpError extends Error {
   }
 }
 
-export function parseCookies(header) {
+function parseCookies(header) {
   const out = {};
   for (const part of String(header || "").split(";")) {
     const idx = part.indexOf("=");
