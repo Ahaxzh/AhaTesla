@@ -139,6 +139,36 @@ test("report-engine：buildReport 周期聚合 + 油车对比 + topRoutes", asyn
   assert.match(report.baselineNote, /8L\/100km/);
 });
 
+test("调度器溢出守护：远期排程分段睡，未到点不空跑 runKind（annual 年末回归）", () => {
+  const timers = [];
+  let builds = 0;
+  const store = openStore({ file: ":memory:" });
+  const scheduler = startReportScheduler({
+    store,
+    buildDeps: () => ({
+      db: null, state: {},
+      computeTripViews: async () => { builds += 1; return []; },
+      listDrivesSql: () => ({ sql: "", params: [] }),
+      listChargingForStats: async () => []
+    }),
+    notifier: { dispatch: async () => ({ results: {} }) },
+    eventLog: { log() {} }, state: {},
+    setTimeoutImpl: (fn, delay) => { timers.push({ fn, delay }); return 0; }
+  });
+  // 首排：四类报告各注册一个 timer，延迟均不得超出 12h 分段上限
+  //（annual 年末排到次年 1 月 ≈34 天，旧实现直接溢出 2^31ms 被 Node 钳 1ms）
+  assert.ok(timers.length >= 4, "四类报告都应注册首排 timer");
+  for (const t of timers) {
+    assert.ok(t.delay <= 12 * 3600_000, `delay=${t.delay} 超出分段睡眠上限`);
+  }
+  // 到点前唤醒：只重排，不得触发 buildReport（旧实现在此对真实库空跑全年聚合）
+  const before = timers.length;
+  timers[0].fn();
+  assert.equal(builds, 0, "未到点不得空跑 buildReport");
+  assert.equal(timers.length, before + 1, "唤醒后必须重排下一睡");
+  scheduler.stop();
+});
+
 test("report-engine：nextReportRun 周一 08:00 / 月 1 日 08:00 / 年 1 月 1 日 08:00（v2.5）", () => {
   const thu = new Date("2026-10-15T10:00:00+08:00"); // 周四
   const nextWeekly = nextReportRun("weekly", thu, "Asia/Shanghai");

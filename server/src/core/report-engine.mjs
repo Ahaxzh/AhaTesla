@@ -572,11 +572,20 @@ export function startReportScheduler({
     return state.pushRules?.matrix ?? undefined;
   }
 
+  // setTimeout 的 duration 上限是 2^31ms(≈24.8 天)；annual 年末排程距次年 1 月
+  // 可达 ~34 天，溢出被 Node 钳到 1ms 立即触发 → runKind 空跑(归档去重跳过)
+  // → 重排再溢出，循环空扫真实库（2026-11-28 实测：年报每 ~23s 被全年聚合空跑）。
+  // 修复：单次睡眠 ≤12h 分段睡；醒来未到点只重排、不触发 runKind。
+  const MAX_SLEEP_MS = 12 * 3600_000;
   function schedule(kind) {
     if (stopped) return;
     const next = nextReportRun(kind, new Date(), tz);
-    const delay = Math.max(1000, next.getTime() - Date.now());
+    const delay = Math.min(Math.max(1000, next.getTime() - Date.now()), MAX_SLEEP_MS);
     const t = setTimeoutImpl(() => {
+      if (next.getTime() - Date.now() > 1000) {
+        schedule(kind); // 分段睡眠醒来，尚未到点
+        return;
+      }
       runKind(kind).finally(() => schedule(kind));
     }, delay);
     t.unref?.();
