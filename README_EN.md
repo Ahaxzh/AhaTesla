@@ -21,7 +21,7 @@
 - 💰 **Monthly bill** — mileage vs. electricity vs. gas, sentry/parking drain, driving vs. parked cost split
 - 📊 **Dashboard** — 24h state timeline, usage heatmap, semantic state cards (driving / charging / sentry / asleep)
 - 📄 **Reports** — **daily digest** (yesterday + same-day-last-week comparison + anomaly notes), weekly & monthly reports (immutable archived snapshots)
-- 🔔 **Push, your way** — Web Push (works from an **iPhone home-screen PWA**), Telegram, Feishu, WeCom, ntfy, Bark — a 9-event × 6-channel matrix; optionally plug in your own OpenAI-compatible model to polish the copy (off by default; full templates with no model)
+- 🔔 **Push, your way** — Web Push (works from an **iPhone home-screen PWA**), Telegram, Feishu, WeCom, ntfy, Bark — a 12-event × 6-channel matrix; optionally plug in your own OpenAI-compatible model to polish the copy (off by default; full templates with no model)
 - 🌓 **Look & feel** — light/dark/system theme, English & Chinese UI
 - 📱 **Web / PWA** — install to your home screen, mobile-first dark UI
 - 🔐 **Auth** — single-user JWT with access + refresh tokens, httpOnly cookie, scrypt hashing, lockout on failures
@@ -109,6 +109,7 @@ server/ Node22 ESM (API + JWT + static hosting + push engine) ← web/ React19+V
 
 ## Testing
 - `server`: `npm test` — unit tests (pricing ledger / API routes / auth / push engine); `node --test test/live` for read-only tests against a real DB
+- Module boundaries: `node scripts/check-arch.mjs` — same check CI runs (rules in docs/adr/0001)
 - `web`: `npm test` — vitest component tests (every page/button, both viewports), `npm run build`
 - E2E: Playwright, see `e2e/`
 
@@ -134,8 +135,8 @@ The script is idempotent: repeated injections never overwrite the original backu
 ## Layout
 ```
 server/  Node backend     web/ React frontend
-deploy/  compose×3 + Dockerfile + SQL + NPM guide   docs/  contract & architecture (source of truth: API_CONTRACT.md)
-e2e/     Playwright      scripts/ tooling
+deploy/  compose×3 + Dockerfile + SQL + NPM guide   docs/  contract & architecture (source of truth: API_CONTRACT.md; governance: GOVERNANCE.md + adr/)
+e2e/     Playwright      scripts/ tooling (e2e starter · password inject · module-boundary check)
 ```
 
 ## Security posture

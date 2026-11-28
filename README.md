@@ -26,7 +26,7 @@ AhaTesla 基于 [TeslaMate](https://github.com/teslamate-org/teslamate) 采集�
 | 💰 月度账单 | 里程 / 电费 / 油车对比、驻车哨兵损耗、行驶/驻车费用构成 |
 | 📊 仪表盘 | 24h 状态时间轴、用车热力图、语义化车辆状态卡(行驶/充电/哨兵/睡眠) |
 | 📄 报告推送 | 每日早报(昨日汇总 + 上周同日对比 + 异常提醒)、周报/月报(归档不可变快照) |
-| 🔔 多渠道推送 | Web Push(iPhone PWA 可收)/ Telegram / 飞书 / 企业微信 / ntfy / Bark,9 事件 × 6 渠道独立矩阵;可选接入 OpenAI 兼容模型润色文案 |
+| 🔔 多渠道推送 | Web Push(iPhone PWA 可收)/ Telegram / 飞书 / 企业微信 / ntfy / Bark,12 事件 × 6 渠道独立矩阵;可选接入 OpenAI 兼容模型润色文案 |
 | 🌓 界面 | 明暗主题(跟随系统/浅色/深色)· 中英双语 |
 | 📱 Web / PWA | iPhone 添加到主屏幕,移动优先,深色科技风 UI |
 | 🔐 认证 | 单用户 JWT 双 Token(Access 24h + Refresh 30d)+ httpOnly cookie,scrypt 哈希,失败锁定 |
@@ -130,6 +130,7 @@ server/ Node ESM(API + JWT + 静态托管 + 推送引擎) ← web/ React 19 + Vi
 cd server && npm test          # node --test(计价账本/API 路由/认证/推送引擎)
 cd web && npm test             # vitest(每页面/每按钮/双视口)
 cd web && npm run build        # dist 由 server 静态托管
+node scripts/check-arch.mjs     # 模块边界检查(CI 同款;规则见 docs/adr/0001)
 
 # E2E(Playwright,mobile + desktop 双视口;自动拉起隔离实例并注入临时凭据)
 bash scripts/run-e2e.sh        # 常规用例 + /setup 向导用例
@@ -145,8 +146,8 @@ server/   Node 后端(API · 认证 · 计价账本 · 推送引擎)
 web/      React 前端(PWA · i18n · 明暗主题)
 deploy/   Dockerfile · compose × 3 · SQL · NPM 反代文档
 e2e/      Playwright 全链路测试
-docs/     契约与架构(API_CONTRACT.md 为接口唯一真相源)
-scripts/  工具脚本(e2e 启动器 · 密码注入)
+docs/     契约与架构(API_CONTRACT.md 为接口唯一真相源 · GOVERNANCE.md 治理任务池 · adr/ 决策记录)
+scripts/  工具脚本(e2e 启动器 · 密码注入 · 架构边界检查)
 ```
 
 ## 安全与隐私
@@ -157,7 +158,7 @@ scripts/  工具脚本(e2e 启动器 · 密码注入)
 
 | 工作流 | 触发 | 内容 |
 |---|---|---|
-| [CI](.github/workflows/ci.yml) | push main / PR | server 单测 · web 单测 + tsc + build |
+| [CI](.github/workflows/ci.yml) | push main / PR | 架构边界检查(arch) · server 单测 · web 单测 + tsc + build |
 | [Docker](.github/workflows/docker.yml) | push main / tag `v*` / 手动 / PR | 多架构镜像构建,推 GHCR(`latest` / semver / sha) |
 | [Cleanup](.github/workflows/cleanup-ghcr.yml) | 每日定时 | 清理 2 周前的旧镜像(需配置 `PAT_TOKEN` Secret) |
 
