@@ -83,4 +83,5 @@ web/src
 - **B5** ✅ 组合根瘦身：push-dispatch/patrols/maintenance/monitor-persistence/static 五模块迁出；MQTT 懒视图替代重注册 hack；index 650→430 行；冒烟通过。
 - **B6** ✅ costCny→cost 全栈对齐契约 B1（trips/charging/stats/dashboard/overview + web 全部 + fmtMoney）。
 - **B7** ✅ 导出面收缩（19 项私有化）+ 文档收口（本文件 + ARCHITECTURE.md）。
-- 待终验：`bash scripts/run-e2e.sh` 全链路 → 合入 main。
+- **B8** ✅（2026-11-28 追加，升镜像部署时暴露）年报调度溢出：annual 年末排程 ~34 天超出 setTimeout 2^31ms 上限，被钳 1ms 立即触发 → 归档去重跳过 → 重排再溢出，**线上每 ~23s 对真实库空跑一次全年聚合**（v2.4 年报功能起既有）。修复=分段睡（≤12h）+ 未到点只重排；回归测试锁定。报告归档：`docs/archive/GOVERNANCE-2026-11-28.md`。
+- 终验 ✅：e2e 全链路 41+4 过 → 合入 main（073655d）→ 镜像部署本机（connect-compose + local override）。
