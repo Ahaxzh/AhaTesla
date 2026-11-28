@@ -1,6 +1,10 @@
-// index.mjs — AhaTesla server entry point.
+// index.mjs — AhaTesla server entry point（组合根：只做装配与生命周期，不装领域逻辑）。
 // API on :18500 (PORT env) + static hosting of ../../web/dist when present.
 // Worker (trip monitor + MQTT signals + push dispatch + report scheduler) runs in this process.
+//
+// 领域逻辑归属（B5 解耦后）：
+//   推送管线 core/push-dispatch · 巡检 core/patrols · 保养判定 core/maintenance
+//   monitor 持久化 core/monitor-persistence · 静态托管 api/static
 
 // 出网代理支持：Node 内置 fetch（undici）不读 HTTP(S)_PROXY 环境变量。
 // Telegram/飞书等外呼在有代理变量的环境下必须显式接管 dispatcher，否则直连超时。
@@ -10,10 +14,8 @@ if (process.env.HTTP_PROXY || process.env.HTTPS_PROXY || process.env.http_proxy 
   setGlobalDispatcher(new EnvHttpProxyAgent());
 }
 
-import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
 import { loadSecretKey, dataDir, decryptSecret } from "./core/secret-box.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -24,23 +26,25 @@ import { loadState, saveState, getStore } from "./core/state.mjs";
 import { createEventLog } from "./core/events.mjs";
 import { createFeishuChannel } from "./core/feishu.mjs";
 import { TripMonitor, startTripMonitorLoop } from "./core/trip-monitor.mjs";
+import { createMonitorPersistence } from "./core/monitor-persistence.mjs";
+import { createPushDispatch } from "./core/push-dispatch.mjs";
+import { createPatrols } from "./core/patrols.mjs";
 import { startMqttBridge } from "./core/mqtt-bridge.mjs";
 import { createNotifier, createTelegramChannel, createWebPushChannel, createWecomChannel, createNtfyChannel, createBarkChannel } from "./core/push-channels.mjs";
 import { startReportScheduler } from "./core/report-engine.mjs";
 import { getBatteryHealth } from "./core/battery-health.mjs";
 import { carIdFromQuery } from "./api/car-scope.mjs";
 import { recordProbe, createOutageWatcher } from "./core/health.mjs";
-import { checkTirePressure, checkBatteryLow } from "./core/alerts.mjs";
-import { signJwt, verifyJwt, TOKEN_COOKIE } from "./api/auth.mjs";
-import { createApp, parseCookies } from "./api/http-kit.mjs";
+import { createApp } from "./api/http-kit.mjs";
 import { createJwtMiddleware } from "./api/jwt.mjs";
+import { createStaticHandler } from "./api/static.mjs";
 import { createAuthRoutes } from "./api/auth-routes.mjs";
 import { createTripsRoutes } from "./api/trips-routes.mjs";
 import { createChargingRoutes } from "./api/charging-routes.mjs";
 import { createPricingRoutes } from "./api/pricing-routes.mjs";
 import { createLedgerRoutes } from "./api/ledger-routes.mjs";
 import { createExportRoutes } from "./api/export-routes.mjs";
-import { createMaintenanceRoutes, maintenanceStatus } from "./api/maintenance-routes.mjs";
+import { createMaintenanceRoutes } from "./api/maintenance-routes.mjs";
 import { createDashboardRoutes } from "./api/dashboard-routes.mjs";
 import { createDashboardExtraRoutes } from "./api/dashboard-extra-routes.mjs";
 import { createSettingsRoutes } from "./api/settings-routes.mjs";
@@ -49,21 +53,12 @@ import { createSetupRoutes } from "./api/setup-routes.mjs";
 import { createPushRoutes } from "./api/push-routes.mjs";
 import { createAiRoutes } from "./api/ai-routes.mjs";
 import { createAiCopywriter } from "./core/ai-copywriter.mjs";
-import { computeTripViews as tripsComputeTripViews } from "./core/trip-views.mjs";
-import { listDrivesSql, listChargingForStats, getCars } from "./core/teslamate-queries.mjs";
-import { enrichTripEndEvent, enrichChargingDoneEvent, enrichChargingStartEvent } from "./core/event-enrichment.mjs";
+import { computeTripViews } from "./core/trip-views.mjs";
+import { listDrivesSql, listChargingForStats } from "./core/teslamate-queries.mjs";
 
 const PORT = Number(process.env.PORT) || 18500;
-const DB_URL = process.env.DB_URL || ""; // 空 = 由 main() 内 resolveDbUrl 按 state.datasource 解析
 // MQTT 可选增强（§7.1）：仅显式配置 MQTT_URL 时启用；默认不配置（纯轮询基线）。
 const MQTT_URL = process.env.MQTT_URL || "";
-
-// 事件类型 → 推送矩阵开关（state.pushRules 键名），见 docs/API_CONTRACT.md §6。
-const EVENT_PUSH_RULE = Object.freeze({
-  trip_end: "tripEnd",
-  charging_start: "chargingStart",
-  charging_done: "chargingDone"
-});
 
 function log(...args) {
   process.stdout.write(`[${new Date().toISOString()}] ${args.join(" ")}\n`);
@@ -83,24 +78,21 @@ function redactUrl(url) {
   }
 }
 
-// ---- bootstrap state ------------------------------------------------------
-// AC-1.4：无预设明文密码，管理员账号由 /setup 向导首位注册创建；
-// 进程启动状态装配全部在 main() 内完成（此前另设 bootstrap() 仅为旧测试兼容）。
+// AC-1.4：无预设明文密码，管理员账号由 /setup 向导首位注册创建。
 
-export function buildApp({ db, state, eventLog, mqtt, startedAt, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
+export function buildApp({ db, state, eventLog, mqtt = null, startedAt, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const getSecret = () => loadSecretKey();
   const requireAuth = createJwtMiddleware({ getSecret });
-  const feishu = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
-
   const app = createApp({ onError: (error) => eventLog.log("server.error", { message: error?.message }) });
 
-  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, notifier, reportScheduler, buildDeps, ai });
+  registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, notifier, reportScheduler, buildDeps, ai });
 
-  return { app, feishu };
+  return app;
 }
 
-// 路由注册统一入口：buildApp 与 main() 重建路由共用，避免两份清单漂移。
-function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, feishu, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
+// 路由注册统一入口（buildApp 与测试共用，避免两份清单漂移）。
+// 注：静态路由表 + :id 顺序匹配 —— 汇总/habits/energy-curve 必须先于 /:id 注册。
+export function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt, startedAt, setupDeps = null, notifier = null, reportScheduler = null, buildDeps = null, ai = null }) {
   const auth = createAuthRoutes({ state, getSecret, eventLog });
   const setup = setupDeps ?? createSetupRoutes({ state, db, getSecret, saveStateFn: saveState, eventLog, currentDbUrl: process.env.DB_URL }); // db.retarget 由 saveDatasource 注入下方
   const trips = createTripsRoutes({ db, state });
@@ -202,57 +194,6 @@ function registerRoutes(app, { requireAuth, getSecret, state, db, eventLog, mqtt
   app.get("/api/system/health-lite", (ctx) => healthLite.healthLite(ctx)); // 匿名探活（GA-32）
 }
 
-// ---- static hosting --------------------------------------------------------
-
-const MIME = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".ico": "image/x-icon",
-  ".webmanifest": "application/manifest+json",
-  ".woff2": "font/woff2",
-  ".map": "application/json"
-};
-
-export function createStaticHandler(rootDir) {
-  if (!rootDir || !existsSync(rootDir)) return null;
-  return async (req, res, pathname) => {
-    let rel = pathname === "/" ? "/index.html" : pathname;
-    const filePath = join(rootDir, rel);
-    if (!filePath.startsWith(rootDir)) return false;
-    try {
-      const content = await readFile(filePath);
-      const ext = filePath.slice(filePath.lastIndexOf("."));
-      // 缓存策略：HTML 与 SW 永远走网络（发版即生效）；带 hash 的构建产物长缓存
-      const isHtml = ext === ".html" || pathname === "/";
-      const isSw = rel === "/service-worker.js";
-      const hashed = /-[A-Za-z0-9_-]{8}\.(js|css|png|svg|woff2?)$/.test(rel);
-      const cacheControl = isHtml || isSw
-        ? "no-cache, must-revalidate"
-        : hashed
-          ? "public, max-age=31536000, immutable"
-          : "public, max-age=3600";
-      res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream", "cache-control": cacheControl });
-      res.end(content);
-      return true;
-    } catch {
-      // SPA fallback
-      try {
-        const index = await readFile(join(rootDir, "index.html"));
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache, must-revalidate" });
-        res.end(index);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  };
-}
-
 // ---- MQTT signal bridge ------------------------------------------------------
 
 // MQTT 为可选增强（§7.1）：仅 MQTT_URL 显式配置时启用；未配置/连不上时优雅
@@ -316,48 +257,26 @@ async function main() {
       if (rawFb) state.fuelBaseline = { ...state.fuelBaseline, ...JSON.parse(rawFb) };
     } catch { /* 坏数据忽略，走默认 */ }
   }
-
-  // GA-39（§7.4 崩溃自愈）：monitor 状态（水线游标 + sent_keys/pending_events）
-  // 持久化到 SQLite kv，重启恢复，避免重复推送/水线重算。防抖写回（节流 2s）。
-  const MONITOR_STATE_KEY = "monitor_state_v1";
   const store = getStore();
-  const savedMonitorState = (() => {
-    try {
-      const raw = store.kvGet(MONITOR_STATE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
-  })();
-  let monitorSaveTimer = null;
-  const persistMonitorState = () => {
-    if (monitorSaveTimer) return;
-    monitorSaveTimer = setTimeout(() => {
-      monitorSaveTimer = null;
-      try {
-        // M2:sent_keys 只保留最近 500 条(eventKey 去重只需覆盖近期),
-        // 防止常年运行下 kv blob 无限膨胀拖慢每次序列化。
-        const keys = Object.keys(monitor.state.sent_keys || {});
-        if (keys.length > 500) {
-          for (const key of keys.slice(0, keys.length - 500)) delete monitor.state.sent_keys[key];
-        }
-        store.kvPut(MONITOR_STATE_KEY, JSON.stringify(monitor.state));
-      } catch (error) {
-        eventLog?.log?.("monitor.persist_error", { message: error.message });
-      }
-    }, 2_000);
-    monitorSaveTimer.unref?.();
-  };
 
+  // GA-39（§7.4 崩溃自愈）：monitor 状态 kv 持久化（防抖 2s + 周期兜底）
   const monitor = new TripMonitor({
-    state: savedMonitorState,
+    state: (() => {
+      try {
+        const raw = store.kvGet("monitor_state_v1");
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    })(),
     onEvent: (event) => {
       eventLog.log("push.event", { type: event.type, eventKey: event.eventKey });
-      dispatchPush(event).catch((error) => eventLog.log("push.error", { message: error.message }));
+      dispatch(event).catch((error) => eventLog.log("push.error", { message: error.message }));
     }
   });
+  const monitorPersistence = createMonitorPersistence({ monitor, store, eventLog });
 
-  // ---- Notifier（三渠道抽象，GA-08）+ AI 润色（m4c-c3）+ 报告调度器（GA-11） ----
+  // ---- 渠道 + AI 润色（m4c-c3）+ 报告调度器（GA-11）+ 推送管线 ----------------
   const feishuChannel = createFeishuChannel(state, { logger: (msg) => eventLog.log("feishu.error", { message: msg }) });
   const ai = createAiCopywriter({ store, eventLog });
   const notifier = createNotifier({
@@ -371,10 +290,11 @@ async function main() {
     bark: createBarkChannel({ logger: (m) => eventLog.log("bark.error", { message: m }) }),
     ai
   });
-  // 报告构建依赖（computeTripViews/listDrivesSql/listChargingForStats 已静态导入）
+  const { dispatch, carsListCached, replayPending } = createPushDispatch({ db, state, notifier, eventLog, monitor });
+
   const reportBuildDeps = () => ({
     db, state,
-    computeTripViews: tripsComputeTripViews,
+    computeTripViews,
     listDrivesSql,
     listChargingForStats
   });
@@ -388,114 +308,24 @@ async function main() {
     logger: (msg) => log("report:", msg)
   });
 
-  // ---- m4e 多车:推送事件的车辆标记(60s 车辆缓存) --------------------------
-  // 声明须早于下方"启动补发"块 —— dispatchPush 虽是提升的函数声明,但它引用的
-  // carsCache(let)若尚未执行会 TDZ,被 catch 吞掉后补发事件全都不带车名后缀
-  let carsCache = { at: 0, list: null };
-  async function carsListCached() {
-    if (carsCache.list && Date.now() - carsCache.at < 60_000) return carsCache.list;
-    try {
-      const rows = await getCars(db);
-      carsCache = { at: Date.now(), list: rows };
-    } catch {
-      carsCache = { at: Date.now(), list: carsCache.list || [] }; // 查询失败沿用旧缓存
-    }
-    return carsCache.list;
-  }
-
-  // M2 修复：崩溃/重启时未完成投递的 pending 事件在此补发（最多 20 条、
-  // 7 天内的才补 —— dedupe 保证同 key 不重推；过期事件直接丢弃并记日志）。
+  // M2 修复：崩溃/重启时未完成投递的 pending 事件补发（dedupe 保证同 key 不重推）
   {
-    const pending = monitor.pendingEvents();
-    const now = Date.now();
-    let replayed = 0;
-    for (const event of pending.slice(0, 20)) {
-      const atMs = Date.parse(event.at || event.ended_at || "");
-      if (Number.isFinite(atMs) && now - atMs > 7 * 24 * 3600_000) {
-        if (event.eventKey) monitor.acknowledge(event.eventKey);
-        eventLog?.log?.("push.pending_dropped", { eventKey: event.eventKey, type: event.type });
-        continue;
-      }
-      replayed += 1;
-      dispatchPush(event).catch((error) => eventLog?.log?.("push.error", { message: error.message }));
-    }
-    if (pending.length) {
-      log(`monitor pending events: ${pending.length} loaded, ${replayed} replayed`);
-      persistMonitorState();
+    const { total, replayed } = replayPending();
+    if (total) {
+      log(`monitor pending events: ${total} loaded, ${replayed} replayed`);
+      monitorPersistence.persist();
     }
   }
 
-  const { app, feishu } = buildApp({ db, state, eventLog, mqtt: null, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
-
-  async function carIdOfEvent(event) {
-    try {
-      if (event.type === "trip_end" && Array.isArray(event.segment_ids) && event.segment_ids.length) {
-        const r = await db.queryOne("SELECT car_id FROM drives WHERE id = $1", [Number(event.segment_ids[0])]);
-        return r?.car_id ?? null;
-      }
-      if ((event.type === "charging_start" || event.type === "charging_done" || event.type === "chargeInterrupt")
-        && event.charging_process_id) {
-        const r = await db.queryOne("SELECT car_id FROM charging_processes WHERE id = $1", [Number(event.charging_process_id)]);
-        return r?.car_id ?? null;
-      }
-    } catch { /* 查不到就不标记 */ }
-    return null;
-  }
-  async function carLabelForEvent(event) {
-    const cars = await carsListCached();
-    if (!cars || cars.length <= 1) return null; // 单车实例:标题零变化
-    const carId = event.carId ?? await carIdOfEvent(event);
-    if (carId == null) return null;
-    const car = cars.find((c) => Number(c.id) === Number(carId));
-    if (!car) return null;
-    return state.settings?.carAliases?.[String(carId)] || car.name;
-  }
-
-  async function dispatchPush(rawEvent) {
-    // 事件富化（v2.2 + P1 b/c/d）：天气/胎压/速度/怠速 + 计价批次 + 充电预估/对比
-    let event = rawEvent;
-    try {
-      if (event.type === "trip_end") {
-        event = await enrichTripEndEvent(db, event, { state });
-      } else if (event.type === "charging_done") event = await enrichChargingDoneEvent(db, event, { state });
-      else if (event.type === "charging_start") event = await enrichChargingStartEvent(db, event);
-    } catch (error) {
-      eventLog.log("push.enrich_error", { message: error.message });
-    }
-    // m4e 多车:车辆标记。cars ≤1 时零变化(不挂 carLabel,标题不加后缀);
-    // 多车时 trip/charging 事件按事件源车挂 `carLabel`(别名优先),标题后缀 `· 别名`。
-    try {
-      const label = await carLabelForEvent(event);
-      if (label) event.carLabel = label;
-    } catch { /* 标记失败不影响推送 */ }
-    // 矩阵化投递（GA-08/AC-12.2）：多渠道并行 + 单渠道失败隔离 + deliveryMs 埋点
-    const t0 = Date.now();
-    const { results } = await notifier.dispatch(event);
-    const deliveryMs = Date.now() - t0;
-    eventLog.log("push.dispatch", { type: event.type, results, deliveryMs });
-    // M2 修复：投递尝试即确认（不再只在 ≥1 渠道成功时确认）。dedupe 由
-    // sent_keys 承担 —— 此前全渠道失败/矩阵全关的事件会永远卡在 pending：
-    // 不重发、又堵住同 key 再触发，静音时段的 backlog 也在 kv 里无限累积。
-    if (event.eventKey) monitor.acknowledge(event.eventKey);
-
-    // P2 告警派生:充电结束且明显提前(富化层 endBattery<80 置 endedEarly)→
-    // 独立更醒目的 chargeInterrupt 告警(charging_done 照常已发,两者并存)。
-    // charging_done 本身每会话恰一次(monitor 去重) → 派生事件天然每会话一次。
-    if (event.type === "charging_done" && event.endedEarly) {
-      try {
-        const alarm = await notifier.dispatch({
-          type: "chargeInterrupt",
-          charging_process_id: event.charging_process_id,
-          endBattery: event.endBattery,
-          energyKwh: event.energyKwh,
-          locationName: event.locationName
-        });
-        eventLog.log("push.dispatch", { type: "chargeInterrupt", derived: true, results: alarm.results, deliveryMs: Date.now() - t0 });
-      } catch (error) {
-        eventLog.log("push.error", { message: `chargeInterrupt: ${error.message}` });
-      }
-    }
-  }
+  // ---- HTTP：路由一次注册 + MQTT 懒视图（替代「连上后清表重注册」hack） ------
+  // system 路由只在请求时读 mqtt.isConfigured()/isConnected() —— 桥接建立后
+  // 视图自动反映，无需重注册路由表。
+  const mqttRef = { bridge: null };
+  const mqttView = {
+    isConfigured: () => Boolean(mqttRef.bridge),
+    isConnected: () => mqttRef.bridge?.isConnected?.() ?? false
+  };
+  const app = buildApp({ db, state, eventLog, mqtt: mqttView, startedAt, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
 
   const staticHandler = createStaticHandler(join(__dirname, "..", "..", "web", "dist"));
   // 默认只绑 127.0.0.1（裸机/systemd 部署不再意外监听全部网卡走明文 HTTP）；
@@ -518,102 +348,35 @@ async function main() {
     rawHandler(req, res);
   });
 
-  // P2 告警:数据断联/恢复(边沿各一次,共用 outage 矩阵行)
+  // ---- 巡检与告警（P2/v2.5/v2.6）-------------------------------------------
+  // 数据断联/恢复(边沿各一次,共用 outage 矩阵行) + 三巡检(各自 kv 节流)
   const outageWatcher = createOutageWatcher({
     thresholdMs: 10 * 60_000,
-    onOutage: (ms) => dispatchPush({ type: "outage", outageMs: ms }).catch(() => {}),
-    onRecovered: (ms) => dispatchPush({ type: "outage_recovered", outageMs: ms }).catch(() => {})
+    onOutage: (ms) => dispatch({ type: "outage", outageMs: ms }).catch(() => {}),
+    onRecovered: (ms) => dispatch({ type: "outage_recovered", outageMs: ms }).catch(() => {})
   });
-
-  // P2 告警:胎压巡检(随监控循环同频,越限且距上次告警 ≥24h 才推)。
-  // m4e 多车:逐车巡检,事件带 carId(carLabelForEvent 据此挂车名后缀)。
-  // M1 修复:节流时间戳经 SQLite kv 持久化(saveState 会静默丢非白名单字段,
-  // 重启即重推;dailyLastRun 同理在 report-engine 内改走 kv)。
-  if (!state.alerts) state.alerts = {};
-  async function patrolTirePressure() {
-    const now = Date.now();
-    let lastTireAlertAt = Number(store.kvGet("alerts:lastTireAlertAt")) || 0;
-    if (lastTireAlertAt && now - lastTireAlertAt < 24 * 3600_000) return;
-    let cars = [{ id: null }];
-    try {
-      cars = await carsListCached();
-      if (!cars?.length) cars = [{ id: null }];
-    } catch { /* 车表不可达 → 全库巡检 */ }
-    for (const car of cars) {
-      const r = await checkTirePressure(db, { carId: car.id });
-      if (!r) continue;
-      store.kvPut("alerts:lastTireAlertAt", String(now));
-      await dispatchPush({
-        type: "tirePressure", carId: r.carId ?? car.id, tirePressure: r, minBar: r.min, suggest: r.suggest
-      }).catch(() => {});
-      break; // 一次巡检只推一条(24h 节流),多车问题明日再报
-    }
-  }
-
-  // v2.5 低电量巡检(同款 24h kv 节流;充电中不告警——alerts.checkBatteryLow 内判定)。
-  // 场景:车在地库/机场静置掉电到 20% 以下,官方 App 之外统一从这收提醒。
-  async function patrolBatteryLow() {
-    const now = Date.now();
-    let lastAt = Number(store.kvGet("alerts:lastBatteryLowAlertAt")) || 0;
-    if (lastAt && now - lastAt < 24 * 3600_000) return;
-    let cars = [{ id: null }];
-    try {
-      cars = await carsListCached();
-      if (!cars?.length) cars = [{ id: null }];
-    } catch { /* 车表不可达 → 全库巡检 */ }
-    for (const car of cars) {
-      const r = await checkBatteryLow(db, { carId: car.id });
-      if (!r) continue;
-      store.kvPut("alerts:lastBatteryLowAlertAt", String(now));
-      await dispatchPush({
-        type: "batteryLow", carId: r.carId ?? car.id, batteryLevel: r.batteryLevel, thresholdPct: r.thresholdPct
-      }).catch(() => {});
-      break; // 一次巡检只推一条(24h 节流),多车问题明日再报
-    }
-  }
-
-  // v2.5 保养里程巡检(7 天节流——不像胎压紧急,周提醒足够;只在有到期项时推送)。
-  async function patrolMaintenance() {
-    const now = Date.now();
-    let lastAt = Number(store.kvGet("alerts:lastMaintenanceAlertAt")) || 0;
-    if (lastAt && now - lastAt < 7 * 24 * 3600_000) return;
-    try {
-      const status = await maintenanceStatus(db, store, { carId: state.datasource?.carId ?? null });
-      const due = status.items.filter((i) => i.due);
-      if (!due.length) return;
-      store.kvPut("alerts:lastMaintenanceAlertAt", String(now));
-      await dispatchPush({
-        type: "maintenance", odometerKm: status.odometerKm, items: status.items
-      }).catch(() => {});
-    } catch { /* 巡检失败静默 */ }
-  }
+  const patrols = createPatrols({ db, state, store, dispatch, carsListCached });
 
   const loop = startTripMonitorLoop({
     monitor,
     db,
     // 探活结果喂给健康状态机（GA-32 失联横幅数据源）；失败由 loop 内部 logger 兜底
-    // P2:同一帧喂断联观察者(≥10min 边沿推送)与胎压巡检(24h 节流)
     onPollResult: (ok) => {
-      const result = recordProbe(ok);
-      outageWatcher.observe(result);
-      void patrolTirePressure();
-      void patrolBatteryLow();
-      void patrolMaintenance();
+      outageWatcher.observe(recordProbe(ok));
+      patrols.runAll();
     },
     logger: (message) => eventLog.log("monitor.error", { message })
   });
   // GA-39：周期 + 事件驱动节流持久化 monitor 状态（水线游标/sent_keys/pending_events）
   const origPoke = loop.poke.bind(loop);
-  loop.poke = () => Promise.resolve(origPoke()).finally(persistMonitorState);
-  const persistTimer = setInterval(persistMonitorState, 30_000);
+  loop.poke = () => Promise.resolve(origPoke()).finally(() => monitorPersistence.persist());
+  const persistTimer = setInterval(() => monitorPersistence.persist(), 30_000);
   persistTimer.unref?.();
 
   // loop 先建，MQTT 充电边沿才能 poke 即时轮询（§7.1 增强路径）
   const mqttBridge = await startMqtt({ monitor, eventLog, loop });
+  mqttRef.bridge = mqttBridge;
   if (mqttBridge) {
-    const requireAuth2 = createJwtMiddleware({ getSecret: () => loadSecretKey() });
-    app.routes.length = 0;
-    registerRoutes(app, { requireAuth: requireAuth2, getSecret: () => loadSecretKey(), state, db, eventLog, mqtt: mqttBridge, startedAt, feishu, notifier, reportScheduler, buildDeps: reportBuildDeps, ai });
     log(`mqtt enabled (optional enhancement): ${redactUrl(MQTT_URL)}`);
   } else if (MQTT_URL) {
     log(`mqtt configured but unavailable — degraded to polling baseline: ${redactUrl(MQTT_URL)}`);
@@ -625,8 +388,7 @@ async function main() {
     loop.stop();
     reportScheduler?.stop?.();
     clearInterval(persistTimer);
-    if (monitorSaveTimer) { clearTimeout(monitorSaveTimer); }
-    try { store.kvPut(MONITOR_STATE_KEY, JSON.stringify(monitor.state)); } catch {}
+    monitorPersistence.dispose();
     await mqttBridge?.close?.();
     server.close();
     await db.close().catch(() => {});
