@@ -43,7 +43,7 @@ export function createDashboardRoutes({ db, state }) {
         endAt: isoFromTeslaMate(row.end_at),
         locationName: row.geofence_name || row.address_name || "未知地点",
         energyAddedKWh: finiteNumber(row.charge_energy_added),
-        costCny: priced.costCny,
+        cost: priced.costCny,
         pricePerUnit: priced.pricePerUnit,
         startBattery: row.start_battery_level ?? null,
         endBattery: row.end_battery_level ?? null,
@@ -104,7 +104,7 @@ export function createDashboardRoutes({ db, state }) {
         carId: boundCarId
       });
       const monthEnergy = monthViews.reduce((total, view) => total + (view.energyKWh ?? 0), 0);
-      const monthCost = monthViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
+      const monthCost = monthViews.reduce((total, view) => total + (view.cost ?? 0), 0);
 
       const weekDrives = await fetchAllDrivesInWindow(db, {
         from: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(), carId: boundCarId
@@ -114,7 +114,7 @@ export function createDashboardRoutes({ db, state }) {
         carId: boundCarId
       });
       const weekEnergy = weekViews.reduce((total, view) => total + (view.energyKWh ?? 0), 0);
-      const weekCost = weekViews.reduce((total, view) => total + (view.costCny ?? 0), 0);
+      const weekCost = weekViews.reduce((total, view) => total + (view.cost ?? 0), 0);
 
       const monthDistance = finiteNumber(monthStats?.distance_km) ?? 0;
       // GA-17（AC-7.4）：油车基准可配置（state.fuelBaseline），默认 8.0L/100km @ ¥8.20/L（PRD 口径）
@@ -157,17 +157,17 @@ export function createDashboardRoutes({ db, state }) {
         monthStats: {
           distanceKm: round(monthDistance, 1),
           energyKWh: round(monthEnergy, 2),
-          costCny: round(monthCost, 2),
+          cost: round(monthCost, 2),
           driveCount: monthStats?.drive_count ?? 0,
           driveHours: round((monthStats?.drive_minutes ?? 0) / 60, 1)
         },
         weekStats: {
           distanceKm: round(finiteNumber(weekStats?.distance_km) ?? 0, 1),
           energyKWh: round(weekEnergy, 2),
-          costCny: round(weekCost, 2)
+          cost: round(weekCost, 2)
         },
         fuelComparison: {
-          fuelCostCny: fuelCost,
+          fuelCost: fuelCost,
           baseline: `对比基准 ${baseline.literPer100km}L/100km @ ¥${baseline.fuelPriceCnyPerL}/L`,
           source: FUEL_REFERENCE.source,
           asOf: FUEL_REFERENCE.asOf

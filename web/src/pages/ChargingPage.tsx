@@ -11,7 +11,7 @@ import { StatCard } from '@/components/StatCard'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKwh, fmtPrice, getCurrencySymbol, toInputDate } from '@/utils/format'
+import { fmtMoney, fmtDateTime, fmtDuration, fmtKwh, fmtPrice, getCurrencySymbol, toInputDate } from '@/utils/format'
 import type { ChargeDetail } from '@/types'
 
 const PAGE_SIZE = 20
@@ -244,7 +244,7 @@ export default function ChargingPage() {
         {stats ? (
           <>
             <StatCard icon={Zap} label={t('charging.stat.kwh', '{r}充电量').replace('{r}', rangeText)} value={fmtKwh(stats.totalKWh)} />
-            <StatCard icon={Coins} label={t('charging.stat.cost', '{r}电费').replace('{r}', rangeText)} value={fmtCny(stats.totalCostCny)} accent data-testid="charge-total-cost" />
+            <StatCard icon={Coins} label={t('charging.stat.cost', '{r}电费').replace('{r}', rangeText)} value={fmtMoney(stats.totalCost)} accent data-testid="charge-total-cost" />
             <StatCard icon={BatteryCharging} label={t('charging.stat.price', '平均单价')} value={`${getCurrencySymbol()}${fmtPrice(stats.avgPricePerKWh)}/kWh`} />
             {/* 会话数（server stats.sessionCount；月份筛选联动） */}
             <StatCard
@@ -285,7 +285,7 @@ export default function ChargingPage() {
               return (
                 <div key={key} data-testid={`cost-type-${key}`}>
                   <div className="text-[11px] text-slate-400">{label}</div>
-                  <div className="num mt-1 text-lg font-semibold text-slate-100">{fmtCny(g.cost)}</div>
+                  <div className="num mt-1 text-lg font-semibold text-slate-100">{fmtMoney(g.cost)}</div>
                   <div className="num mt-0.5 text-[11px] text-slate-500">{fmtKwh(g.kwh)} · {g.count} {t('charging.chart.countUnit', '次')}</div>
                   <div className={`mt-2 h-1.5 rounded-full bg-gradient-to-r ${cls}`} style={{ width: '100%', opacity: 0.8 }} role="presentation" />
                 </div>
@@ -308,7 +308,7 @@ export default function ChargingPage() {
                       key={m.month}
                       className="flex-1 rounded-t bg-gradient-to-t from-tesla/20 to-tesla/60"
                       style={{ height: `${Math.max((m.cost / max) * 100, 4)}%` }}
-                      title={`${m.month} · ${fmtCny(m.cost)} · ${m.kwh} kWh`}
+                      title={`${m.month} · ${fmtMoney(m.cost)} · ${m.kwh} kWh`}
                     />
                   )
                 })}
@@ -388,7 +388,7 @@ export default function ChargingPage() {
                       <span className={`rounded-full px-2 py-0.5 text-[11px] ${tag.cls}`} data-testid={`cost-source-${c.id}`}>
                         {t(tag.labelKey, tag.labelZh)}
                       </span>
-                      <span className="num text-sm font-semibold text-tesla">{fmtCny(c.costCny)}</span>
+                      <span className="num text-sm font-semibold text-tesla">{fmtMoney(c.cost)}</span>
                     </div>
                   </div>
                   <div className="num mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
@@ -464,7 +464,7 @@ export default function ChargingPage() {
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
                     <div className="text-[11px] text-slate-400">{t('charging.modal.cost', '费用')}</div>
-                    <div className="mt-1 text-sm font-semibold text-tesla">{fmtCny(detail.costCny)}</div>
+                    <div className="mt-1 text-sm font-semibold text-tesla">{fmtMoney(detail.cost)}</div>
                   </div>
                   <div className="rounded-xl bg-white/[0.04] p-3">
                     <div className="text-[11px] text-slate-400">{t('charging.modal.price', '单价')}</div>

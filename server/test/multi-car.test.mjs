@@ -118,7 +118,7 @@ test("buildReport：carId 透传到行程/充电查询，报告带 carId", async
       async queryOne() { return null; },
     },
     state: { pricing: { defaultRateCnyPerKwh: 0.5, history: [] }, fuelBaseline: {} },
-    computeTripViews: async (_db, rows) => rows.map((r) => ({ id: r.id, distanceKm: 0, energyKWh: 0, costCny: 0 })),
+    computeTripViews: async (_db, rows) => rows.map((r) => ({ id: r.id, distanceKm: 0, energyKWh: 0, cost: 0 })),
     listDrivesSql,
     listChargingForStats,
     carId: 2,

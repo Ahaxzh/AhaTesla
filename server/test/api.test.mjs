@@ -265,7 +265,7 @@ test("GET /api/trips 返回分页 + Trip 字段 + 成本分摊", async () => {
   assert.equal(trip.energyKWh, 3); // 20km × 150Wh/km
   // batch: 25.3kWh @38/25.3 → cost = 3 × (38/25.3)
   const expected = Number((3 * (38.0 / 25.3)).toFixed(2));
-  assert.equal(trip.costCny, expected);
+  assert.equal(trip.cost, expected);
   assert.equal(trip.kwhPer100km, Number((3 / 21.5 * 100).toFixed(2)));
   assert.equal(trip.startAt, "2026-10-13T02:11:40.000Z"); // naive UTC → ISO
 });
@@ -446,11 +446,11 @@ test("GET /api/charging：cost 直接用 / 无 cost 回落默认价", async () =
   assert.equal(res.json.total, 490);
   const [first, second] = res.json.items;
   assert.equal(first.id, 490);
-  assert.equal(first.costCny, 38.0);
+  assert.equal(first.cost, 38.0);
   assert.equal(first.locationName, "CND");
   assert.equal(first.powerMaxKw, 90);
   assert.equal(second.id, 489);
-  assert.equal(second.costCny, 10.0); // default 1.0 × 10
+  assert.equal(second.cost, 10.0); // default 1.0 × 10
   assert.equal(second.locationName, "某处充电站");
 });
 
@@ -460,7 +460,7 @@ test("GET /api/charging/stats 聚合按地点", async () => {
   assert.equal(res.status, 200);
   assert.equal(res.json.sessionCount, 2);
   assert.equal(res.json.totalKWh, 35.3);
-  assert.equal(res.json.totalCostCny, 48.0);
+  assert.equal(res.json.totalCost, 48.0);
   assert.equal(res.json.byLocation.length, 2);
   const cnd = res.json.byLocation.find((l) => l.name === "CND");
   assert.equal(cnd.count, 1);
@@ -647,7 +647,7 @@ test("GET /api/dashboard 汇总", async () => {
   assert.equal(res.json.car.state, "asleep_or_parked");
   assert.equal(res.json.monthStats.driveCount, 40);
   assert.equal(res.json.monthStats.driveHours, 20);
-  assert.ok(res.json.fuelComparison.fuelCostCny > 0);
+  assert.ok(res.json.fuelComparison.fuelCost > 0);
   assert.equal(res.json.recentTrips.length, 1);
 });
 

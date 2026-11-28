@@ -102,7 +102,7 @@ test("早报消费 backlog:「昨夜静默行程」段呈现并清空", async ()
       { match: () => true, rows: [{ id: 1, distance_km: 12, duration_min: 30, cost: 1.2 }] }
     ]),
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 1, costCny: d.cost })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 1, cost: d.cost })),
     listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
     listChargingForStats: async () => []
   });
@@ -190,7 +190,7 @@ test("daily 插枪提醒:TOU 用户昨日无充电才出现", async () => {
       { match: () => true, rows: [] }
     ]),
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 1, costCny: d.cost })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 1, cost: d.cost })),
     listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
     listChargingForStats: async () => []
   });
@@ -225,7 +225,7 @@ test("monthly 年度累计行:月报专属,周报不出现", async () => {
       }
     ]),
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, cost: d.cost })),
     listDrivesSql: ({ from, to }) => { monthWindows.push(new Date(from).toISOString().slice(0, 10)); return { sql: "SELECT * FROM drives", params: [from, to] }; },
     listChargingForStats: async () => []
   });
@@ -238,7 +238,7 @@ test("monthly 年度累计行:月报专属,周报不出现", async () => {
   const weeklyDeps = () => ({
     db: makeFakeDb([{ match: () => true, rows: [] }]),
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, cost: d.cost })),
     listDrivesSql: () => ({ sql: "SELECT * FROM drives", params: [] }),
     listChargingForStats: async () => []
   });

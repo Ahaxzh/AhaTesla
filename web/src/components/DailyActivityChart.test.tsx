@@ -26,7 +26,7 @@ function makeOverview(bucket: 'day' | 'week' = 'day'): TripsOverview {
     distanceKm: 300,
     durationMin: 315,
     energyKwh: 50,
-    costCny: 30,
+    cost: 30,
     maxSpeedKmh: 100,
     stateShare: { driveMin: 315, chargeMin: 150, parkedMin: 9615 },
     daily: { bucket, points: bucket === 'day' ? pts : [{ date: '2026-11-09', driveMin: 315, chargeMin: 150, trips: 9 }] },

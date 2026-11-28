@@ -85,7 +85,7 @@ export async function computeTripViews(db, drives, { defaultRate, history, state
       distanceKm: distance,
       durationMin: Number(drive.duration_min) || 0,
       energyKWh: energy,
-      costCny: allocation?.cost_cny ?? null,
+      cost: allocation?.cost_cny ?? null,
       startAddress: shortAddressLabel(addressLabel(addressMap[drive.start_address_id] || null)) || geofenceMap[drive.start_geofence_id] || nearestGeofenceName(geofenceRows, drive.start_lat, drive.start_lng) || amapOf(drive.start_lat, drive.start_lng) || null,
       endAddress: shortAddressLabel(addressLabel(addressMap[drive.end_address_id] || null)) || geofenceMap[drive.end_geofence_id] || nearestGeofenceName(geofenceRows, drive.end_lat, drive.end_lng) || amapOf(drive.end_lat, drive.end_lng) || null,
       kwhPer100km: energy !== null && distance > 0 ? round(energy / distance * 100, 2) : null,

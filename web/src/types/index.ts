@@ -53,7 +53,7 @@ export interface Trip {
   distanceKm: number
   durationMin: number
   energyKWh: number
-  costCny: number
+  cost: number
   startAddress: string
   endAddress: string
   kwhPer100km: number
@@ -107,7 +107,7 @@ export interface Charge {
   endAt: string
   locationName: string
   energyAddedKWh: number
-  costCny: number
+  cost: number
   pricePerUnit: number
   /** SoC 采样缺失时为 null（服务端 ?? null 直传，展示层需判空） */
   startBattery: number | null
@@ -196,12 +196,12 @@ export interface DashboardData {
   monthStats: {
     distanceKm: number
     energyKWh: number
-    costCny: number
+    cost: number
     driveCount: number
     driveHours: number
   }
-  weekStats: { distanceKm: number; energyKWh: number; costCny: number }
-  fuelComparison: { fuelCostCny: number; source: string; asOf: string }
+  weekStats: { distanceKm: number; energyKWh: number; cost: number }
+  fuelComparison: { fuelCost: number; source: string; asOf: string }
   recentTrips: Trip[]
   recentCharges: Charge[]
 }
@@ -217,7 +217,7 @@ export interface TripsOverview {
   distanceKm: number
   durationMin: number
   energyKwh: number | null
-  costCny: number | null
+  cost: number | null
   /** v2.8 区间表显续航消耗合计（km）：与 distanceKm 同量纲，差值 = ±比额定多/少跑；旧实例无此字段 */
   ratedUsedKm?: number | null
   maxSpeedKmh: number | null
@@ -240,7 +240,7 @@ export interface RouteSummary {
 
 export interface ChargingStats extends ChargingStatsV2 {
   totalKWh: number
-  totalCostCny: number
+  totalCost: number
   avgPricePerKWh: number
   /** 本期充电会话数（服务端 stats 已返回，前端类型此前漏标） */
   sessionCount?: number
@@ -446,6 +446,7 @@ export interface ReportDetail extends ReportListItem {
     savedPct: number | null
   }
   /** v2.4 补里程/能耗/电费（旧快照只有 count → 字段可空降级） */
+  /** 报告快照为不可变历史数据，金额字段沿用归档时格式（costCny） */
   topRoutes: { route: string; count: number; distanceKm?: number; energyKwh?: number; costCny?: number }[]
   insights?: ReportInsights | null
   /** 月报：年度累计 */

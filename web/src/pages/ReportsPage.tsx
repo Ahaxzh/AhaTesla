@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { useToast } from '@/components/Toast'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtKm } from '@/utils/format'
+import { fmtMoney, fmtDateTime, fmtKm } from '@/utils/format'
 
 /** P5 报告页（/reports）：周报/月报卡片瀑布流 + 手动生成（调试） */
 export default function ReportsPage() {
@@ -142,11 +142,11 @@ export default function ReportsPage() {
                 <div className="truncate text-sm font-medium text-slate-100">{r.periodLabel}</div>
                 <div className="num mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
                   <span>{t('rep.kpi.km', '里程')} {fmtKm(r.distanceKm)} km</span>
-                  <span>{t('rep.kpi.cost', '电费')} {fmtCny(r.totalCost)}</span>
+                  <span>{t('rep.kpi.cost', '电费')} {fmtMoney(r.totalCost)}</span>
                   {r.saved != null && (
                     <span className="flex items-center gap-0.5 text-emerald-400">
                       <TrendingDown className="h-3 w-3" />
-                      {t('rep.saved', '省')} {fmtCny(Math.abs(r.saved))}
+                      {t('rep.saved', '省')} {fmtMoney(Math.abs(r.saved))}
                     </span>
                   )}
                 </div>

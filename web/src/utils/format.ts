@@ -20,8 +20,8 @@ export function getCurrencySymbol() {
   return currencySymbol
 }
 
-/** 金额（带货币符号；fmtCny 保留原名避免全站改名面） */
-export function fmtCny(v: number | null | undefined, digits = 2): string {
+/** 金额（带货币符号；fmtMoney 保留原名避免全站改名面） */
+export function fmtMoney(v: number | null | undefined, digits = 2): string {
   if (v == null || Number.isNaN(v)) return '--'
   return `${currencySymbol}${v.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }

@@ -121,7 +121,7 @@ test("report-engine：buildReport 周期聚合 + 油车对比 + topRoutes", asyn
     db,
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
     computeTripViews: async (_db, drives) => drives.map((d) => ({
-      id: d.id, distanceKm: d.distance_km, energyKWh: 3, costCny: 1.8,
+      id: d.id, distanceKm: d.distance_km, energyKWh: 3, cost: 1.8,
       routeKey: d.start_geofence_id === 1 ? "家 → 公司" : "公司 → 家"
     })),
     listDrivesSql: () => ({ sql: "SELECT * FROM drives", params: [] }),
@@ -174,7 +174,7 @@ test("report-engine：annual 上一自然年 + 年度之最（v2.5）", async ()
     db,
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
     computeTripViews: async (_db, drives) => drives.map((d) => ({
-      id: d.id, startAt: d.start_at, distanceKm: d.distance_km, energyKWh: 3, costCny: 1.8,
+      id: d.id, startAt: d.start_at, distanceKm: d.distance_km, energyKWh: 3, cost: 1.8,
       routeKey: d.start_geofence_id === 1 ? "家 → 公司" : "公司 → 家"
     })),
     listDrivesSql: () => ({ sql: "SELECT * FROM drives", params: [] }),
@@ -463,7 +463,7 @@ test("buildReport daily：昨日窗口聚合 + 上周同日对比 + 本月累计
   const deps = {
     db,
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost, routeKey: "家 → 公司" })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, cost: d.cost, routeKey: "家 → 公司" })),
     listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
     listChargingForStats: async (_db, { sinceIso }) => (sinceIso <= "2026-10-14T15:30:00.000Z"
       ? [{ id: 9, end_date: "2026-10-14T15:30:00", charge_energy_added: 41.2, geofence_name: "家庭充电桩" }]
@@ -522,7 +522,7 @@ test("report 调度器 daily：空日跳过 + 有数据投递 + 跨重启去重 
       { match: (sql) => sql.includes("FROM geofences"), rows: [] }
     ]),
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] }, fuelBaseline: { literPer100km: 8.0, fuelPriceCnyPerL: 8.2 } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost, routeKey: "家 → 公司" })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, cost: d.cost, routeKey: "家 → 公司" })),
     listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
     listChargingForStats: async () => []
   });
@@ -609,7 +609,7 @@ test("回归：报告投递必须用真实矩阵行（双层包装会让全事�
       { match: (sql) => sql.includes("FROM geofences"), rows: [] }
     ]),
     state: { pricing: { defaultRateCnyPerKwh: 0.6, history: [] } },
-    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, costCny: d.cost, routeKey: "家 → 公司" })),
+    computeTripViews: async (_db, drives) => drives.map((d) => ({ id: d.id, distanceKm: d.distance_km, energyKWh: 2, cost: d.cost, routeKey: "家 → 公司" })),
     listDrivesSql: ({ from, to }) => ({ sql: "SELECT * FROM drives", params: [from, to] }),
     listChargingForStats: async () => []
   });

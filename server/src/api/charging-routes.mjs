@@ -22,7 +22,7 @@ export function chargeRowToView(row, options, defaultRateCnyPerKwh) {
     endAt: isoFromTeslaMate(row.end_at),
     locationName: row.geofence_name || row.address_name || "未知地点",
     energyAddedKWh: energy,
-    costCny: priced.costCny,
+    cost: priced.costCny,
     pricePerUnit: priced.pricePerUnit,
     startBattery: row.start_battery_level ?? null,
     endBattery: row.end_battery_level ?? null,
@@ -268,7 +268,7 @@ export function createChargingRoutes({ db, state, getStore }) {
         period,
         sessionCount: rows.length,
         totalKWh: round(totalKwh, 2),
-        totalCostCny: round(totalCost, 2),
+        totalCost: round(totalCost, 2),
         avgPricePerKWh: totalKwh > 0 && pricedSessions > 0 ? round(totalCost / totalKwh, 4) : null,
         byLocation: locations,
         // Grafana charging-costs-stats 提炼:充电成本三分 + 免费充电 + 月度趋势

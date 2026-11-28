@@ -23,7 +23,7 @@ import { BatteryHealthCard } from '@/components/BatteryHealthCard'
 import { HeatmapCalendar } from '@/components/HeatmapCalendar'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtKm, fmtKwh, timeAgo } from '@/utils/format'
+import { fmtMoney, fmtDateTime, fmtKm, fmtKwh, timeAgo } from '@/utils/format'
 import type { Charge, Trip } from '@/types'
 
 /** states 原值 → 产品语义（PRD §6.3 P2）：offline≠睡眠；online=哨兵/在线驻车。
@@ -62,7 +62,7 @@ export default function DashboardPage() {
 
   const month = data?.monthStats
   // 省钱数：油车对比 − 账本口径电费（FIFO 批次分摊，与电费卡显示一致；v2.2 修复与简单计价的口径混用）
-  const saved = month && data ? data.fuelComparison.fuelCostCny - (ledger?.totalCost ?? month.costCny) : 0
+  const saved = month && data ? data.fuelComparison.fuelCost - (ledger?.totalCost ?? month.cost) : 0
   const car = data?.car
   const pill = statePill(car?.state ?? '')
   // 电量横条配色（原 BatteryRing 内部同口径：≥50 绿 / ≥25 琥珀 / 其余红）
@@ -178,20 +178,20 @@ export default function DashboardPage() {
             <StatCard
               icon={Coins}
               label={t('dash.month.cost', '本月电费')}
-              value={fmtCny(ledger?.totalCost ?? month!.costCny)}
+              value={fmtMoney(ledger?.totalCost ?? month!.cost)}
               accent
               data-testid="stat-cost"
               hint={
                 ledger
-                  ? `${t('dash.costHintDriving', '含行驶')} ${fmtCny(ledger.breakdown.drivingCost ?? 0)} · ${t('dash.costHintParking', '驻车/哨兵')} ${fmtCny(ledger.breakdown.parkingCost ?? 0)}`
+                  ? `${t('dash.costHintDriving', '含行驶')} ${fmtMoney(ledger.breakdown.drivingCost ?? 0)} · ${t('dash.costHintParking', '驻车/哨兵')} ${fmtMoney(ledger.breakdown.parkingCost ?? 0)}`
                   : undefined
               }
             />
             <StatCard
               icon={TrendingDown}
               label={t('dash.month.vsFuel', '相比油车')}
-              value={saved >= 0 ? `${t('dash.saved', '省')} ${fmtCny(Math.abs(saved))}` : `${t('dash.more', '多')} ${fmtCny(Math.abs(saved))}`}
-              hint={`${t('dash.fuelHintPrefix', '油车约')} ${fmtCny(data.fuelComparison.fuelCostCny)}`}
+              value={saved >= 0 ? `${t('dash.saved', '省')} ${fmtMoney(Math.abs(saved))}` : `${t('dash.more', '多')} ${fmtMoney(Math.abs(saved))}`}
+              hint={`${t('dash.fuelHintPrefix', '油车约')} ${fmtMoney(data.fuelComparison.fuelCost)}`}
             />
           </section>
 
@@ -264,7 +264,7 @@ function RecentTripRow({ trip }: { trip: Trip }) {
             {fmtDateTime(trip.startAt)} · {fmtKm(trip.distanceKm)} km · {fmtKwh(trip.energyKWh)}
           </div>
         </div>
-        <div className="num text-sm font-medium text-tesla">{fmtCny(trip.costCny)}</div>
+        <div className="num text-sm font-medium text-tesla">{fmtMoney(trip.cost)}</div>
       </Link>
     </li>
   )
@@ -282,7 +282,7 @@ function RecentChargeRow({ charge }: { charge: Charge }) {
           {fmtDateTime(charge.startAt)} · {fmtKwh(charge.energyAddedKWh)}{soc}
         </div>
       </div>
-      <div className="num text-sm font-medium text-slate-300">{fmtCny(charge.costCny)}</div>
+      <div className="num text-sm font-medium text-slate-300">{fmtMoney(charge.cost)}</div>
     </li>
   )
 }

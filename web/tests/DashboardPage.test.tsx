@@ -70,7 +70,7 @@ describe('DashboardPage', () => {
         HttpResponse.json({
           ...mockDashboard,
           car: { name: 'Model 3', currentBattery: 0, rangeKm: 0, state: 'asleep', odometerKm: 0 },
-          monthStats: { distanceKm: 0, energyKWh: 0, costCny: 0, driveCount: 0, driveHours: 0 },
+          monthStats: { distanceKm: 0, energyKWh: 0, cost: 0, driveCount: 0, driveHours: 0 },
           fuelComparison: { fuelCostCny: 0, source: 'model', asOf: '' },
           recentTrips: [],
           recentCharges: [],

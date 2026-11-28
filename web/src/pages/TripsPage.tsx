@@ -11,7 +11,7 @@ import { DailyActivityChart } from '@/components/DailyActivityChart'
 import { EfficiencyCard } from '@/components/EfficiencyCard'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
+import { fmtMoney, fmtDateTime, fmtDuration, fmtKm, fmtKwh, toInputDate } from '@/utils/format'
 
 // 轨迹汇总图二级懒加载：地图 chunk（Leaflet ~156KB）不阻塞行程页首屏
 const RouteMap = lazy(() => import('@/components/RouteMap').then((m) => ({ default: m.RouteMap })))
@@ -171,7 +171,7 @@ export default function TripsPage() {
             <StatCard icon={Route} label={t('trips.kpi.distance', '总里程')} value={`${fmtKm(overview.distanceKm, 0)} km`} hint={`${overview.tripCount} ${t('dash.tripsUnit', '趟')} · ${fmtDuration(overview.durationMin)}`} />
             <StatCard icon={Gauge} label={t('trips.kpi.maxSpeed', '最高时速')} value={overview.maxSpeedKmh != null ? `${Math.round(overview.maxSpeedKmh)} km/h` : '--'} />
             <StatCard icon={TrendingUp} label={t('trips.kpi.energy', '总能耗')} value={overview.energyKwh != null ? fmtKwh(overview.energyKwh) : '--'} />
-            <StatCard icon={Coins} label={t('trips.kpi.cost', '总电费')} value={overview.costCny != null ? fmtCny(overview.costCny) : '--'} accent />
+            <StatCard icon={Coins} label={t('trips.kpi.cost', '总电费')} value={overview.cost != null ? fmtMoney(overview.cost) : '--'} accent />
           </div>
           <div className="glass-card-flat p-4">
             <div className="mb-2.5 flex items-center gap-2 text-sm font-medium text-slate-200">
@@ -245,7 +245,7 @@ export default function TripsPage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="num text-sm font-semibold text-tesla">{fmtCny(trip.costCny)}</div>
+                    <div className="num text-sm font-semibold text-tesla">{fmtMoney(trip.cost)}</div>
                     <div className="num mt-0.5 text-[11px] text-slate-400">{fmtKm(trip.kwhPer100km, 1)} kWh/100km</div>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />

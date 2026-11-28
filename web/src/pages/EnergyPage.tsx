@@ -20,7 +20,7 @@ import { MonthlyAccuracyChart } from '@/components/MonthlyAccuracyChart'
 import { EnergyCurveChart } from '@/components/EnergyCurveChart'
 import { useI18n } from '@/i18n'
 import { useCar } from '@/contexts/CarContext'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh } from '@/utils/format'
+import { fmtMoney, fmtDateTime, fmtDuration, fmtKm, fmtKwh } from '@/utils/format'
 
 /**
  * 能耗页 v2.8 —— 车机能耗 App 同构（参考 Tesla 车机「能量」页四窗设计）：
@@ -157,7 +157,7 @@ export default function EnergyPage() {
       s.trip = {
         km: latestTrip.distanceKm,
         kwh: latestTrip.energyKWh,
-        cost: latestTrip.costCny,
+        cost: latestTrip.cost,
         durationMin: latestTrip.durationMin,
         avgWh: latestTrip.kwhPer100km > 0 ? Math.round(latestTrip.kwhPer100km * 10) : null,
         tripCount: 1,
@@ -169,7 +169,7 @@ export default function EnergyPage() {
       s[key] = {
         km: ov.distanceKm,
         kwh: ov.energyKwh,
-        cost: ov.costCny,
+        cost: ov.cost,
         durationMin: ov.durationMin,
         avgWh: ov.energyKwh != null && ov.distanceKm > 0 ? Math.round((ov.energyKwh / ov.distanceKm) * 1000) : null,
         tripCount: ov.tripCount,
@@ -324,7 +324,7 @@ export default function EnergyPage() {
 
             {/* KPI 2×2（窄屏 3 列已证截断——v2.8 截图自检教训）：第四格 = 满电预估 */}
             <div className="grid grid-cols-2 gap-3" data-testid="energy-kpis">
-              <StatCard compact icon={BatteryCharging} label={t('energy.kpi.energy', '能耗')} value={fmtKwhBig(st.kwh)} hint={st.cost != null ? fmtCny(st.cost) : undefined} />
+              <StatCard compact icon={BatteryCharging} label={t('energy.kpi.energy', '能耗')} value={fmtKwhBig(st.kwh)} hint={st.cost != null ? fmtMoney(st.cost) : undefined} />
               <StatCard compact icon={Gauge} label={t('energy.kpi.avg', '平均能耗')} value={st.avgWh != null ? `${st.avgWh} Wh/km` : '--'} hint={st.avgWh != null ? `${(st.avgWh / 10).toFixed(1)} kWh/100km` : undefined} />
               <StatCard
                 compact

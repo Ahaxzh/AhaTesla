@@ -58,7 +58,7 @@
 - `GET /api/dashboard/timeline`（v2.1 新增，P2 模块2）→ {segments:[{from, to, state:"driving"|"charging"|"online"|"asleep"|"offline"}], summary:{drivingH, chargingH, asleepH, onlineH, offlineH}}（最近 24h，按实例时区对齐零点或滚动窗口）
 - `GET /api/dashboard/heatmap`（v2.1 新增，P2 模块4）→ {days:[{date:"YYYY-MM-DD", distanceKm}], maxKm}（最近 90 天按实例时区聚合，date 为本地日期）
 - `GET /api/trips?limit=50&offset=0&from=ISO&to=ISO` → {total, items:[Trip]}
-- `GET /api/trips/overview?from=ISO&to=ISO` → {tripCount, distanceKm, durationMin, energyKwh, costCny, **ratedUsedKm**（**v2.8** 区间表显续航消耗合计 km，SUM(GREATEST(start_rated−end_rated,0))，与 distanceKm 同量纲；差值 = ±比额定多/少跑，能耗页头条数据源；旧实例升级前无此字段 → 前端判空降级）, maxSpeedKmh, stateShare:{driveMin, chargeMin, parkedMin}, daily:{bucket:"day"|"week", points:[{date:"YYYY-MM-DD", driveMin, chargeMin, trips}]}}（v0.3 行程页顶部汇总 + v0.4 时间分布改每日活跃柱状图：能耗电费与列表同 FIFO 口径；stateShare 为时长 SUM 近似（驻车=区间−行驶−充电，仅作小字）；daily 供柱状图——按**结束时刻**归日（实例时区，同 heatmap 口径）、区间 ≤150 天按日零填充、更长自动按周聚合（周一起，date=桶起始日）防长区间点数爆炸）
+- `GET /api/trips/overview?from=ISO&to=ISO` → {tripCount, distanceKm, durationMin, energyKwh, **cost**（B1 落地，2026-11-28；原 costCny）, **ratedUsedKm**（**v2.8** 区间表显续航消耗合计 km，SUM(GREATEST(start_rated−end_rated,0))，与 distanceKm 同量纲；差值 = ±比额定多/少跑，能耗页头条数据源；旧实例升级前无此字段 → 前端判空降级）, maxSpeedKmh, stateShare:{driveMin, chargeMin, parkedMin}, daily:{bucket:"day"|"week", points:[{date:"YYYY-MM-DD", driveMin, chargeMin, trips}]}}（v0.3 行程页顶部汇总 + v0.4 时间分布改每日活跃柱状图：能耗电费与列表同 FIFO 口径；stateShare 为时长 SUM 近似（驻车=区间−行驶−充电，仅作小字）；daily 供柱状图——按**结束时刻**归日（实例时区，同 heatmap 口径）、区间 ≤150 天按日零填充、更长自动按周聚合（周一起，date=桶起始日）防长区间点数爆炸）
 - `GET /api/trips/display-accuracy?from=ISO&to=ISO&months=12&carId`（**v2.5**；v2.6.1 from/to 优先——页面筛选区间）→ {days,months:[{month:"YYYY-MM",actualKm,ratedKm,trips,ratio}],avgRatio}（表显 vs 实际：实际里程 ÷ 表显续航消耗按月聚合，ratio>100=跑赢表显；单月表显消耗 <50km 剔除；months 6~24 钳制）
 - `GET /api/trips/efficiency-profile?from=ISO&to=ISO&days=365&carId`（**v2.6** 能效画像；v2.6.1 from/to 优先，分箱 Δ 基准 avgWhPerKm 为区间里程加权平均）→ {days,samples,avgWhPerKm,best:{whPerKm,distanceKm,tempC,avgSpeedKmh,at}|null,tempBins:[{label,whPerKm,count}],speedBins:[...]}（个人最佳 = ≥5km 行程最低 Wh/km 及当时条件；温度/均速分箱按里程加权平均；能耗口径 = 表显续航消耗 × 车辆效率；50~400 Wh/km 外离群剔除；days 90~730 钳制）
 - `GET /api/trips/energy-curve?driveId=N|from=ISO&carId`（**v2.8.2** 车机能量曲线：positions 表显续航 1km 分桶+3 点滑动平均）→ {startRatedKm, actualKm, ratedUsedKm, avgWhPerKm, points:[{km, ratedLeft, instant, avg}]}（二选一参数：driveId=单趟 / from=时刻起（如上次充电结束）；ratedLeft 喂续航衰减图（虚线=额定 1:1 斜率），instant/avg 喂瞬时vs平均图；只行驶段（drive_id 非空），rated=0 停车段剔除；LTTB ≤400 点；无样本 points:[]）
@@ -116,7 +116,7 @@
 
 ### 报告（v2 新增）
 - `GET /api/reports` → {items:[{id, type:"weekly"|"monthly"|"annual", periodLabel, distanceKm, totalCost, saved}]}
-- `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）。**v2.4 快照已含字段全量露出**：topRoutes:[{route, count, distanceKm, energyKwh, costCny}]；insights:{avgTempC, tempRangeC, avgSpeedKmh, maxSpeedKmh, idlePct, powerMaxKw, tireFlBar, tireRrBar, tireMinBar, kwhPer100km}|null；日报 compare:{lastWeek:{distanceKm,totalCost}, kmDeltaPct, costDeltaPct, month:{distanceKm,totalCost}}；月报 ytd:{distanceKm, totalCost, saved}（旧快照缺新字段的兼容：前端判空隐藏区块）
+- `GET /api/reports/:id` → 报告快照（KPI 四宫格 / 主跑路线 TOP3 / 账本结语 / 深度洞察数据，P5 规格）。**v2.4 快照已含字段全量露出**：topRoutes:[{route, count, distanceKm, energyKwh, costCny}]（快照为不可变归档数据，金额字段沿用归档时格式 costCny，不随 B1 改名）；insights:{avgTempC, tempRangeC, avgSpeedKmh, maxSpeedKmh, idlePct, powerMaxKw, tireFlBar, tireRrBar, tireMinBar, kwhPer100km}|null；日报 compare:{lastWeek:{distanceKm,totalCost}, kmDeltaPct, costDeltaPct, month:{distanceKm,totalCost}}；月报 ytd:{distanceKm, totalCost, saved}（旧快照缺新字段的兼容：前端判空隐藏区块）
 - `POST /api/reports/generate` {type:"daily"|"weekly"|"monthly"|"annual"}（手动触发，调试用；annual=上一自然年，每年 1 月 1 日 08:00 自动归档，快照含 annual:{maxDayKm, maxTripKm, maxTripRoute, chargeSessions, superPct}——最长单日/最长单程/充电构成，结语带 🏆 年度之最行）
 
 ### 保养提醒（v2.6 新增）
@@ -158,7 +158,7 @@
 
 | # | 变更 | v1 | v2 | 前端同步点 |
 |---|---|---|---|---|
-| B1 | 金额字段去 CNY | costCny / totalCostCny / fuelCostCny 等 | cost / totalCost / fuelCost | client.ts + 全部展示组件 |
+| B1 | 金额字段去 CNY | costCny / totalCostCny / fuelCostCny 等 | cost / totalCost / fuelCost | client.ts + 全部展示组件（**2026-11-28 实际完成**：trips/charging/stats/dashboard/overview 均已改名；报告快照 costCny 为不可变历史格式保留；前端 fmtCny→fmtMoney） |
 | B2 | 初始化方式 | 日志打印初始密码 | /setup 首注册管理员（AC-1.4） | LoginPage → 新 SetupPage |
 | B3 | 会话模型 | 单 JWT 24h | Access 24h + Refresh 30d | client.ts 401→refresh→重试 |
 | B4 | 推送规则 | 每事件单 bool | 5×3 矩阵 | PushPage 矩阵 UI |

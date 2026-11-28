@@ -4,7 +4,7 @@ import { ArrowLeft, BatteryCharging, CalendarRange, Coins, Gauge, Route as Route
 import { api } from '@/api/client'
 import { StatCard } from '@/components/StatCard'
 import { useI18n } from '@/i18n'
-import { fmtCny, fmtKm, fmtKwh } from '@/utils/format'
+import { fmtMoney, fmtKm, fmtKwh } from '@/utils/format'
 import type { ReportInsights } from '@/types'
 
 /** 洞察小卡：null 字段直接不渲染（旧快照/无数据的维度自动缺位） */
@@ -104,11 +104,11 @@ export default function ReportDetailPage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="report-kpi">
         <StatCard icon={RouteIcon} label={t('rep.detail.kpi.distance', '总里程')} value={`${fmtKm(kpi.distanceKm)} km`} hint={`${kpi.driveCount} ${t('dash.tripsUnit', '趟')}`} />
         <StatCard icon={BatteryCharging} label={t('rep.detail.kpi.charge', '总充电量')} value={fmtKwh(kpi.chargeKwh)} hint={fmtKwh(kpi.energyKwh)} />
-        <StatCard icon={Coins} label={t('rep.detail.kpi.cost', '总电费')} value={fmtCny(kpi.totalCost)} accent hint={kpi.costPerKm != null ? `${fmtCny(kpi.costPerKm, 3)}/km` : undefined} />
+        <StatCard icon={Coins} label={t('rep.detail.kpi.cost', '总电费')} value={fmtMoney(kpi.totalCost)} accent hint={kpi.costPerKm != null ? `${fmtMoney(kpi.costPerKm, 3)}/km` : undefined} />
         <StatCard
           icon={TrendingDown}
           label={t('rep.detail.kpi.saved', '较油车节省')}
-          value={kpi.saved >= 0 ? fmtCny(kpi.saved) : `${t('rep.detail.more', '多')} ${fmtCny(-kpi.saved)}`}
+          value={kpi.saved >= 0 ? fmtMoney(kpi.saved) : `${t('rep.detail.more', '多')} ${fmtMoney(-kpi.saved)}`}
           hint={kpi.savedPct != null ? `${kpi.savedPct}%` : undefined}
         />
       </div>
@@ -122,7 +122,7 @@ export default function ReportDetailPage() {
           <div className="num grid grid-cols-2 gap-2.5 text-sm sm:grid-cols-4">
             <div>
               <p className="text-[11px] text-slate-400">{t('rep.detail.compare.lastWeek', '上周同日')}</p>
-              <p className="mt-0.5 text-slate-200">{fmtKm(report.compare.lastWeek.distanceKm, 0)} km · {fmtCny(report.compare.lastWeek.totalCost)}</p>
+              <p className="mt-0.5 text-slate-200">{fmtKm(report.compare.lastWeek.distanceKm, 0)} km · {fmtMoney(report.compare.lastWeek.totalCost)}</p>
             </div>
             <div>
               <p className="text-[11px] text-slate-400">{t('rep.detail.compare.kmDelta', '里程环比')}</p>
@@ -136,7 +136,7 @@ export default function ReportDetailPage() {
             </div>
             <div>
               <p className="text-[11px] text-slate-400">{t('rep.detail.compare.monthCost', '本月电费')}</p>
-              <p className="mt-0.5 text-slate-200">{fmtCny(report.compare.month.totalCost)}</p>
+              <p className="mt-0.5 text-slate-200">{fmtMoney(report.compare.month.totalCost)}</p>
             </div>
           </div>
         </section>
@@ -149,10 +149,10 @@ export default function ReportDetailPage() {
             <TrendingUp className="h-4 w-4 text-tesla" /> {t('rep.detail.ytd.title', '年度至今')}
           </h2>
           <p className="num text-sm text-slate-300">
-            {fmtKm(report.ytd.distanceKm, 0)} km · {fmtCny(report.ytd.totalCost)} ·{' '}
+            {fmtKm(report.ytd.distanceKm, 0)} km · {fmtMoney(report.ytd.totalCost)} ·{' '}
             {report.ytd.saved >= 0
-              ? `${t('rep.detail.kpi.saved', '较油车节省')} ${fmtCny(report.ytd.saved)}`
-              : `${t('rep.detail.more', '多')} ${fmtCny(-report.ytd.saved)}`}
+              ? `${t('rep.detail.kpi.saved', '较油车节省')} ${fmtMoney(report.ytd.saved)}`
+              : `${t('rep.detail.more', '多')} ${fmtMoney(-report.ytd.saved)}`}
           </p>
         </section>
       )}
@@ -206,7 +206,7 @@ export default function ReportDetailPage() {
                 <span className="num shrink-0 text-xs text-slate-400">
                   {r.count} {t('rep.detail.routes.count', '次')}
                   {r.distanceKm != null && <span className="text-slate-500"> · {fmtKm(r.distanceKm, 0)} km</span>}
-                  {r.costCny != null && <span className="text-slate-500"> · {fmtCny(r.costCny)}</span>}
+                  {r.costCny != null && <span className="text-slate-500"> · {fmtMoney(r.costCny)}</span>}
                 </span>
               </li>
             ))}

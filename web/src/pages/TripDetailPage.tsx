@@ -25,7 +25,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { SkeletonCards } from '@/components/Skeletons'
 import { StatCard } from '@/components/StatCard'
 import { useI18n } from '@/i18n'
-import { fmtCny, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice, getCurrencySymbol } from '@/utils/format'
+import { fmtMoney, fmtDateTime, fmtDuration, fmtKm, fmtKwh, fmtPrice, getCurrencySymbol } from '@/utils/format'
 
 /** 能效达成率标签（P3 模块1）：≥100% 绿 / <85% 橙 */
 function EfficiencyBadge({ ratio }: { ratio: number | null | undefined }) {
@@ -94,7 +94,7 @@ export default function TripDetailPage() {
             <StatCard compact icon={RouteIcon} label={t('tripDetail.kpi.distance', '里程')} value={`${fmtKm(trip.distanceKm)} km`} />
             <StatCard compact icon={Clock} label={t('tripDetail.kpi.duration', '时长')} value={fmtDuration(trip.durationMin)} />
             <StatCard compact icon={Zap} label={t('tripDetail.kpi.energy', '能耗')} value={fmtKwh(trip.energyKWh)} hint={`${fmtKm(trip.kwhPer100km)} kWh/100km`} />
-            <StatCard compact icon={Coins} label={t('tripDetail.kpi.cost', '电费')} value={fmtCny(trip.costCny)} accent data-testid="trip-cost" />
+            <StatCard compact icon={Coins} label={t('tripDetail.kpi.cost', '电费')} value={fmtMoney(trip.cost)} accent data-testid="trip-cost" />
           </div>
           {/* 结论胶囊行（v2.6.2 统一规格：同高 h-7 圆角胶囊，与能效徽章一致，不再大小混杂） */}
           <div className="flex flex-wrap items-center gap-2">
@@ -244,7 +244,7 @@ export default function TripDetailPage() {
                           <td className="max-w-[220px] truncate py-2.5 pr-3 text-slate-200">{b.source}</td>
                           <td className="num py-2.5 px-3 text-right text-slate-300">{b.kwh.toFixed(1)}</td>
                           <td className="num py-2.5 px-3 text-right text-slate-300">{getCurrencySymbol()}{fmtPrice(b.price)}</td>
-                          <td className="num py-2.5 pl-3 text-right font-medium text-white">{fmtCny(b.amount)}</td>
+                          <td className="num py-2.5 pl-3 text-right font-medium text-white">{fmtMoney(b.amount)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -255,7 +255,7 @@ export default function TripDetailPage() {
               {trip.fifo.blendedPrice != null && (
                 <div className="num mt-3 flex items-center justify-between border-t border-white/[0.06] pt-3 text-sm">
                   <span className="text-slate-400">
-                    {t('tripDetail.fifo.total', '本次总电费')} <span className="ml-1 text-base font-semibold text-tesla">{fmtCny(trip.fifo.totalCost)}</span>
+                    {t('tripDetail.fifo.total', '本次总电费')} <span className="ml-1 text-base font-semibold text-tesla">{fmtMoney(trip.fifo.totalCost)}</span>
                   </span>
                   <span className="text-slate-500">{t('tripDetail.fifo.blended', '综合单价 ¥{v}/kWh').replace('{v}', fmtPrice(trip.fifo.blendedPrice))}</span>
                 </div>
@@ -275,12 +275,12 @@ export default function TripDetailPage() {
                       {t('tripDetail.fuel.title', '油车对比')}
                     </span>
                     <span className="num font-medium text-emerald-400">
-                      {t('tripDetail.fuel.saved', '净节省')} {fmtCny(trip.fuelComparison.saved)}
+                      {t('tripDetail.fuel.saved', '净节省')} {fmtMoney(trip.fuelComparison.saved)}
                       {trip.fuelComparison.savedPct != null && `（↓${trip.fuelComparison.savedPct}%）`}
                     </span>
                   </div>
                   <p className="num mt-2 text-[11px] text-slate-500">
-                    {trip.fuelComparison.baseline} → {t('tripDetail.fuel.cost', '对比油费')} {fmtCny(trip.fuelComparison.fuelCost)}
+                    {trip.fuelComparison.baseline} → {t('tripDetail.fuel.cost', '对比油费')} {fmtMoney(trip.fuelComparison.fuelCost)}
                   </p>
                 </div>
               )}

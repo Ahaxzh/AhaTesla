@@ -167,7 +167,7 @@ export function createTripsRoutes({ db, state }) {
 
       // 能耗/电费：FIFO 全量回放后按区间内 drive 求和（与列表卡同口径）
       let energyKwh = null;
-      let costCny = null;
+      let cost = null;
       if (drives.length) {
         const idSet = new Set(drives);
         const ledger = await getFifoLedger(db, state, carId).catch(() => null);
@@ -179,7 +179,7 @@ export function createTripsRoutes({ db, state }) {
             e += alloc.energy_kwh ?? 0;
             c += alloc.cost_cny ?? 0;
           }
-          if (any) { energyKwh = round(e, 1); costCny = round(c, 2); }
+          if (any) { energyKwh = round(e, 1); cost = round(c, 2); }
         }
       }
 
@@ -204,7 +204,7 @@ export function createTripsRoutes({ db, state }) {
         distanceKm: finiteNumber(aggRow?.distance_km) ?? 0,
         durationMin: driveMin,
         energyKwh,
-        costCny,
+        cost,
         // 区间表显续航消耗合计（km）：与 distanceKm 同量纲，差值 = ±比额定多/少跑
         ratedUsedKm: finiteNumber(aggRow?.rated_used_km),
         maxSpeedKmh,

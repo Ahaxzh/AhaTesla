@@ -116,7 +116,7 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
 
   const distanceKm = round(views.reduce((s, v) => s + (v.distanceKm ?? 0), 0), 1);
   const energyKwh = round(views.reduce((s, v) => s + (v.energyKWh ?? 0), 0), 2);
-  const totalCost = round(views.reduce((s, v) => s + (v.costCny ?? 0), 0), 2);
+  const totalCost = round(views.reduce((s, v) => s + (v.cost ?? 0), 0), 2);
 
   // 充电侧（周期内结算的会话；m4e 按车）
   const charging = await listChargingForStats(db, { sinceIso: start.toISOString(), carId });
@@ -141,7 +141,7 @@ export async function buildReport({ kind, now = new Date(), tz = "Asia/Shanghai"
     cur.count += 1;
     cur.distanceKm += v.distanceKm ?? 0;
     cur.energyKwh += v.energyKWh ?? 0;
-    cur.costCny += v.costCny ?? 0;
+    cur.costCny += v.cost ?? 0;
     routeAgg.set(v.routeKey, cur);
   }
   const topRoutes = [...routeAgg.entries()]
@@ -368,7 +368,7 @@ async function windowStats(deps, start, end) {
   });
   return {
     distanceKm: round(views.reduce((s, v) => s + (v.distanceKm ?? 0), 0), 1),
-    totalCost: round(views.reduce((s, v) => s + (v.costCny ?? 0), 0), 2)
+    totalCost: round(views.reduce((s, v) => s + (v.cost ?? 0), 0), 2)
   };
 }
 

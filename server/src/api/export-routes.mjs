@@ -50,7 +50,7 @@ export function createExportRoutes({ db, state }) {
       items.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
       const lines = items.map((v) => [
         v.startAt, v.endAt, v.startAddress, v.endAddress,
-        v.distanceKm, v.durationMin, v.energyKWh ?? "", v.costCny ?? "", v.kwhPer100km ?? "", v.routeKey,
+        v.distanceKm, v.durationMin, v.energyKWh ?? "", v.cost ?? "", v.kwhPer100km ?? "", v.routeKey,
       ]);
       sendCsv(ctx, `ahatesla-trips-${new Date().toISOString().slice(0, 10)}.csv`, [
         ["开始时间", "结束时间", "起点", "终点", "里程(km)", "时长(分)", "能耗(kWh)", "电费(元)", "kWh/100km", "路线"], ...lines,
@@ -71,7 +71,7 @@ export function createExportRoutes({ db, state }) {
       const items = rows.map((r) => chargeRowToView(r, options, state.pricing.defaultRateCnyPerKwh));
       const lines = items.map((v) => [
         v.startAt, v.endAt, v.locationName,
-        v.energyAddedKWh ?? "", v.costCny ?? "", v.pricePerUnit ?? "",
+        v.energyAddedKWh ?? "", v.cost ?? "", v.pricePerUnit ?? "",
         v.startBattery ?? "", v.endBattery ?? "", v.durationMin, v.powerMaxKw ?? "",
         COST_SOURCE_LABEL[v.costSource] ?? v.costSource,
       ]);
